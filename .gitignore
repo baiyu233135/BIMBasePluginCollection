@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+
+# BIMBase 编译输出与日志
+*.bfa
+*.log
+*_CRASH.txt
+p3d_test_output.txt
+*.pyc
+
+# 备份文件
+*.bak
+*.bak.*
+
+# IDE
+.vs/
+.vscode/
+
+# 临时输出（调试脚本生成）
+output.txt
+geometries_types.txt
+bimbase_types.txt
+dlls.txt
+
+# 模型权重与大数据集
+*.pt
+*.onnx
+datasets/
+
+# 第三方软件资源（体积过大，单独管理）
+OrcaSlicer/
+
+# 操作系统文件
+Thumbs.db
+.DS_Store

@@ -1,0 +1,29 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<BIMPyPlugin>
+    <BfaLibName/>
+    <PluginVersion>1.1.0</PluginVersion>
+    <LoadStatus>true</LoadStatus>
+    <Category name="CADBoard">
+        <Panel name="绘图面板">
+            <Button name="CAD画板">
+                <command>main.py</command>
+                <iconPath>CAD画板.ico</iconPath>
+            </Button>
+            <Button name="自动配置环境">
+                <command>setup_env.py</command>
+                <iconPath>CAD画板.ico</iconPath>
+            </Button>
+            <Button name="AI智能建模">
+                <command>ai_modeling_launcher.py</command>
+                <iconPath>AI建模.ico</iconPath>
+            </Button>
+            <Button name="桥隧病害识别">
+                <command>bridge_disease_launcher.py</command>
+                <iconPath>桥隧识别.ico</iconPath>
+            </Button>
+        </Panel>
+    </Category>
+    <Name>CADBoard</Name>
+    <PluginModule>C:\ProgramData\PKPM\BIMBase\Plugins\Pro\V1.6\pythonplugin\CADBoard</PluginModule>
+    <PluginSDKVersion>1.6.2</PluginSDKVersion>
+</BIMPyPlugin>

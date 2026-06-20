@@ -1,0 +1,29 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<BIMPyPlugin>
+    <BfaLibName/>
+    <PluginVersion>1.0.0</PluginVersion>
+    <LoadStatus>true</LoadStatus>
+    <Category name="组件测试">
+        <Panel name="基本图元">
+            <Button name="直角三棱柱">
+                <command>直角三棱柱.py</command>
+                <iconPath>cube copy 3.ico</iconPath>
+            </Button>
+            <Button name="圆柱">
+                <command>圆柱.py</command>
+                <iconPath>cube copy.ico</iconPath>
+            </Button>
+            <Button name="正方体">
+                <command>正方体.py</command>
+                <iconPath>cube.ico</iconPath>
+            </Button>
+            <Button name="长方体">
+                <command>长方体.py</command>
+                <iconPath>cube copy 2.ico</iconPath>
+            </Button>
+        </Panel>
+    </Category>
+    <Name>组件测试</Name>
+    <PluginModule>C:\ProgramData\PKPM\BIMBase\Plugins\Pro\V1.6\pythonplugin\组件测试\</PluginModule>
+    <PluginSDKVersion>1.6.2</PluginSDKVersion>
+</BIMPyPlugin>

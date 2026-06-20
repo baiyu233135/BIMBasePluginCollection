@@ -1,0 +1,12 @@
+{
+  "api_key": "***REMOVED***",
+  "api_base": "https://api.deepseek.com/chat/completions",
+  "model": "deepseek-chat",
+  "temperature": 0.3,
+  "max_tokens": 2000,
+  "api_provider": "deepseek",
+  "coze_api_key": "",
+  "coze_bot_id": "",
+  "baidu_api_key": "***REMOVED***",
+  "baidu_secret_key": "***REMOVED***"
+}

@@ -1,0 +1,63 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<BIMPyPlugin>
+    <BfaLibName>桥梁组件</BfaLibName>
+    <PluginVersion>1.0.6</PluginVersion>
+    <LoadStatus>true</LoadStatus>
+    <Category name="桥梁组件库">
+        <Panel name="上部结构">
+            <Button name="上部结构">
+                <command>桥梁组件*//1-上部结构</command>
+                <iconPath>上部结构.ico</iconPath>
+            </Button>
+        </Panel>
+        <Panel name="下部结构">
+            <Button name="下部结构">
+                <command>桥梁组件*//2-下部结构</command>
+                <iconPath>下部结构.ico</iconPath>
+            </Button>
+        </Panel>
+        <Panel name="附属设施">
+            <Button name="附属设施">
+                <command>桥梁组件*//3-附属设施</command>
+                <iconPath>附属设施.ico</iconPath>
+            </Button>
+        </Panel>
+        <Panel name="承台与桩基清单">
+            <Button name="承台与桩基清单">
+                <command>桥梁组件*//承台与桩基清单//承台与桩基清单.py</command>
+                <iconPath>承台及桩基清单.ico</iconPath>
+            </Button>
+            <Button name="自动配置环境">
+                <command>桥梁组件*//承台与桩基清单//自动配置环境.py</command>
+                <iconPath>配置插件.ico</iconPath>
+            </Button>
+        </Panel>
+        <Panel name="3D打印软件">
+            <Button name="导入Stl">
+                <command>桥梁组件*//Stl插件//导入Stl.py</command>
+                <iconPath>导入.ico</iconPath>
+            </Button>
+            <Button name="导出FBX">
+                <command>桥梁组件*//Stl插件//仅导出Stl.py</command>
+                <iconPath>导出.ico</iconPath>
+            </Button>
+            <Button name="导出FBX并打开切片">
+                <command>桥梁组件*//Stl插件//导出Stl.py</command>
+                <iconPath>插件管理.ico</iconPath>
+            </Button>
+            <Button name="FBX转STL工具">
+                <command>桥梁组件*//Stl插件//test_button.py</command>
+                <iconPath>转STL.ico</iconPath>
+            </Button>
+        </Panel>
+        <Panel name="Lumion渲染">
+            <Button name="导入Lumion">
+                <command>桥梁组件*//Lumion渲染软件//model.py</command>
+                <iconPath>动态渲染.ico</iconPath>
+            </Button>
+        </Panel>
+    </Category>
+    <Name>桥梁组件</Name>
+    <PluginModule>C:\ProgramData\PKPM\BIMBase\Plugins\Pro\V1.6\pythonplugin\桥梁组件</PluginModule>
+    <PluginSDKVersion>1.6.2</PluginSDKVersion>
+</BIMPyPlugin>

@@ -1,0 +1,267 @@
+============================================================
+CADBoard 面编辑功能（双向同步）开发总结与技术文档
+============================================================
+整理日期: 2026-05-03
+对应版本: CADBoard v1.5 + BIMBase Python Plugin SDK v1.6.2
+
+
+============================================================
+一、用户原始需求
+============================================================
+
+1. 面元素生成：选中一个已同步到 BIMBase 的 2D 几何元素（矩形、圆、
+   多边形、三棱柱等），能自动生成该 3D 组件的"展开面"（所有 2D 面
+   平铺显示在画板上，方便单独编辑）。
+
+2. 面元素修改反推：在画板上修改某个面元素的尺寸（如把侧面高度从
+   200 改为 100），能把变化反推回组件参数（如 h=100），并重新生成
+   所有面元素。
+
+3. 双向同步：面修改后，画板中的原始源元素参数更新，BIMBase 中已
+   放置的 3D 实体也同步更新形状（不重新手动放置）。
+
+4. 支持组件类型：矩形拉伸体(SweepBoxComponent)、圆柱体
+   (Circle3DComponent)、多边形棱柱(Polygon3DComponent)、直角三棱柱
+   (RightTriangularPrism) 等。
+
+
+============================================================
+二、已实现的工作
+============================================================
+
+[2.1] 正向同步（画板 → BIMBase）
+  - bimbase_sync.py 中创建了参数化 Component 子类
+  - 调用 pyp3d.place() 在 BIMBase 中放置组件
+  - 解决了 sys.argv[0] 被篡改导致的 place() 崩溃
+  - ComponentRegistry 记录每个画板元素对应的 BIMBase 组件实例
+
+[2.2] 反向同步（BIMBase → 画板）
+  - 优先使用 get_entityid_from_boxselection() 获取用户框选的实体
+  - 避免全量扫描 get_all_instancekey（1945 个 key 会导致 3 分钟冻结）
+  - get_noumKV_from_instancekey() 提取参数，过滤非 CADBoard 键
+  - 解决 P3DInstanceKey.__str__() 的 _data 属性缺失崩溃（不调用 str()）
+
+[2.3] 面元素生成系统
+  - geometry/faces.py：FaceManager 静态模板 + 动态面生成
+  - FACE_TEMPLATES 定义了各组件类型的面模板（generator + updater）
+  - _layout_faces() 自动偏移面元素位置，避免重叠
+  - ComponentFaceGroup.generate_faces_for_element() / replace_faces()
+
+[2.4] 动态面支持
+  - Polygon3DComponent：顶面/底面 + 每条边动态生成侧面(side0, side1...)
+  - RightTriangularPrism：顶面/底面(三角形) + 3 个矩形侧面
+
+[2.5] 未同步元素的面推断
+  - infer_component_params_from_element()：从 2D 几何反向推断组件类型
+    和参数，让从未同步到 BIMBase 的元素也能生成面
+
+[2.6] 面修改流程简化
+  - 原流程：属性面板改值 → 点"应用修改" → 点"应用面修改"
+  - 现流程：属性面板改值 → 直接点"应用面修改"（自动把属性值写入
+    当前选中的面元素，然后反推参数）
+
+
+============================================================
+三、当前存在的核心问题（未解决）
+============================================================
+
+[3.1] BIMBase replace() 行为不可控
+  - inst.replace() 会触发 BIMBase 重新生成几何，但表现像是"新建"
+    了一个组件，导致用户感觉"成了要新放置的组件"
+  - 根本原因未知：可能是 SDK 的 replace() 实现就是删除旧实体+创建新
+    实体，导致需要重新放置；也可能是参数写入方式不对
+
+[3.2] 3D 预览把面元素当成独立组件渲染
+  - preview_3d.py 遍历所有 self.elements 进行 3D 渲染
+  - 面元素（RectangleElement/PolylineElement）虽然有 is_3d=False，
+    但预览系统没有正确过滤，导致每个面都被渲染成一个独立的立方体/
+    拉伸体
+  - 截图中 Elements: 6，显示 6 个独立几何体，而不是 1 个组件
+
+[3.3] 面元素与源元素的生命周期管理混乱
+  - 面元素和原始源元素都在 self.elements 同一个列表中
+  - replace_faces() 按 component_id 删除旧面，但如果 component_id 被
+    覆盖或丢失，会导致旧面残留
+  - 3D 预览、导出 DWG、同步到 BIMBase 都会受到面元素污染
+
+[3.4] Polygon3DComponent 动态面模板缺失
+  - 静态模板只有 top/bottom，动态侧面(side0, side1...) 没有 updater
+  - 已添加 fallback updater（只更新 z_top），但未充分测试
+
+[3.5] 面修改后的参数回写不够精准
+  - 当前 updater 逻辑（如 _prism_side_a_update）用 elem.width - old['width']
+    计算差值，然后 params['a'] += dw。这种"差值累加"方式在多次修改
+    时容易累积误差
+  - 更合理的做法：updater 直接根据 elem 的当前几何值计算绝对参数值
+
+[3.6] 面元素的属性面板字段语义混乱
+  - 矩形面：width=边长, height=棱柱高。但用户可能期望 width/height
+    都是面本身的尺寸
+  - Z起始/Z终止/厚度 对 2D 面元素来说永远是 0，造成困惑
+
+
+============================================================
+四、技术架构说明
+============================================================
+
+[4.1] 核心文件职责
+  board.py              - 主窗口、事件循环、属性面板、面修改按钮
+  geometry/faces.py     - 面模板注册表、生成器、updater、布局算法
+  utils/face_mapper.py  - ComponentFaceGroup（面元素生命周期管理）
+  bimbase_sync.py       - BIMBase 组件创建、放置、参数读写
+  utils/component_registry.py - 参数映射规则、元素工厂、推断逻辑
+  preview_3d.py         - 3D 预览窗口（OpenGL 渲染）
+
+[4.2] 面生成流水线
+  1. _generate_faces_for_selected() 获取源元素
+  2. infer_component_params_from_element() 推断参数（如需）
+  3. FaceManager.generate_all_faces()
+     a. 遍历 FACE_TEMPLATES 静态模板，调用 generator 生成面
+     b. 动态面（_polygon_dynamic_faces / _prism_dynamic_faces）
+     c. _layout_faces() 对所有面应用偏移，记录 layout_offset
+  4. ComponentFaceGroup.replace_faces() 删除旧面、添加新面
+
+[4.3] 面修改流水线（简化后）
+  1. 用户选中面元素，在属性面板修改 width/height
+  2. 点击"应用面修改"
+  3. _apply_face_changes() 自动把属性面板值写入当前选中面
+  4. 遍历该组件的所有面：
+     - 有 _face_modified 标记的面：直接用保存的 old_state 调 updater
+     - 无标记的面：generate expected → layout_offset 补偿 → 状态比较
+  5. 合并所有 updater 返回的新参数
+  6. apply_params_and_regenerate() 用新参数重新生成所有面
+  7. 更新源元素的 component_params
+  8. 调用 inst.replace() 尝试同步 BIMBase（行为不稳定）
+
+[4.4] FACE_TEMPLATES 结构
+  {
+    '组件类型名': {
+      '面名': {
+        'plane': 'xy'|'xz'|'yz'|'side',
+        'description': '...',
+        'generator': lambda params: Element,
+        'update_params': updater_func,
+        'snap_plane': '...',
+      },
+      ...
+    },
+    ...
+  }
+
+[4.5] updater 函数签名
+  def updater(elem, old_state, params):
+      # elem: 被修改后的实际面元素
+      # old_state: 修改前的几何状态字典（来自 capture_element_state）
+      # params: 当前组件参数字典（可修改）
+      # return: 更新后的 params
+
+
+============================================================
+五、关键代码片段（供后续参考）
+============================================================
+
+[5.1] layout_offset 补偿（解决面布局偏移导致的误判）
+  # _layout_faces 中记录偏移
+  elem.face_info['layout_offset'] = (dx, dy)
+
+  # _apply_face_changes 中补偿
+  expected = FaceManager.generate_face_element(...)
+  offset = elem.face_info.get('layout_offset', (0.0, 0.0))
+  expected.translate(offset[0], offset[1])
+
+[5.2] 自动应用属性面板到选中面
+  selected = [e for e in self.elements if getattr(e, 'selected', False)]
+  if len(selected) == 1 and hasattr(selected[0], 'face_info'):
+      elem = selected[0]
+      elem.width = float(self.prop_inputs['width'].text())
+      elem.height = float(self.prop_inputs['height'].text())
+      elem._face_modified = True
+
+[5.3] RightTriangularPrism 模板示例
+  'RightTriangularPrism': {
+      'top': {
+          'generator': lambda p: _make_prism_top(p),
+          'update_params': _prism_top_update,
+      },
+      'side_a': {
+          'generator': lambda p: _make_rect(0, p.get('z_bottom',0), p['a'], p['h']),
+          'update_params': _prism_side_a_update,
+      },
+      ...
+  }
+
+
+============================================================
+六、后续开发建议（优先级排序）
+============================================================
+
+[P0] 面元素与源元素分离存储
+  - 不要把面元素放入 self.elements（源元素列表）
+  - 新增 self.face_elements 或让 ComponentFaceGroup 独立管理
+  - preview_3d.py、导出 DWG、同步到 BIMBase 都只遍历 self.elements
+  - 这是解决"3D预览把面当独立组件"和"面污染其他功能"的根本办法
+
+[P0] 彻底搞清 BIMBase replace() 的行为
+  - 在独立测试脚本中验证：修改 Component 实例参数后调用 replace()
+  - 观察是"原地更新"还是"删除重建"
+  - 如果是删除重建，需要找到"原地更新参数"的正确 API
+  - 可能需要用 get_noumenon_from_instancekey 获取底层 Noumenon 修改
+
+[P1] 重写 updater 为"绝对值计算"而非"差值累加"
+  - 例如 _prism_side_a_update：
+    旧: params['a'] += elem.width - old['width']
+    新: params['a'] = elem.width   # 直接取当前几何值
+  - 避免多次修改时的误差累积
+
+[P1] 完善 Polygon3DComponent 动态面模板
+  - 在 generate_all_faces 中为每个动态面动态注册模板
+  - 或者修改 update_params_from_face，对 side* 面统一走 fallback
+
+[P2] 面元素属性面板专用化
+  - 对面元素显示"边长"、"棱柱高"等语义化字段，而不是通用的 width/height
+  - 隐藏 Z起始/Z终止/厚度 等对 2D 面无意义的字段
+
+[P2] 支持拖拽修改面元素几何
+  - 在 SelectCommand 中检测选中的是否为面元素
+  - 拖拽 corner/handle 时实时更新 elem.width/elem.height
+  - 松开鼠标后自动打 _face_modified 标记
+
+[P3] 面过滤下拉框联动
+  - "全部面"/"顶面"/"侧面"等过滤条件在 _apply_face_changes 时也应生效
+  - 当前过滤只影响显示，不影响修改逻辑
+
+
+============================================================
+七、已知 SDK 限制与坑
+============================================================
+
+1. P3DInstanceKey.__str__ / __repr 会触发 _data 懒加载崩溃
+   → 永远不要对 datakey 调用 str() 或 repr()
+
+2. get_noumKV_from_instancekey() 在第一次 str(datakey) 崩溃后，
+   后续所有调用都会报 'NoneType' object has no attribute 'send'
+   → 整个进程需要重启才能恢复
+
+3. place() 需要 sys.argv[0] 指向有效文件路径
+   → 调用前 patch sys.argv[0]，调用后恢复
+
+4. Python 模块在 BIMBase 嵌入式环境中会被缓存
+   → 任何代码修改都必须完全重启 BIMBase
+
+5. inst.replace() 行为不透明
+   → 需要独立测试确认其语义
+
+
+============================================================
+八、调试技巧
+============================================================
+
+- face_debug.log: 记录面生成和修改的完整流程
+- bimbase_sync_debug.log: 记录 BIMBase 同步的详细过程
+- CADBoard_error.log: 记录主窗口异常和崩溃
+- 在 updater 中 print() 会直接输出到 BIMBase 的 Python 控制台
+
+
+============================================================
+文档结束
+============================================================

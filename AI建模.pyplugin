@@ -1,0 +1,31 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<BIMPyPlugin>
+    <BfaLibName/>
+    <PluginVersion>1.0.2</PluginVersion>
+    <LoadStatus>true</LoadStatus>
+    <Category name="AI建模(大语言模型)">
+        <Panel name="使用说明（请先登录）">
+            <Button name="AI建模 使用说明">
+                <command>代码\\功能使用介绍.py</command>
+                <iconPath>插件管理.ico</iconPath>
+            </Button>
+            <Button name="登录 大语言模型">
+                <command>代码\\打开AI智能体.py</command>
+                <iconPath>cube.ico</iconPath>
+            </Button>
+        </Panel>
+        <Pane1 name="AI建模（先复制代码后运行）">
+            <Button name="AI对话 建模入口">
+                <command>代码\\打开AI智能体.py</command>
+                <iconPath>BIMbase按钮.ico</iconPath>
+            </Button>
+            <Button name="复制代码 然后运行">
+                <command>代码\\代码运行交互.py</command>
+                <iconPath>导入.ico</iconPath>
+            </Button>
+        </Pane1>
+    </Category>
+    <Name>AI建模</Name>
+    <PluginModule>C:\ProgramData\PKPM\BIMBase\Plugins\Pro\V1.6\pythonplugin\AI建模</PluginModule>
+    <PluginSDKVersion>1.6.1</PluginSDKVersion>
+</BIMPyPlugin>
