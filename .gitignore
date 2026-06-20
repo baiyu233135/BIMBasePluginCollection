@@ -25,9 +25,7 @@ geometries_types.txt
 bimbase_types.txt
 dlls.txt
 
-# 模型权重与大数据集
-*.pt
-*.onnx
+# 大数据集
 datasets/
 
 # 第三方软件资源（体积过大，单独管理）

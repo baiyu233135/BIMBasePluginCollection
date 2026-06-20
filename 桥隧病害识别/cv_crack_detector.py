@@ -12,7 +12,7 @@ import os
 import cv2
 import numpy as np
 from typing import List, Tuple
-from utils.disease_detector import DiseaseResult
+from disease_detector import DiseaseResult
 
 
 def detect_cracks_cv(image_path: str, min_length: int = 50, 

@@ -24,13 +24,9 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QPixmap, QFont
 from PyQt5.QtCore import Qt
 
-_current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _current_dir not in sys.path:
-    sys.path.insert(0, _current_dir)
-
-from utils.report_generator import ReportGenerator
-from utils.disease_marker import MarkerRecord, get_marker_manager
-from utils.bimbase_query import get_component_query
+from report_generator import ReportGenerator
+from disease_marker import MarkerRecord, get_marker_manager
+from bimbase_query import get_component_query
 
 # 桥梁构件类型（含基本几何体）
 COMPONENT_CLASSES = [
@@ -382,7 +378,7 @@ class DiseaseDialog(QDialog):
     def _on_test_place(self):
         """直接投影测试：在固定位置放置红色大标记，不依赖选中组件"""
         try:
-            from utils.disease_marker import DiseaseMarkerComponent
+            from disease_marker import DiseaseMarkerComponent
             comp = DiseaseMarkerComponent.create_component(0, 0, 500, size=500.0)
             if comp is None:
                 QMessageBox.critical(self, "失败", "pyp3d不可用，无法创建组件。\n\n请确认在BIMBase环境中运行。")
@@ -576,7 +572,7 @@ class DiseaseDialog(QDialog):
         _dbg(f"Param keys: {param_keys}")
 
         # 匹配构件类型
-        from utils.bimbase_query import infer_bridge_component_type
+        from bimbase_query import infer_bridge_component_type
         comp_type = infer_bridge_component_type(params)
         if not comp_type:
             comp_type = "未知类型"
@@ -637,7 +633,7 @@ class DiseaseDialog(QDialog):
             base_pos = self._estimate_base_position(params)
 
             # 创建投影引擎
-            from utils.face_projection import FaceProjectionEngine
+            from face_projection import FaceProjectionEngine
             engine = FaceProjectionEngine(comp_type, params, base_pos)
 
             # 生成模拟阴影（固定种子保证可重复）
@@ -654,7 +650,7 @@ class DiseaseDialog(QDialog):
             if plugin_dir not in sys.path:
                 sys.path.insert(0, plugin_dir)
 
-            from utils.disease_marker import DiseaseMarkerComponent
+            from disease_marker import DiseaseMarkerComponent
             from bimbase_sync import place_to, translate as _translate
 
             for shadow in shadows:
@@ -730,7 +726,7 @@ class DiseaseDialog(QDialog):
                 return
 
             base_pos = self._estimate_base_position(params)
-            from utils.face_projection import FaceProjectionEngine, generate_disease_texture, ShadowRegion
+            from face_projection import FaceProjectionEngine, generate_disease_texture, ShadowRegion
             engine = FaceProjectionEngine(comp_type, params, base_pos)
             shadows = engine.generate_simulated_shadows(count=3, seed=42)
             if not shadows:
@@ -753,7 +749,7 @@ class DiseaseDialog(QDialog):
                 thickness=2.0
             )
 
-            from utils.disease_marker import DiseaseMarkerComponent
+            from disease_marker import DiseaseMarkerComponent
             marker = DiseaseMarkerComponent.create_texture_marker(
                 x=wx, y=wy, z=wz,
                 width=face.width, height=face.height, thickness=2.0,
@@ -809,7 +805,7 @@ class DiseaseDialog(QDialog):
                 return
 
             base_pos = self._estimate_base_position(params)
-            from utils.face_projection import FaceProjectionEngine, PointCloudGenerator
+            from face_projection import FaceProjectionEngine, PointCloudGenerator
             engine = FaceProjectionEngine(comp_type, params, base_pos)
             shadows = engine.generate_simulated_shadows(count=3, seed=42)
             if not shadows:
@@ -836,7 +832,7 @@ class DiseaseDialog(QDialog):
                 return
 
             # 创建点云标记
-            from utils.disease_marker import DiseaseMarkerComponent
+            from disease_marker import DiseaseMarkerComponent
             marker = DiseaseMarkerComponent.create_point_cloud_marker(
                 x=face.center[0], y=face.center[1], z=face.center[2],
                 points=points, point_size=4.0, face_plane=face.plane
@@ -921,7 +917,7 @@ class DiseaseDialog(QDialog):
             if not params:
                 return
 
-            from utils.bimbase_query import infer_bridge_component_type
+            from bimbase_query import infer_bridge_component_type
             comp_type = infer_bridge_component_type(params) if params else ""
 
             if comp_type:

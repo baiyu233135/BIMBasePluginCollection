@@ -16,6 +16,12 @@ _current_dir = os.path.dirname(os.path.abspath(__file__))
 if _current_dir not in sys.path:
     sys.path.insert(0, _current_dir)
 
+# bimbase_sync 位于 CADBoard 目录，需要加入路径
+_cadboard_dir = os.path.join(_current_dir, '..', 'CADBoard')
+_cadboard_dir = os.path.normpath(_cadboard_dir)
+if _cadboard_dir not in sys.path:
+    sys.path.insert(0, _cadboard_dir)
+
 # 尝试导入BIMBase实体查询API
 # 注意：bimbase_sync在pyp3d不可用时可能抛出TypeError，需捕获所有异常
 try:

@@ -18,9 +18,9 @@ from dataclasses import dataclass
 # 配置
 # ============================================================
 
-# 模型文件路径（相对于CADBoard目录）
+# 模型文件路径（相对于本模块目录）
 DEFAULT_MODEL_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    os.path.dirname(os.path.abspath(__file__)),
     "models", "disease_yolov8n.pt"
 )
 
@@ -117,7 +117,7 @@ class DiseaseDetector:
             self._load_error = f"模型文件不存在: {self.model_path}\n请先运行训练脚本下载数据集并训练模型。"
             # 尝试使用预训练权重作为fallback（检测通用物体）
             fallback_path = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                os.path.dirname(os.path.abspath(__file__)),
                 "models", "yolov8n.pt"
             )
             try:
@@ -183,7 +183,7 @@ class DiseaseDetector:
         if is_fallback:
             # 使用传统CV方法检测裂缝
             try:
-                from utils.cv_crack_detector import detect_cracks_cv
+                from cv_crack_detector import detect_cracks_cv
                 return detect_cracks_cv(image_path)
             except Exception as e:
                 print(f"[DiseaseDetector] CV检测失败: {e}")

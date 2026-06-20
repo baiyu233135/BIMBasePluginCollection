@@ -34,7 +34,7 @@ except ImportError:
 
 # 日志文件路径（与bridge_disease_debug.log共用，便于排查）
 _LOG_FILE = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    os.path.dirname(os.path.abspath(__file__)),
     "bridge_disease_debug.log"
 )
 

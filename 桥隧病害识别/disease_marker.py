@@ -36,9 +36,9 @@ if _diffuse_fn is None:
     except ImportError:
         pass
 
-# 日志文件路径
+# 日志文件路径（本模块目录）
 _LOG_FILE = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    os.path.dirname(os.path.abspath(__file__)),
     "bridge_disease_debug.log"
 )
 
@@ -301,9 +301,9 @@ else:
     _DiseaseTextureMarker = None
     _DiseasePointCloudMarker = None
 
-# 持久化文件路径
+# 持久化文件路径（本模块目录）
 RECORDS_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    os.path.dirname(os.path.abspath(__file__)),
     "disease_records.json"
 )
 
@@ -548,12 +548,13 @@ class DiseaseMarkerManager:
                 )
                 if comp is not None:
                     # 使用place()放置到BIMBase
-                    plugin_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                    if plugin_dir not in sys.path:
-                        sys.path.insert(0, plugin_dir)
+                    _cadboard_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'CADBoard')
+                    _cadboard_dir = os.path.normpath(_cadboard_dir)
+                    if _cadboard_dir not in sys.path:
+                        sys.path.insert(0, _cadboard_dir)
                     import bimbase_sync as _ref
                     original_argv0 = sys.argv[0]
-                    sys.argv[0] = os.path.join(plugin_dir, 'bimbase_sync.py')
+                    sys.argv[0] = os.path.join(_cadboard_dir, 'bimbase_sync.py')
                     try:
                         place(comp)
                     finally:
@@ -603,12 +604,13 @@ class DiseaseMarkerManager:
                     position_3d[0], position_3d[1], position_3d[2], size=50.0
                 )
                 if comp is not None:
-                    plugin_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                    if plugin_dir not in sys.path:
-                        sys.path.insert(0, plugin_dir)
+                    _cadboard_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'CADBoard')
+                    _cadboard_dir = os.path.normpath(_cadboard_dir)
+                    if _cadboard_dir not in sys.path:
+                        sys.path.insert(0, _cadboard_dir)
                     import bimbase_sync as _ref
                     original_argv0 = sys.argv[0]
-                    sys.argv[0] = os.path.join(plugin_dir, 'bimbase_sync.py')
+                    sys.argv[0] = os.path.join(_cadboard_dir, 'bimbase_sync.py')
                     try:
                         place(comp)
                     finally:
