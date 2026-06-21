@@ -21,6 +21,14 @@
                 <command>长方体.py</command>
                 <iconPath>cube copy 2.ico</iconPath>
             </Button>
+            <Button name="索缆锚锭">
+                <command>索缆锚锭.py</command>
+                <iconPath>索缆锚锭.ico</iconPath>
+            </Button>
+            <Button name="引桥桥墩">
+                <command>引桥桥墩.py</command>
+                <iconPath>引桥桥墩.ico</iconPath>
+            </Button>
         </Panel>
     </Category>
     <Name>组件测试</Name>
