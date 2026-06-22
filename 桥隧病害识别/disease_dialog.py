@@ -37,8 +37,8 @@ COMPONENT_CLASSES = [
     "人行道及护栏", "路面及交通标线",
 ]
 
-# 6类病害
-DISEASE_CLASSES = ["裂缝", "剥落", "露筋", "蜂窝麻面", "渗水", "锈蚀"]
+# 病害类型（含自动识别兜底标签）
+DISEASE_CLASSES = ["异常区域", "裂缝", "剥落", "露筋", "蜂窝麻面", "渗水", "锈蚀"]
 
 # 严重程度
 SEVERITY_LEVELS = ["轻微", "中等", "严重", "极严重"]
@@ -84,6 +84,17 @@ class DiseaseDialog(QDialog):
         self.btn_import.setMinimumHeight(36)
         self.btn_import.clicked.connect(self._on_import_photo)
         v.addWidget(self.btn_import)
+
+        self.btn_detect_anomalies = QPushButton("🔍 自动识别异常区域")
+        self.btn_detect_anomalies.setMinimumHeight(36)
+        self.btn_detect_anomalies.setStyleSheet(
+            "QPushButton{background:#E65100;color:white;font-weight:bold;}"
+        )
+        self.btn_detect_anomalies.setToolTip("使用传统 CV 自动圈出裂缝、渗水等异常区域")
+        self.btn_detect_anomalies.clicked.connect(self._on_detect_anomalies)
+        self.btn_detect_anomalies.setEnabled(False)
+        v.addWidget(self.btn_detect_anomalies)
+
         self.lbl_photo_name = QLabel("未选择照片")
         self.lbl_photo_name.setStyleSheet("color:#666;")
         v.addWidget(self.lbl_photo_name)
@@ -245,6 +256,7 @@ class DiseaseDialog(QDialog):
         self.current_image_path = path
         self.lbl_photo_name.setText(os.path.basename(path))
         self.lbl_photo_name.setStyleSheet("color:#1565C0;font-weight:bold;")
+        self.btn_detect_anomalies.setEnabled(True)
 
         # 显示预览
         pix = QPixmap(path)
@@ -254,6 +266,96 @@ class DiseaseDialog(QDialog):
                 Qt.KeepAspectRatio, Qt.SmoothTransformation
             )
             self.lbl_image.setPixmap(scaled)
+
+    def _on_detect_anomalies(self):
+        """使用传统 CV 自动识别异常区域，并在照片上圈出。"""
+        if not self.current_image_path:
+            QMessageBox.warning(self, "提示", "请先导入照片")
+            return
+
+        self.btn_detect_anomalies.setEnabled(False)
+        self.btn_detect_anomalies.setText("🔍 识别中...")
+        QApplication.processEvents()
+
+        try:
+            from disease_detector import DiseaseDetector
+            detector = DiseaseDetector()
+            results = detector.detect_anomalies(self.current_image_path)
+
+            if not results:
+                QMessageBox.information(self, "识别完成", "未检测到明显异常区域。\n\n"
+                    "可尝试导入更清晰的 T 梁照片，或在后续版本中调整检测参数。")
+                self.btn_detect_anomalies.setEnabled(True)
+                self.btn_detect_anomalies.setText("🔍 自动识别异常区域")
+                return
+
+            # 生成带框预览图
+            from cv_anomaly_detector import draw_anomaly_results
+            preview_path = draw_anomaly_results(self.current_image_path, results)
+            if preview_path and os.path.exists(preview_path):
+                pix = QPixmap(preview_path)
+                if not pix.isNull():
+                    scaled = pix.scaled(
+                        self.scroll.width() - 20, self.scroll.height() - 20,
+                        Qt.KeepAspectRatio, Qt.SmoothTransformation
+                    )
+                    self.lbl_image.setPixmap(scaled)
+
+            # 清空当前图片已有的异常区域记录，避免重复
+            self.records = [r for r in self.records
+                            if not (r.get("photo") == self.current_image_path
+                                    and r.get("disease") == "异常区域")]
+
+            # 将检测结果加入记录
+            component_type = self.combo_component.currentText()
+            bridge_name = self.edit_bridge_name.text().strip() or "未命名桥梁"
+            component_no = self.edit_component_no.text().strip() or "未编号"
+            for idx, r in enumerate(results, 1):
+                x1, y1, x2, y2 = r.bbox
+                w = x2 - x1
+                h = y2 - y1
+                severity = self._confidence_to_severity(r.confidence)
+                record = {
+                    "id": str(uuid.uuid4())[:8],
+                    "photo": self.current_image_path,
+                    "component": component_type,
+                    "bridge": bridge_name,
+                    "component_no": component_no,
+                    "disease": "异常区域",
+                    "severity": severity,
+                    "position": f"像素坐标: x={x1}, y={y1}",
+                    "size": f"宽{w} × 高{h} 像素",
+                    "note": f"自动识别第 {idx} 处异常区域，置信度 {r.confidence:.2f}",
+                    "time": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                }
+                self.records.append(record)
+
+            self._refresh_table()
+            self.btn_report.setEnabled(True)
+            if self._selected_component is not None:
+                self.btn_project.setEnabled(True)
+
+            QMessageBox.information(self, "识别完成",
+                f"已在照片上圈出 {len(results)} 处异常区域，\n"
+                f"并已自动添加到病害记录列表。")
+
+        except Exception as e:
+            import traceback
+            QMessageBox.critical(self, "识别失败",
+                f"异常区域识别出错:\n{e}\n\n{traceback.format_exc()}")
+        finally:
+            self.btn_detect_anomalies.setEnabled(True)
+            self.btn_detect_anomalies.setText("🔍 自动识别异常区域")
+
+    @staticmethod
+    def _confidence_to_severity(confidence: float) -> str:
+        """根据置信度映射严重程度"""
+        if confidence >= 0.75:
+            return "严重"
+        elif confidence >= 0.5:
+            return "中等"
+        else:
+            return "轻微"
 
     def _on_add_record(self):
         if not self.current_image_path:

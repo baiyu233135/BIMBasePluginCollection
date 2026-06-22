@@ -32,6 +32,7 @@ DISEASE_CLASSES = [
     "蜂窝麻面",
     "渗水",
     "锈蚀",
+    "异常区域",  # 传统 CV 不分类别时的兜底标签
 ]
 
 # 各类构件的常规病害映射（用于过滤/提示）
@@ -161,6 +162,28 @@ class DiseaseDetector:
         """获取模型加载错误信息"""
         return self._load_error
     
+    def detect_anomalies(self, image_path: str) -> List[DiseaseResult]:
+        """
+        使用传统 CV 方法检测图片中的异常区域，不区分具体病害类型。
+
+        不依赖 YOLO 模型，适合在没有专用病害模型时快速识别 T 梁等
+        混凝土构件表面的裂缝、渗水、污渍等异常。
+
+        Args:
+            image_path: 图片文件路径
+
+        Returns:
+            DiseaseResult 列表，class_name 均为 "异常区域"
+        """
+        try:
+            from cv_anomaly_detector import detect_anomalies_cv
+            return detect_anomalies_cv(image_path)
+        except Exception as e:
+            print(f"[DiseaseDetector] 异常区域检测失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+
     def detect(self, image_path: str, conf_threshold: float = 0.25) -> List[DiseaseResult]:
         """
         对单张图片进行病害检测。

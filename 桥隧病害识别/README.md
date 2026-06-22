@@ -5,6 +5,7 @@
 ## 功能特点
 
 - **病害检测**：基于 YOLOv8n 模型，支持 6 类病害（裂缝、剥落、露筋、蜂窝麻面、渗水、锈蚀）。
+- **异常区域识别**：无需训练模型，使用 OpenCV 传统图像处理方法自动圈出 T 梁等混凝土构件表面的异常区域（裂缝、渗水、污渍等），不区分具体病害类型。
 - **CV Fallback**：当 YOLO 模型不可用时，使用 OpenCV 传统图像处理方法检测裂缝。
 - **构件分类**：基于 EfficientNet-B0 自动识别 19 种桥梁构件类型。
 - **病害标记**：在 BIMBase 场景中生成红色标记组件，直观展示病害位置。
@@ -20,6 +21,7 @@
 ├── disease_detector.py          # YOLOv8n 病害检测
 ├── disease_marker.py            # 病害标记组件
 ├── cv_crack_detector.py         # OpenCV 裂缝检测 fallback
+├── cv_anomaly_detector.py       # OpenCV 异常区域检测（T梁等，不分类）
 ├── component_classifier.py      # 桥梁构件图像分类
 ├── face_projection.py           # 面投影引擎
 ├── report_generator.py          # Word 报告生成
