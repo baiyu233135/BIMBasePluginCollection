@@ -30,6 +30,16 @@
                 <iconPath>引桥桥墩.ico</iconPath>
             </Button>
         </Panel>
+        <Panel name="布置接口">
+            <Button name="直线">
+                <command>直线.py</command>
+                <iconPath>直线.ico</iconPath>
+            </Button>
+            <Button name="曲线">
+                <command>曲线.py</command>
+                <iconPath>曲线.ico</iconPath>
+            </Button>
+        </Panel>
     </Category>
     <Name>组件测试</Name>
     <PluginModule>C:\ProgramData\PKPM\BIMBase\Plugins\Pro\V1.6\pythonplugin\组件测试\</PluginModule>

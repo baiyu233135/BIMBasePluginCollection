@@ -70,4 +70,32 @@ try:
 except Exception as e:
     print(f"  [ERR] 引桥桥墩实例化: {type(e).__name__}: {e}")
 
+# 测试直线
+print("\n[4] 测试直线")
+try:
+    from 直线 import 直线
+    c = 直线()
+    print("  [OK] 直线实例化成功")
+    try:
+        place(c)
+        print("  [OK] 直线 place 成功")
+    except Exception as e:
+        print(f"  [ERR] 直线 place: {type(e).__name__}: {e}")
+except Exception as e:
+    print(f"  [ERR] 直线实例化: {type(e).__name__}: {e}")
+
+# 测试曲线
+print("\n[5] 测试曲线")
+try:
+    from 曲线 import 曲线
+    d = 曲线()
+    print("  [OK] 曲线实例化成功")
+    try:
+        place(d)
+        print("  [OK] 曲线 place 成功")
+    except Exception as e:
+        print(f"  [ERR] 曲线 place: {type(e).__name__}: {e}")
+except Exception as e:
+    print(f"  [ERR] 曲线实例化: {type(e).__name__}: {e}")
+
 print("\n=== 测试结束 ===")
