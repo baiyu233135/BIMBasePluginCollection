@@ -896,16 +896,22 @@ class CADBoardWindow(QMainWindow):
         self.prop_inputs['z_start'].setText(f"{elem.z_start:.2f}")
         self.prop_inputs['z_end'].setText(f"{elem.z_end:.2f}")
         self.prop_inputs['thickness'].setText(f"{elem.thickness:.2f}")
-        # 宽度：矩形/圆/椭圆等有宽度概念的元素
+        # 宽度：矩形/圆/椭圆/多段线等
         if hasattr(elem, 'width'):
             self.prop_inputs['width'].setText(f"{elem.width:.2f}")
         elif hasattr(elem, 'radius'):
             self.prop_inputs['width'].setText(f"{elem.radius:.2f}")
+        elif hasattr(elem, 'points'):
+            b = elem.get_bounds()
+            self.prop_inputs['width'].setText(f"{b[2] - b[0]:.2f}")
         else:
             self.prop_inputs['width'].setText("-")
-        # 高度：矩形元素显示2D高度，其他显示3D拉伸高度
+        # 高度：矩形元素显示2D高度，多段线显示包围盒高度，其他显示3D拉伸高度
         if elem.__class__.__name__ == 'RectangleElement':
             self.prop_inputs['height'].setText(f"{elem.height:.2f}")
+        elif hasattr(elem, 'points'):
+            b = elem.get_bounds()
+            self.prop_inputs['height'].setText(f"{b[3] - b[1]:.2f}")
         else:
             self.prop_inputs['height'].setText(f"{elem.z_end - elem.z_start:.2f}")
         self.prop_3d_cb.setChecked(elem.is_3d)
@@ -1154,11 +1160,19 @@ class CADBoardWindow(QMainWindow):
 
         # Phase 3 Enhancement: 智能识别三视图按钮
         self._recognize_views_btn = QPushButton("🔍 识别三视图")
-        self._recognize_views_btn.setToolTip("智能识别导入的PDF三视图并自动创建参数化组件")
+        self._recognize_views_btn.setToolTip("基于本地规则识别导入的PDF三视图")
         self._recognize_views_btn.setMinimumWidth(110)
         self._recognize_views_btn.setStyleSheet("QPushButton { background-color: #1565C0; color: white; font-weight: bold; }")
         self._recognize_views_btn.clicked.connect(self._recognize_pdf_views)
         self.toolbar.addWidget(self._recognize_views_btn)
+
+        # Phase 2 Enhancement: 复杂识别（Qwen-VL 多模态 AI）
+        self._complex_recognize_btn = QPushButton("🧠 复杂识别")
+        self._complex_recognize_btn.setToolTip("使用 Qwen-VL 从 PDF/图片识别复杂构件（如引桥桥墩）")
+        self._complex_recognize_btn.setMinimumWidth(110)
+        self._complex_recognize_btn.setStyleSheet("QPushButton { background-color: #7B1FA2; color: white; font-weight: bold; }")
+        self._complex_recognize_btn.clicked.connect(self._recognize_complex_views)
+        self.toolbar.addWidget(self._complex_recognize_btn)
 
         # Phase 3 Enhancement: 退出面编辑模式按钮（默认隐藏，进入面编辑后显示）
         self._exit_face_btn = QPushButton("❌ 退出面编辑")
@@ -2300,7 +2314,28 @@ class CADBoardWindow(QMainWindow):
         _write_board_log(f"Entered face edit mode: component={component_type} id={component_id}")
 
     def _recognize_pdf_views(self):
-        """智能识别导入的PDF三视图并自动创建参数化组件（优先使用 Qwen-VL AI 识别）"""
+        """智能识别导入的PDF三视图并自动创建参数化组件"""
+        self.status_bar.showMessage("正在分析三视图布局...")
+        try:
+            success, msg = auto_associate_from_pdf_views(self)
+            if success:
+                try:
+                    self._fit_canvas_to_elements(margin=50)
+                except Exception:
+                    pass
+                QMessageBox.information(self, "三视图识别", msg)
+                self.status_bar.showMessage("三视图识别成功，画布已自适应")
+            else:
+                QMessageBox.warning(self, "三视图识别", msg)
+                self.status_bar.showMessage("三视图识别失败")
+        except Exception as e:
+            import traceback
+            _write_board_log(f"_recognize_pdf_views crash: {e}\n{traceback.format_exc()}")
+            QMessageBox.critical(self, "三视图识别错误", f"识别过程中出错:\n{e}")
+            self.status_bar.showMessage("三视图识别出错")
+
+    def _recognize_complex_views(self):
+        """复杂识别：使用 Qwen-VL 从 PDF/图片识别引桥桥墩等复杂构件"""
         # 未配置 API Key 时提示用户
         if not has_api_key():
             reply = QMessageBox.question(
@@ -2390,7 +2425,7 @@ class CADBoardWindow(QMainWindow):
         except Exception as e:
             import traceback
             err = traceback.format_exc()
-            _write_board_log(f"_recognize_pdf_views AI crash: {e}\n{err}")
+            _write_board_log(f"_recognize_complex_views crash: {e}\n{err}")
             QMessageBox.critical(self, "图纸识别错误", f"识别过程中出错:\n{e}\n\n已记录到 drawing_recognizer.log")
             self.status_bar.showMessage("图纸识别出错")
 
@@ -2515,13 +2550,14 @@ class CADBoardWindow(QMainWindow):
                     elif hasattr(elem, 'radius'):
                         elem.radius = new_width
                         _log_face(f"  radius -> {new_width}")
-                except ValueError:
+                except (ValueError, AttributeError):
                     pass
                 try:
                     new_height = float(self.prop_inputs['height'].text())
-                    elem.height = new_height
-                    _log_face(f"  height -> {new_height}")
-                except ValueError:
+                    if hasattr(elem, 'height'):
+                        elem.height = new_height
+                        _log_face(f"  height -> {new_height}")
+                except (ValueError, AttributeError):
                     pass
                 # 给这个面打标记，确保下面一定会处理它
                 elem._face_modified = True

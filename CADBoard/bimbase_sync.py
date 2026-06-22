@@ -148,23 +148,44 @@ def _ensure_pyp3d_port():
 
 
 def _ensure_place_to_direct():
-    """延迟初始化底层 place_to 函数，使用官方 create_component + place_to。"""
+    """延迟初始化底层 place_to 函数，绕过 interface 覆盖，直接设置 transformation 后创建实例。"""
     global _PlaceToDirect
     if _PlaceToDirect is not None:
         return True
     try:
         # 在放置时刻才导入，确保 BIMBase/pyp3d 已就绪
-        from pyp3d import create_component, place_to as _place_to
+        from pyp3d import (
+            UnifiedFunction, PARACMPT_PARAMETRIC_COMPONENT,
+            PARACMPT_KEYWORD_TRANSFORMATION, create_component,
+        )
+        try:
+            from pyp3d import PARACMPT_PLACE_INSTANCE_TO
+            _place_to_flag = PARACMPT_PLACE_INSTANCE_TO
+            _log(f"_ensure_place_to_direct: using PARACMPT_PLACE_INSTANCE_TO = {_place_to_flag}")
+        except ImportError:
+            _place_to_flag = None
+            _log("_ensure_place_to_direct: PARACMPT_PLACE_INSTANCE_TO not available, will use BPParametricComponentManager::create")
 
         def _place_impl(noumenon, transform):
             _log("_place_impl: calling create_component...")
             create_component(noumenon)
-            _log("_place_impl: create_component done, calling place_to...")
-            _place_to(noumenon, transform)
-            _log("_place_impl: place_to done")
+            _log("_place_impl: create_component done")
+            noumenon[PARACMPT_KEYWORD_TRANSFORMATION] = transform
+            _log("_place_impl: calling BPParametricComponentManager::create...")
+            UnifiedFunction(PARACMPT_PARAMETRIC_COMPONENT, "BPParametricComponentManager::create")(noumenon)
+            _log("_place_impl: BPParametricComponentManager::create done")
+            try:
+                from pyp3d import get_place_to_entityId, entityid_isvaid
+                eid = get_place_to_entityId()
+                is_valid = entityid_isvaid(eid) if eid else False
+                mid = getattr(eid, '_ModelId', 'N/A')
+                eid_val = getattr(eid, '_ElementId', 'N/A')
+                _log(f"_place_impl: get_place_to_entityId() = ModelId={mid}, ElementId={eid_val}, valid={is_valid}")
+            except Exception as e2:
+                _log(f"_place_impl: get_place_to_entityId() failed: {e2}")
 
         _PlaceToDirect = _place_impl
-        _log("_PlaceToDirect initialized (lazy)")
+        _log("_PlaceToDirect initialized (UnifiedFunction direct create)")
         return True
     except Exception as e:
         _log(f"_ensure_place_to_direct failed: {e}")
@@ -508,14 +529,13 @@ def place_component_at(comp, x, y, z, _in_modal=False):
     _ensure_place_to_direct()
     original_argv = _set_argv_for_place()
     try:
-        # 方案1：底层 _PlaceToDirect（create_component + place_instance_to）
+        # 方案1：底层 _PlaceToDirect（绕过 interface 覆盖，直接设置 transformation 后创建实例）
         if _PlaceToDirect is not None:
             _core_recover()
             try:
                 _log(f"place_component_at: trying _PlaceToDirect({pos})")
                 before = _count_entities()
                 _PlaceToDirect(comp, _translate(*pos))
-                # 给 BIMBase 一点刷新时间再统计实体数量
                 import time
                 time.sleep(0.3)
                 after = _count_entities()
@@ -528,19 +548,7 @@ def place_component_at(comp, x, y, z, _in_modal=False):
             except Exception as e:
                 _log(f"place_component_at: _PlaceToDirect failed: {e}")
 
-        # 方案2：原生 place_to
-        _core_recover()
-        try:
-            from pyp3d import place_to as _place_to
-            _log(f"place_component_at: trying place_to({pos})")
-            _place_to(comp, _translate(*pos))
-            _log("place_component_at: place_to SUCCESS")
-            _refresh_view()
-            return True, f"已自动布置到 {pos}"
-        except Exception as e:
-            _log(f"place_component_at: place_to failed: {e}")
-
-        # 方案3：create_geometry 直接创建（不依赖 place 工具上下文）
+        # 方案2：create_geometry 直接创建（不依赖 place 工具上下文）
         _core_recover()
         try:
             _log(f"place_component_at: trying create_geometry at {pos}")
@@ -566,6 +574,18 @@ def place_component_at(comp, x, y, z, _in_modal=False):
                 return True, f"已自动布置到 {pos}"
         except Exception as e:
             _log(f"place_component_at: create_geometry failed: {e}")
+
+        # 方案3：原生 place_to（可能被 interface 覆盖为手动工具）
+        _core_recover()
+        try:
+            from pyp3d import place_to as _place_to
+            _log(f"place_component_at: trying place_to({pos})")
+            _place_to(comp, _translate(*pos))
+            _log("place_component_at: place_to SUCCESS")
+            _refresh_view()
+            return True, f"已自动布置到 {pos}"
+        except Exception as e:
+            _log(f"place_component_at: place_to failed: {e}")
 
         # 方案4：坐标烘焙 + place() + create_geometry/SendInput
         _core_recover()

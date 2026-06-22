@@ -273,17 +273,33 @@ def _cuboid_left_update(elem, old, params):
 
 # ========== 引桥桥墩面更新函数 ==========
 
+def _polyline_bounds(points):
+    """计算多段线（支持 None 断点）的包围盒"""
+    xs = [p[0] for p in points if p is not None]
+    ys = [p[1] for p in points if p is not None]
+    if not xs:
+        return (0, 0, 0, 0)
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
 def _pier_top_update(elem, old, params):
     """引桥桥墩俯视图: width→盖梁总长, height→盖梁宽"""
-    params['盖梁总长'] = elem.width
-    params['盖梁宽'] = elem.height
+    if hasattr(elem, 'width'):
+        params['盖梁总长'] = elem.width
+        params['盖梁宽'] = elem.height
+    else:
+        b = elem.get_bounds()
+        params['盖梁总长'] = b[2] - b[0]
+        params['盖梁宽'] = b[3] - b[1]
     return params
 
 
 def _pier_front_update(elem, old, params):
     """引桥桥墩主视图: width→盖梁总长, height→墩高+盖梁总高"""
-    params['盖梁总长'] = elem.width
-    new_total_h = elem.height
+    b = elem.get_bounds()
+    new_w = b[2] - b[0]
+    new_total_h = b[3] - b[1]
+    params['盖梁总长'] = new_w
     cap_h = params.get('盖梁总高', 300)
     new_col_h = max(0, new_total_h - cap_h)
     params['墩高'] = new_col_h
@@ -292,8 +308,10 @@ def _pier_front_update(elem, old, params):
 
 def _pier_left_update(elem, old, params):
     """引桥桥墩左视图: width→盖梁宽, height→墩高+盖梁总高"""
-    params['盖梁宽'] = elem.width
-    new_total_h = elem.height
+    b = elem.get_bounds()
+    new_w = b[2] - b[0]
+    new_total_h = b[3] - b[1]
+    params['盖梁宽'] = new_w
     cap_h = params.get('盖梁总高', 300)
     new_col_h = max(0, new_total_h - cap_h)
     params['墩高'] = new_col_h
@@ -418,6 +436,196 @@ def _prism_dynamic_faces(params, component_id):
 
 
 # ========== 面模板注册表 ==========
+
+# ========== 元素工厂函数 ==========
+
+def _make_rect(x, y, w, h):
+    from geometry.elements import RectangleElement
+    return RectangleElement(float(x), float(y), float(w), float(h))
+
+
+def _make_prism_top(p):
+    """生成直角三棱柱的顶面/底面三角形"""
+    from geometry.elements import PolylineElement
+    a = float(p.get('直角边1', 100))
+    b = float(p.get('直角边2', 100))
+    pts = [(0, 0), (a, 0), (0, b)]
+    return PolylineElement(pts, closed=True)
+
+
+def _make_approach_pier_top(p):
+    """引桥桥墩俯视图：盖梁顶面矩形 + 双墩柱位置示意"""
+    from geometry.elements import RectangleElement, PolylineElement
+    L = float(p.get('盖梁总长', 1930))
+    W = float(p.get('盖梁宽', 300))
+    col_s = float(p.get('墩柱间距', 1140))
+    col_d = float(p.get('墩柱直径', 270))
+    # 主轮廓：盖梁矩形
+    pts = [(-L / 2, -W / 2), (L / 2, -W / 2), (L / 2, W / 2), (-L / 2, W / 2), (-L / 2, -W / 2)]
+    # 双墩柱位置（小矩形）
+    half = col_d / 2
+    for cx in (-col_s / 2, col_s / 2):
+        pts.append(None)
+        pts.extend([
+            (cx - half, -half), (cx + half, -half),
+            (cx + half, half), (cx - half, half),
+            (cx - half, -half)
+        ])
+    return PolylineElement(pts, closed=False)
+
+
+def _make_approach_pier_front(p):
+    """引桥桥墩主视图：盖梁梯形轮廓 + 双墩柱 + 系梁"""
+    from geometry.elements import PolylineElement
+    L = float(p.get('盖梁总长', 1930))
+    H_cap = float(p.get('盖梁总高', 300))
+    L_bottom = float(p.get('盖梁主体底宽', 1390))
+    chamfer_x = float(p.get('斜边水平投影', 270))
+    chamfer_h = float(p.get('斜边垂直投影', 120))
+    boss_h = float(p.get('凸起高', 50))
+    col_s = float(p.get('墩柱间距', 1140))
+    col_d = float(p.get('墩柱直径', 270))
+    col_h = float(p.get('墩高', 1200))
+    tie_l = float(p.get('系梁长', 890))
+    tie_h = float(p.get('系梁高', 200))
+    tie_n = int(p.get('系梁数量', 2))
+    tie_start = float(p.get('系梁起始距顶', 200))
+    tie_step = float(p.get('系梁间距', 500))
+
+    z_bottom = float(p.get('z_bottom', 0))
+    z_col_top = z_bottom + col_h
+    z_cap_top = z_col_top + H_cap
+    z_slant_top = z_cap_top - boss_h
+    z_slant_bottom = z_slant_top - chamfer_h
+
+    # 外轮廓：盖梁 + 双墩柱
+    pts = [
+        (-L / 2, z_cap_top),
+        (L / 2, z_cap_top),
+        (L / 2, z_slant_top),
+        (L_bottom / 2, z_slant_bottom),
+        (L_bottom / 2, z_col_top),
+        (col_s / 2 + col_d / 2, z_col_top),
+        (col_s / 2 + col_d / 2, z_bottom),
+        (-col_s / 2 - col_d / 2, z_bottom),
+        (-col_s / 2 - col_d / 2, z_col_top),
+        (-L_bottom / 2, z_col_top),
+        (-L_bottom / 2, z_slant_bottom),
+        (-L / 2, z_slant_top),
+        (-L / 2, z_cap_top),
+    ]
+
+    # 系梁（双墩柱之间的小矩形）
+    for i in range(tie_n):
+        z_top = z_col_top + col_h - tie_start - i * tie_step
+        z = z_top - tie_h / 2.0
+        if z < z_bottom:
+            z = z_bottom
+        pts.append(None)
+        pts.extend([
+            (-tie_l / 2, z),
+            (tie_l / 2, z),
+            (tie_l / 2, z + tie_h),
+            (-tie_l / 2, z + tie_h),
+            (-tie_l / 2, z),
+        ])
+
+    return PolylineElement(pts, closed=False)
+
+
+def _make_approach_pier_left(p):
+    """引桥桥墩左视图：盖梁侧面 + 墩柱 + 系梁"""
+    from geometry.elements import PolylineElement
+    W = float(p.get('盖梁宽', 300))
+    H_cap = float(p.get('盖梁总高', 300))
+    col_d = float(p.get('墩柱直径', 270))
+    col_h = float(p.get('墩高', 1200))
+    tie_w = float(p.get('系梁宽', 200))
+    tie_h = float(p.get('系梁高', 200))
+    tie_n = int(p.get('系梁数量', 2))
+    tie_start = float(p.get('系梁起始距顶', 200))
+    tie_step = float(p.get('系梁间距', 500))
+
+    z_bottom = float(p.get('z_bottom', 0))
+    z_col_top = z_bottom + col_h
+    z_cap_top = z_col_top + H_cap
+
+    # 外轮廓：盖梁矩形 + 墩柱矩形
+    pts = [
+        (-W / 2, z_cap_top),
+        (W / 2, z_cap_top),
+        (W / 2, z_col_top),
+        (col_d / 2, z_col_top),
+        (col_d / 2, z_bottom),
+        (-col_d / 2, z_bottom),
+        (-col_d / 2, z_col_top),
+        (-W / 2, z_col_top),
+        (-W / 2, z_cap_top),
+    ]
+
+    # 系梁
+    for i in range(tie_n):
+        z_top = z_col_top + col_h - tie_start - i * tie_step
+        z = z_top - tie_h / 2.0
+        if z < z_bottom:
+            z = z_bottom
+        pts.append(None)
+        pts.extend([
+            (-tie_w / 2, z),
+            (tie_w / 2, z),
+            (tie_w / 2, z + tie_h),
+            (-tie_w / 2, z + tie_h),
+            (-tie_w / 2, z),
+        ])
+
+    return PolylineElement(pts, closed=False)
+
+
+def _make_circle(cx, cy, r):
+    from geometry.elements import CircleElement
+    return CircleElement(float(cx), float(cy), float(r))
+
+
+def _make_polygon(params):
+    from geometry.elements import PolylineElement
+    count = params.get('point_count', 0)
+    pts = []
+    for i in range(count):
+        px = params.get(f'px{i}')
+        py = params.get(f'py{i}')
+        if px is not None and py is not None:
+            pts.append((float(px), float(py)))
+    return PolylineElement(pts, closed=True)
+
+
+def _make_line(x1, y1, x2, y2):
+    from geometry.elements import LineElement
+    return LineElement(float(x1), float(y1), float(x2), float(y2))
+
+
+def _make_arc(cx, cy, r, sa, ea):
+    from geometry.elements import ArcElement
+    return ArcElement(float(cx), float(cy), float(r), float(sa), float(ea))
+
+
+def _make_ellipse(cx, cy, rx, ry):
+    from geometry.elements import EllipseElement
+    return EllipseElement(float(cx), float(cy), float(rx), float(ry))
+
+
+def _make_polyline(params):
+    from geometry.elements import PolylineElement
+    count = params.get('point_count', 0)
+    pts = []
+    for i in range(count):
+        px = params.get(f'px{i}')
+        py = params.get(f'py{i}')
+        if px is not None and py is not None:
+            pts.append((float(px), float(py)))
+    return PolylineElement(pts, closed=False)
+
+
+
 
 FACE_TEMPLATES = {
     'SweepBoxComponent': {
@@ -687,97 +895,27 @@ FACE_TEMPLATES = {
         # 三视图：俯视图 + 主视图 + 左视图
         'top': {
             'plane': 'xy',
-            'description': '俯视图 (盖梁顶面)',
-            'generator': lambda p: _make_rect(0, 0, p.get('盖梁总长', 1930), p.get('盖梁宽', 300)),
+            'description': '俯视图 (盖梁顶面 + 墩柱位置)',
+            'generator': _make_approach_pier_top,
             'update_params': _pier_top_update,
             'snap_plane': 'xy',
         },
         'front': {
             'plane': 'xz',
-            'description': '主视图 (盖梁+墩柱正面)',
-            'generator': lambda p: _make_rect(
-                0, p.get('z_bottom', 0),
-                p.get('盖梁总长', 1930),
-                p.get('墩高', 1200) + p.get('盖梁总高', 300)
-            ),
+            'description': '主视图 (盖梁梯形 + 双墩柱 + 系梁)',
+            'generator': _make_approach_pier_front,
             'update_params': _pier_front_update,
             'snap_plane': 'xz',
         },
         'left': {
             'plane': 'yz',
-            'description': '左视图 (盖梁+墩柱侧面)',
-            'generator': lambda p: _make_rect(
-                0, p.get('z_bottom', 0),
-                p.get('盖梁宽', 300),
-                p.get('墩高', 1200) + p.get('盖梁总高', 300)
-            ),
+            'description': '左视图 (盖梁 + 墩柱 + 系梁)',
+            'generator': _make_approach_pier_left,
             'update_params': _pier_left_update,
             'snap_plane': 'yz',
         },
     },
 }
-
-
-# ========== 元素工厂函数 ==========
-
-def _make_rect(x, y, w, h):
-    from geometry.elements import RectangleElement
-    return RectangleElement(float(x), float(y), float(w), float(h))
-
-
-def _make_prism_top(p):
-    """生成直角三棱柱的顶面/底面三角形"""
-    from geometry.elements import PolylineElement
-    a = float(p.get('直角边1', 100))
-    b = float(p.get('直角边2', 100))
-    pts = [(0, 0), (a, 0), (0, b)]
-    return PolylineElement(pts, closed=True)
-
-
-def _make_circle(cx, cy, r):
-    from geometry.elements import CircleElement
-    return CircleElement(float(cx), float(cy), float(r))
-
-
-def _make_polygon(params):
-    from geometry.elements import PolylineElement
-    count = params.get('point_count', 0)
-    pts = []
-    for i in range(count):
-        px = params.get(f'px{i}')
-        py = params.get(f'py{i}')
-        if px is not None and py is not None:
-            pts.append((float(px), float(py)))
-    return PolylineElement(pts, closed=True)
-
-
-def _make_line(x1, y1, x2, y2):
-    from geometry.elements import LineElement
-    return LineElement(float(x1), float(y1), float(x2), float(y2))
-
-
-def _make_arc(cx, cy, r, sa, ea):
-    from geometry.elements import ArcElement
-    return ArcElement(float(cx), float(cy), float(r), float(sa), float(ea))
-
-
-def _make_ellipse(cx, cy, rx, ry):
-    from geometry.elements import EllipseElement
-    return EllipseElement(float(cx), float(cy), float(rx), float(ry))
-
-
-def _make_polyline(params):
-    from geometry.elements import PolylineElement
-    count = params.get('point_count', 0)
-    pts = []
-    for i in range(count):
-        px = params.get(f'px{i}')
-        py = params.get(f'py{i}')
-        if px is not None and py is not None:
-            pts.append((float(px), float(py)))
-    return PolylineElement(pts, closed=False)
-
-
 
 
 # ========== 面管理器 ==========

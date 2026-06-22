@@ -516,12 +516,14 @@ class PolylineElement(BaseElement):
     def get_bounds(self) -> Tuple[float, float, float, float]:
         if not self.points:
             return (0, 0, 0, 0)
-        xs = [p[0] for p in self.points]
-        ys = [p[1] for p in self.points]
+        xs = [p[0] for p in self.points if p is not None]
+        ys = [p[1] for p in self.points if p is not None]
+        if not xs:
+            return (0, 0, 0, 0)
         return (min(xs), min(ys), max(xs), max(ys))
 
     def translate(self, dx: float, dy: float):
-        self.points = [(p[0] + dx, p[1] + dy) for p in self.points]
+        self.points = [(p[0] + dx, p[1] + dy) if p is not None else None for p in self.points]
 
     def clone(self):
         elem = PolylineElement(list(self.points), self.closed)
@@ -530,16 +532,20 @@ class PolylineElement(BaseElement):
 
     def scale(self, cx: float, cy: float, factor: float):
         self.points = [(cx + (p[0] - cx) * factor, cy + (p[1] - cy) * factor)
-                       for p in self.points]
+                       if p is not None else None for p in self.points]
 
     def rotate(self, cx: float, cy: float, angle_deg: float):
         a = math.radians(angle_deg)
         cos_a, sin_a = math.cos(a), math.sin(a)
         new_pts = []
-        for px, py in self.points:
-            dx, dy = px - cx, py - cy
-            new_pts.append((cx + dx * cos_a - dy * sin_a,
-                           cy + dx * sin_a + dy * cos_a))
+        for p in self.points:
+            if p is None:
+                new_pts.append(None)
+            else:
+                px, py = p
+                dx, dy = px - cx, py - cy
+                new_pts.append((cx + dx * cos_a - dy * sin_a,
+                               cy + dx * sin_a + dy * cos_a))
         self.points = new_pts
 
     def mirror(self, x1: float, y1: float, x2: float, y2: float):
@@ -557,10 +563,22 @@ class PolylineElement(BaseElement):
 
     def get_segments(self) -> List[Tuple[Tuple[float, float], Tuple[float, float]]]:
         segs = []
-        for i in range(len(self.points) - 1):
-            segs.append((self.points[i], self.points[i + 1]))
+        prev = None
+        for p in self.points:
+            if p is None:
+                prev = None
+                continue
+            if prev is not None:
+                segs.append((prev, p))
+            prev = p
         if self.closed and len(self.points) > 2:
-            segs.append((self.points[-1], self.points[0]))
+            # 闭合最后一个子路径（跳过 break）
+            try:
+                last_idx = max(i for i, p in enumerate(self.points) if p is not None)
+                first_idx = next(i for i, p in enumerate(self.points) if p is not None)
+                segs.append((self.points[last_idx], self.points[first_idx]))
+            except Exception:
+                pass
         return segs
 
     def get_key_params(self) -> dict:
