@@ -334,6 +334,11 @@ PARAM_MAP_RULES = {
         '半径': ('radius', 'direct'),
         'z_bottom': ('z_start', 'direct'),
     },
+    '引桥桥墩': {
+        '盖梁总长': ('width', 'direct'),
+        '盖梁宽': ('height', 'direct'),
+        'z_bottom': ('z_start', 'direct'),
+    },
 }
 
 
@@ -440,6 +445,23 @@ def apply_component_params_to_element(elem, params, component_type):
             elem.z_start = z_bottom
         if hasattr(elem, 'z_end'):
             elem.z_end = z_bottom + H
+        applied += 1
+
+    # 引桥桥墩 特殊处理：盖梁总长/盖梁宽/墩高/盖梁总高
+    if component_type == '引桥桥墩':
+        L = float(params.get('盖梁总长', 1930))
+        W = float(params.get('盖梁宽', 300))
+        col_h = float(params.get('墩高', 1200))
+        cap_h = float(params.get('盖梁总高', 300))
+        if hasattr(elem, 'width'):
+            elem.width = L
+        if hasattr(elem, 'height'):
+            elem.height = W
+        z_bottom = float(params.get('z_bottom', 0))
+        if hasattr(elem, 'z_start'):
+            elem.z_start = z_bottom
+        if hasattr(elem, 'z_end'):
+            elem.z_end = z_bottom + col_h + cap_h
         applied += 1
 
     # 统一更新 3D 高度（非矩形元素）
@@ -612,6 +634,18 @@ def create_element_from_params(params, component_type):
             elem = CircleElement(cx, cy, r)
             elem.z_start = float(params.get('z_bottom', 0))
             elem.z_end = elem.z_start + 2 * r
+            return elem
+
+        elif component_type == '引桥桥墩':
+            from geometry.elements import RectangleElement
+            # x,y 按几何中心处理
+            cx = float(params.get('x', 0))
+            cy = float(params.get('y', 0))
+            L = float(params.get('盖梁总长', 1930))
+            W = float(params.get('盖梁宽', 300))
+            elem = RectangleElement(cx - L / 2, cy - W / 2, L, W)
+            elem.z_start = float(params.get('z_bottom', 0))
+            elem.z_end = elem.z_start + float(params.get('墩高', 1200)) + float(params.get('盖梁总高', 300))
             return elem
 
     except Exception:

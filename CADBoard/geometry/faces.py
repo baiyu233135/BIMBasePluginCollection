@@ -271,6 +271,35 @@ def _cuboid_left_update(elem, old, params):
     return params
 
 
+# ========== 引桥桥墩面更新函数 ==========
+
+def _pier_top_update(elem, old, params):
+    """引桥桥墩俯视图: width→盖梁总长, height→盖梁宽"""
+    params['盖梁总长'] = elem.width
+    params['盖梁宽'] = elem.height
+    return params
+
+
+def _pier_front_update(elem, old, params):
+    """引桥桥墩主视图: width→盖梁总长, height→墩高+盖梁总高"""
+    params['盖梁总长'] = elem.width
+    new_total_h = elem.height
+    cap_h = params.get('盖梁总高', 300)
+    new_col_h = max(0, new_total_h - cap_h)
+    params['墩高'] = new_col_h
+    return params
+
+
+def _pier_left_update(elem, old, params):
+    """引桥桥墩左视图: width→盖梁宽, height→墩高+盖梁总高"""
+    params['盖梁宽'] = elem.width
+    new_total_h = elem.height
+    cap_h = params.get('盖梁总高', 300)
+    new_col_h = max(0, new_total_h - cap_h)
+    params['墩高'] = new_col_h
+    return params
+
+
 # ========== 动态面生成器 ==========
 
 def _polygon_dynamic_faces(params, component_id):
@@ -651,6 +680,38 @@ FACE_TEMPLATES = {
             'description': '右视图 (YZ)',
             'generator': lambda p: _make_rect(0, p.get('z_bottom', 0), p['宽度'], p['高度']),
             'update_params': _cuboid_left_update,
+            'snap_plane': 'yz',
+        },
+    },
+    '引桥桥墩': {
+        # 三视图：俯视图 + 主视图 + 左视图
+        'top': {
+            'plane': 'xy',
+            'description': '俯视图 (盖梁顶面)',
+            'generator': lambda p: _make_rect(0, 0, p.get('盖梁总长', 1930), p.get('盖梁宽', 300)),
+            'update_params': _pier_top_update,
+            'snap_plane': 'xy',
+        },
+        'front': {
+            'plane': 'xz',
+            'description': '主视图 (盖梁+墩柱正面)',
+            'generator': lambda p: _make_rect(
+                0, p.get('z_bottom', 0),
+                p.get('盖梁总长', 1930),
+                p.get('墩高', 1200) + p.get('盖梁总高', 300)
+            ),
+            'update_params': _pier_front_update,
+            'snap_plane': 'xz',
+        },
+        'left': {
+            'plane': 'yz',
+            'description': '左视图 (盖梁+墩柱侧面)',
+            'generator': lambda p: _make_rect(
+                0, p.get('z_bottom', 0),
+                p.get('盖梁宽', 300),
+                p.get('墩高', 1200) + p.get('盖梁总高', 300)
+            ),
+            'update_params': _pier_left_update,
             'snap_plane': 'yz',
         },
     },

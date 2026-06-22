@@ -40,7 +40,7 @@ _log("=" * 60)
 
 _pyp3d_ok = False
 Component = Attr = Line = Section = Sweep = Cube = Sphere = Cone = Arc = None
-Vec2 = Vec3 = Point = place = scale = translate = rotation = None
+Vec2 = Vec3 = Point = place = scale = translate = rotation = rotate = Combine = None
 get_element_from_boxselect = None
 entityid_isvaid = None
 get_datakey_from_entity = None
@@ -50,7 +50,7 @@ try:
     from pyp3d import (
         Component, Attr, Line, Section,
         Sweep, Cube, Sphere, Cone, Arc,
-        Vec2, Vec3, Point, place, place_to, scale, translate, rotation,
+        Vec2, Vec3, Point, place, place_to, scale, translate, rotation, rotate, Combine,
         isinside_global_variable, set_global_variable,
         create_geometry, entityid_isvaid,
     )
@@ -680,6 +680,10 @@ def place_element_to_bimbase(elem):
             return False, "无法创建组件"
         x = getattr(elem, 'x', getattr(elem, 'cx', getattr(elem, 'x1', 0)))
         y = getattr(elem, 'y', getattr(elem, 'cy', getattr(elem, 'y1', 0)))
+        # 矩形占位元素按几何中心放置，使 BIMBase 组件原点与画板中心对齐
+        if elem.__class__.__name__ == 'RectangleElement':
+            x = x + float(getattr(elem, 'width', 0)) / 2.0
+            y = y + float(getattr(elem, 'height', 0)) / 2.0
         z = getattr(elem, 'z_start', 0)
         ok, msg = place_component_at(comp, x, y, z)
         return ok, msg
@@ -1117,6 +1121,119 @@ class Polyline3DComponent(Component):
 
 
 
+class ApproachPierComponent(Component):
+    """引桥桥墩：带斜边和凸起的盖梁 + 双墩柱 + 多根系梁
+    与 组件测试/引桥桥墩.py 保持一致的参数与几何逻辑。"""
+
+    DEFAULT_PARAMS = {
+        '盖梁总长': 1930.0,
+        '盖梁总高': 300.0,
+        '凸起宽': 30.0,
+        '凸起高': 50.0,
+        '盖梁主体底宽': 1390.0,
+        '斜边水平投影': 270.0,
+        '斜边垂直投影': 120.0,
+        '盖梁宽': 300.0,
+        '墩柱直径': 270.0,
+        '墩柱间距': 1140.0,
+        '墩高': 1200.0,
+        '系梁长': 890.0,
+        '系梁宽': 200.0,
+        '系梁高': 200.0,
+        '系梁数量': 2,
+        '系梁起始距顶': 200.0,
+        '系梁间距': 500.0,
+    }
+
+    def __init__(self, **kwargs):
+        super().__init__()
+        for k, v in self.DEFAULT_PARAMS.items():
+            self[k] = Attr(float(v) if isinstance(v, (int, float)) else v, show=True, obvious=True)
+        self['偏移X'] = Attr(0.0, show=False)
+        self['偏移Y'] = Attr(0.0, show=False)
+        self['偏移Z'] = Attr(0.0, show=False)
+        # 允许外部传入参数覆盖默认值
+        for k, v in kwargs.items():
+            if k in self.DEFAULT_PARAMS or k in ('偏移X', '偏移Y', '偏移Z'):
+                self[k] = Attr(float(v) if isinstance(v, (int, float)) and k != '系梁数量' else v,
+                               show=(k in self.DEFAULT_PARAMS), obvious=(k in self.DEFAULT_PARAMS))
+        self['引桥桥墩'] = Attr(None, show=True, obvious=True)
+        self.replace()
+
+    @export
+    def replace(self):
+        try:
+            cap_l = self['盖梁总长']
+            cap_h = self['盖梁总高']
+            boss_w = self['凸起宽']
+            boss_h = self['凸起高']
+            cap_bottom_w = self['盖梁主体底宽']
+            chamfer_x = self['斜边水平投影']
+            chamfer_h = self['斜边垂直投影']
+            cap_w = self['盖梁宽']
+            col_d = self['墩柱直径']
+            col_s = self['墩柱间距']
+            col_h = self['墩高']
+            tie_l = self['系梁长']
+            tie_w = self['系梁宽']
+            tie_h = self['系梁高']
+            tie_n = int(self['系梁数量'])
+            tie_start = self['系梁起始距顶']
+            tie_step = self['系梁间距']
+            ox = float(self['偏移X']) if '偏移X' in self else 0.0
+            oy = float(self['偏移Y']) if '偏移Y' in self else 0.0
+            oz = float(self['偏移Z']) if '偏移Z' in self else 0.0
+
+            half_l = cap_l / 2.0
+            half_bottom = cap_bottom_w / 2.0
+            mid_h = cap_h - boss_h
+
+            # 盖梁截面（外轮廓 - 内轮廓 = 两端凸起）
+            outer = Section(
+                Vec2(-half_bottom, 0),
+                Vec2(half_bottom, 0),
+                Vec2(half_l, chamfer_h),
+                Vec2(half_l, cap_h),
+                Vec2(-half_l, cap_h),
+                Vec2(-half_l, chamfer_h)
+            )
+            inner = Section(
+                Vec2(-half_l + boss_w, mid_h),
+                Vec2(half_l - boss_w, mid_h),
+                Vec2(half_l - boss_w, cap_h),
+                Vec2(-half_l + boss_w, cap_h)
+            )
+            section = rotate(Vec3(1, 0, 0), 0.5 * math.pi) * (outer - inner)
+            path = Line(Vec3(0, -cap_w / 2, 0), Vec3(0, cap_w / 2, 0))
+            cap = translate(ox, oy, oz + col_h) * Sweep(section, path)
+
+            # 双墩柱（长方体）
+            col1 = translate(ox - col_s / 2 - col_d / 2, oy - col_d / 2, oz) * scale(col_d, col_d, col_h) * Cube()
+            col2 = translate(ox + col_s / 2 - col_d / 2, oy - col_d / 2, oz) * scale(col_d, col_d, col_h) * Cube()
+
+            # 系梁
+            ties = None
+            if tie_n > 0 and col_h > 0:
+                for i in range(tie_n):
+                    z_top = col_h - tie_start - i * tie_step
+                    z = z_top - tie_h / 2.0
+                    if z < 0:
+                        z = 0
+                    tie = translate(ox - tie_l / 2, oy - tie_w / 2, oz + z) * scale(tie_l, tie_w, tie_h) * Cube()
+                    if ties is None:
+                        ties = tie
+                    else:
+                        ties = Combine(ties, tie)
+
+            parts = [cap, col1, col2]
+            if ties is not None:
+                parts.append(ties)
+            self['引桥桥墩'] = Combine(*parts)
+        except Exception as e:
+            _log(f"  ApproachPierComponent.replace() error: {e}")
+            self['引桥桥墩'] = Cube()
+
+
 class BIMBaseSync:
     def __init__(self, board):
         self.board = board
@@ -1219,6 +1336,8 @@ class BIMBaseSync:
             return '正方体'
         if '长度' in keys and '宽度' in keys and '高度' in keys:
             return '长方体'
+        if '盖梁总长' in keys or '墩柱直径' in keys:
+            return '引桥桥墩'
         return ''
 
     def _place_component(self, comp):
@@ -1321,6 +1440,9 @@ class BIMBaseSync:
                         elif comp_type == '长方体':
                             if '高度' in new_params:
                                 elem.z_end = elem.z_start + float(new_params['高度'])
+                        elif comp_type == '引桥桥墩':
+                            pier_h = float(new_params.get('墩高', 1200)) + float(new_params.get('盖梁总高', 300))
+                            elem.z_end = elem.z_start + pier_h
                         elif comp_type == '球体':
                             if '半径' in new_params:
                                 elem.z_end = elem.z_start + 2 * float(new_params['半径'])
@@ -1385,7 +1507,7 @@ class BIMBaseSync:
             if comp is None:
                 return False
             # 所有组件统一使用 create_geometry 优先的 place_component_at 自动放置
-            SOLID_TYPES = {'圆柱', '正方体', '长方体', '球体', '直角三棱柱', '圆锥'}
+            SOLID_TYPES = {'圆柱', '正方体', '长方体', '球体', '直角三棱柱', '圆锥', '引桥桥墩'}
             if comp_type in SOLID_TYPES:
                 # 优先使用用户通过弹窗输入的 PDF 放置锚点，防止 PolylineElement 等
                 # 没有 x/y/cx/cy 属性的元素丢失 X/Y 坐标
@@ -1394,6 +1516,10 @@ class BIMBaseSync:
                 y = float(getattr(elem, 'pdf_anchor_y',
                                   getattr(elem, 'y', getattr(elem, 'cy', 0))))
                 z = float(getattr(elem, 'pdf_anchor_z', getattr(elem, 'z_start', 0)))
+                # 矩形占位元素按几何中心放置，与画板显示一致
+                if elem.__class__.__name__ == 'RectangleElement':
+                    x = x + float(getattr(elem, 'width', 0)) / 2.0
+                    y = y + float(getattr(elem, 'height', 0)) / 2.0
             else:
                 # 非实体组件（线、矩形、多边形等）：坐标已 baked 进组件参数，用 identity 自动放置
                 x, y, z = 0, 0, 0
@@ -1418,6 +1544,9 @@ class BIMBaseSync:
             elif comp_type == '长方体':
                 if '高度' in params:
                     elem.z_end = elem.z_start + float(params['高度'])
+            elif comp_type == '引桥桥墩':
+                pier_h = float(params.get('墩高', 1200)) + float(params.get('盖梁总高', 300))
+                elem.z_end = elem.z_start + pier_h
             elif comp_type == '球体':
                 if '半径' in params:
                     elem.z_end = elem.z_start + 2 * float(params['半径'])
@@ -1512,6 +1641,15 @@ class BIMBaseSync:
             params = {'半径': r}
             comp = SphereComponent(半径=r)
             return comp, params, '球体'
+
+        if comp_type == '引桥桥墩':
+            cp = getattr(elem, 'component_params', {})
+            params = dict(ApproachPierComponent.DEFAULT_PARAMS)
+            for k in params:
+                if k in cp:
+                    params[k] = float(cp[k])
+            comp = ApproachPierComponent(**params)
+            return comp, params, '引桥桥墩'
 
         if elem_type == 'line' or comp_type == 'Line3DComponent':
             x2 = getattr(elem, 'x2', x + 100)
@@ -1620,7 +1758,7 @@ class BIMBaseSync:
             'SweepBoxComponent', 'Circle3DComponent', 'Arc3DComponent',
             'Ellipse3DComponent', 'Line3DComponent', 'Point3DComponent',
             'Polygon3DComponent', 'Polyline3DComponent',
-            '直角三棱柱', '圆柱', '正方体', '长方体',
+            '直角三棱柱', '圆柱', '正方体', '长方体', '引桥桥墩',
         }
 
         # 辅助：定期刷新 UI

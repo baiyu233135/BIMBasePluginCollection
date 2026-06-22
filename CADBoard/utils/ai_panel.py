@@ -63,6 +63,7 @@ class LocalCommandParser:
         '长方体': '长方体', '拉伸体': '长方体',
         '球体': '球体', 'sphere': '球体', '球': '球体',
         '直角三棱柱': '直角三棱柱', '三棱柱': '直角三棱柱',
+        '引桥桥墩': '引桥桥墩', '桥墩': '引桥桥墩',
     }
 
     # 操作映射
@@ -102,7 +103,7 @@ class LocalCommandParser:
     }
 
     # 支持的3D实体类型
-    SOLID_TYPES = {'圆柱', '正方体', '长方体', '球体', '直角三棱柱'}
+    SOLID_TYPES = {'圆柱', '正方体', '长方体', '球体', '直角三棱柱', '引桥桥墩'}
 
     @classmethod
     def parse(cls, text: str):
@@ -381,6 +382,8 @@ class LocalCommandParser:
             '多边形': 'Polygon3DComponent',
             '圆弧': 'Arc3DComponent',
             '椭圆': 'Ellipse3DComponent',
+            '引桥桥墩': '引桥桥墩',
+            '桥墩': '引桥桥墩',
         }
         for cn, ct in component_type_map.items():
             if cn in text:
@@ -568,6 +571,31 @@ class LocalCommandParser:
             if m:
                 params['thickness'] = float(m.group(1))
                 break
+
+        # 引桥桥墩专用参数
+        pier_param_patterns = {
+            '盖梁总长': r'盖梁总长\s*(\d+\.?\d*)',
+            '盖梁总高': r'盖梁总高\s*(\d+\.?\d*)',
+            '凸起宽': r'凸起宽\s*(\d+\.?\d*)',
+            '凸起高': r'凸起高\s*(\d+\.?\d*)',
+            '盖梁主体底宽': r'盖梁主体底宽\s*(\d+\.?\d*)',
+            '斜边水平投影': r'斜边水平投影\s*(\d+\.?\d*)',
+            '斜边垂直投影': r'斜边垂直投影\s*(\d+\.?\d*)',
+            '盖梁宽': r'盖梁宽\s*(\d+\.?\d*)',
+            '墩柱直径': r'墩柱直径\s*(\d+\.?\d*)',
+            '墩柱间距': r'墩柱间距\s*(\d+\.?\d*)',
+            '墩高': r'墩高\s*(\d+\.?\d*)',
+            '系梁长': r'系梁长\s*(\d+\.?\d*)',
+            '系梁宽': r'系梁宽\s*(\d+\.?\d*)',
+            '系梁高': r'系梁高\s*(\d+\.?\d*)',
+            '系梁数量': r'系梁数量\s*(\d+)',
+            '系梁起始距顶': r'系梁起始距顶\s*(\d+\.?\d*)',
+            '系梁间距': r'系梁间距\s*(\d+\.?\d*)',
+        }
+        for pname, pat in pier_param_patterns.items():
+            m = re.search(pat, text)
+            if m:
+                params[pname] = float(m.group(1)) if pname != '系梁数量' else int(m.group(1))
 
         return params
 

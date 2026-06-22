@@ -270,6 +270,13 @@ class AICommandExecutor:
                             mapped_key = 'length'
                         elif key == 'height':
                             mapped_key = 'width'
+                    elif comp_type_actual == '引桥桥墩':
+                        if key == 'height':
+                            mapped_key = '墩高'
+                        elif key == 'width':
+                            mapped_key = '盖梁总长'
+                        elif key == 'depth':
+                            mapped_key = '盖梁宽'
                     param_changes[mapped_key] = float(val) if isinstance(val, (int, float, str)) else val
                 
                 for k, v in param_changes.items():
@@ -349,6 +356,11 @@ class AICommandExecutor:
                 'width': '长度', 'length': '长度', 'l': '长度',
                 'depth': '宽度', 'w': '宽度',
                 'height': '高度', 'h': '高度',
+            },
+            '引桥桥墩': {
+                'height': '墩高', 'h': '墩高',
+                'width': '盖梁总长', 'length': '盖梁总长', 'l': '盖梁总长',
+                'depth': '盖梁宽', 'w': '盖梁宽',
             },
         }
         return mapping.get(comp_type, {}).get(key)
@@ -471,10 +483,37 @@ class AICommandExecutor:
             comp_params = {'直角边1': a, '直角边2': b, '高度': h}
             elem.z_start = z
             elem.z_end = z + h
+        elif elem_type == '引桥桥墩':
+            from utils.component_registry import create_element_from_params
+            comp_params = {
+                'x': float(x), 'y': float(y), 'z_bottom': float(z),
+                '盖梁总长': float(params.get('盖梁总长', 1930)),
+                '盖梁总高': float(params.get('盖梁总高', 300)),
+                '凸起宽': float(params.get('凸起宽', 30)),
+                '凸起高': float(params.get('凸起高', 50)),
+                '盖梁主体底宽': float(params.get('盖梁主体底宽', 1390)),
+                '斜边水平投影': float(params.get('斜边水平投影', 270)),
+                '斜边垂直投影': float(params.get('斜边垂直投影', 120)),
+                '盖梁宽': float(params.get('盖梁宽', 300)),
+                '墩柱直径': float(params.get('墩柱直径', 270)),
+                '墩柱间距': float(params.get('墩柱间距', 1140)),
+                '墩高': float(params.get('墩高', 1200)),
+                '系梁长': float(params.get('系梁长', 890)),
+                '系梁宽': float(params.get('系梁宽', 200)),
+                '系梁高': float(params.get('系梁高', 200)),
+                '系梁数量': int(params.get('系梁数量', 2)),
+                '系梁起始距顶': float(params.get('系梁起始距顶', 200)),
+                '系梁间距': float(params.get('系梁间距', 500)),
+            }
+            elem = create_element_from_params(comp_params, '引桥桥墩')
+            if elem is None:
+                return None
         if elem is None:
             return None
-        elem.x = x
-        elem.y = y
+        # 引桥桥墩已在 create_element_from_params 中按 x,y 中心定位，不再覆盖
+        if elem_type != '引桥桥墩':
+            elem.x = x
+            elem.y = y
         elem.component_type = elem_type
         elem.component_params = comp_params
         elem.is_3d = True
@@ -586,7 +625,7 @@ class AICommandExecutor:
             EllipseElement, PointElement
         )
 
-        SOLID_TYPES = {'圆柱', '正方体', '长方体', '球体', '直角三棱柱'}
+        SOLID_TYPES = {'圆柱', '正方体', '长方体', '球体', '直角三棱柱', '引桥桥墩'}
 
         # 沿轴批量布置（兼容 AI 返回的 direction 字段）
         # 某些 AI 会把 axis/count/spacing/position 放在 params 里
