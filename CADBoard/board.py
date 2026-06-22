@@ -67,6 +67,8 @@ from utils.snap import SnapSystem
 from utils.dwg_handler import import_dwg, convert_dxf_to_dwg
 from utils.pdf_handler import import_pdf
 from utils.pdf_view_recognizer import auto_associate_from_pdf_views
+from utils.drawing_recognizer import recognize_drawing_file, has_api_key, load_config
+from drawing_ai_config_dialog import DrawingAIConfigDialog
 from geometry.elements import BaseElement, LineElement, RectangleElement
 from geometry.elements import CircleElement, ArcElement, PolylineElement
 from geometry.elements import EllipseElement, PointElement
@@ -1342,6 +1344,7 @@ class CADBoardWindow(QMainWindow):
         sync_menu.addAction("从BIMBase更新", self._sync_from_bimbase)
         sync_menu.addSeparator()
         sync_menu.addAction("同步设置...", self._show_sync_settings)
+        sync_menu.addAction("图纸识别 API 配置...", self._show_drawing_ai_config)
 
     def _register_commands(self):
         commands = [
@@ -2129,6 +2132,11 @@ class CADBoardWindow(QMainWindow):
         dialog = SyncSettingsDialog(self)
         dialog.exec_()
 
+    def _show_drawing_ai_config(self):
+        """显示图纸识别 API 配置对话框"""
+        dialog = DrawingAIConfigDialog(self)
+        dialog.exec_()
+
     # ---------- 画布设置 ----------
 
     def _show_canvas_settings(self):
@@ -2292,25 +2300,99 @@ class CADBoardWindow(QMainWindow):
         _write_board_log(f"Entered face edit mode: component={component_type} id={component_id}")
 
     def _recognize_pdf_views(self):
-        """智能识别导入的PDF三视图并自动创建参数化组件"""
-        self.status_bar.showMessage("正在分析三视图布局...")
+        """智能识别导入的PDF三视图并自动创建参数化组件（优先使用 Qwen-VL AI 识别）"""
+        # 未配置 API Key 时提示用户
+        if not has_api_key():
+            reply = QMessageBox.question(
+                self,
+                "图纸识别 API 未配置",
+                "尚未配置 DashScope API Key，无法使用 AI 识别。\n"
+                "是否打开配置对话框？",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            if reply == QMessageBox.Yes:
+                self._show_drawing_ai_config()
+            return
+
+        # 选择图纸文件
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择图纸文件",
+            "",
+            "PDF 文件 (*.pdf);;图片文件 (*.png *.jpg *.jpeg *.bmp);;所有文件 (*)",
+        )
+        if not file_path:
+            return
+
+        self.status_bar.showMessage("正在使用 Qwen-VL 识别图纸，请稍候...")
         try:
-            success, msg = auto_associate_from_pdf_views(self)
-            if success:
-                try:
-                    self._fit_canvas_to_elements(margin=50)
-                except Exception:
-                    pass
-                QMessageBox.information(self, "三视图识别", msg)
-                self.status_bar.showMessage("三视图识别成功，画布已自适应")
-            else:
-                QMessageBox.warning(self, "三视图识别", msg)
-                self.status_bar.showMessage("三视图识别失败")
+            results = recognize_drawing_file(file_path, component_hint='引桥桥墩')
+            if not results:
+                raise ValueError("未返回任何识别结果")
+
+            result = results[0]
+            comp_type = result.get('component_type')
+            params = result.get('params') or {}
+            if not comp_type:
+                raise ValueError(f"无法识别构件类型：{result.get('notes', '')}")
+
+            # 创建源占位元素
+            from utils.component_registry import create_element_from_params
+            params.setdefault('x', 0.0)
+            params.setdefault('y', 0.0)
+            params.setdefault('z_bottom', 0.0)
+            elem = create_element_from_params(params, comp_type)
+            if elem is None:
+                raise ValueError(f"无法根据参数创建 {comp_type} 占位元素")
+
+            self.apply_current_layer_style(elem)
+            elem.component_type = comp_type
+            elem.component_params = dict(params)
+            elem.is_3d = True
+            elem.pdf_recognized = True
+            elem.pdf_anchor_x = float(params.get('x', 0.0))
+            elem.pdf_anchor_y = float(params.get('y', 0.0))
+            elem.pdf_anchor_z = float(params.get('z_bottom', 0.0))
+
+            self._save_undo_state()
+            self.add_element(elem)
+
+            # 选中并生成三视图面元素
+            for e in self.elements:
+                e.selected = False
+            elem.selected = True
+
+            if self._face_group is None:
+                self._face_group = ComponentFaceGroup(self)
+            elem.component_params['_face_mode'] = '三视图'
+            faces = self._face_group.generate_faces_for_element(elem, mode='三视图')
+            if not faces:
+                raise ValueError("无法生成三视图面元素")
+            self._face_group.replace_faces(elem.id, faces)
+            elem.visible = False
+
+            face_elems = self._face_group.get_elements_by_component(elem.id)
+            if face_elems:
+                face_elems[0].selected = True
+            self._enter_face_edit_mode(comp_type, elem.id)
+
+            self._update_property_panel()
+            self.viewport.update()
+
+            conf = result.get('confidence', 0.0)
+            notes = result.get('notes', '')
+            msg = f"识别结果：{comp_type}\n置信度：{conf:.2f}"
+            if notes:
+                msg += f"\n备注：{notes}"
+            QMessageBox.information(self, "图纸识别成功", msg)
+            self.status_bar.showMessage("图纸识别完成，已进入面编辑模式")
+
         except Exception as e:
             import traceback
-            _write_board_log(f"_recognize_pdf_views crash: {e}\n{traceback.format_exc()}")
-            QMessageBox.critical(self, "三视图识别错误", f"识别过程中出错:\n{e}")
-            self.status_bar.showMessage("三视图识别出错")
+            err = traceback.format_exc()
+            _write_board_log(f"_recognize_pdf_views AI crash: {e}\n{err}")
+            QMessageBox.critical(self, "图纸识别错误", f"识别过程中出错:\n{e}\n\n已记录到 drawing_recognizer.log")
+            self.status_bar.showMessage("图纸识别出错")
 
     def _exit_face_edit_mode(self):
         """退出面编辑模式：恢复源元素显示，清理面元素，恢复正常交互"""
