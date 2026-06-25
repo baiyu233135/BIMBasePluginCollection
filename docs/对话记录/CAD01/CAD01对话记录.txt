@@ -1,0 +1,69 @@
+CAD画板（引桥桥墩识别 → 三视图 → 参数面板 → 同步放置）技术过程记录
+================================================================================
+文件编号：CAD01
+记录时间：2026-06-22
+相关模块：CADBoard / board.py / bimbase_sync.py / face_overview_dialog.py
+
+一、我的需求
+--------------------------------------------------------------------------------
+1. 在 CADBoard 的“🧠 复杂识别”中识别 PDF/DWG 里的“引桥桥墩”。
+2. 识别后自动生成标准三视图（前视、左视、俯视 / 或等效视图），并像普通“面元素”一样显示在画板里。
+3. 自动弹出最常用的参数编辑面板（只保留 10 个核心参数），修改后能即时重生成三视图。
+4. 点击“同步到 BIMBase”后，能自动把参数化桥墩组件放置到指定坐标，BIMBase 里能看到实体。
+5. 整个过程尽量少点鼠标，自动完成识别 → 三视图 → 调参 → 放置的闭环。
+
+二、当前进展（截至本记录）
+--------------------------------------------------------------------------------
+【已完成】
+- 在 board.py 的 _recognize_complex_views() 中识别出“引桥桥墩”后，自动调用
+  ComponentFaceGroup.generate_faces_for_element() 生成三视图，并进入面编辑模式。
+- 在 face_overview_dialog.py 中补充了 16 个桥墩参数中文标签，新增 PIER_COMMON_PARAMS
+  常用参数列表；FaceOverviewDialog 支持 visible_keys 只显示指定参数。
+- 在 board.py 中新增 _show_face_overview_for_component()，识别后自动弹出只含 10 个
+  常用参数的对话框。
+- 在 bimbase_sync.py 中：
+  – 优化 _Core 健康检测，避免误重建 pyp3d 连接；
+  – 把 _PlaceToDirect 提到放置策略最前面，提高复杂组件成功率；
+  – 引桥桥墩首次同步跳过坐标对话框，直接使用 PDF 锚点；
+  – 增加长方体占位兜底，若复杂几何无法放置，至少能在 BIMBase 里看到一个占位体。
+
+【待验证 / 已知问题】
+- 用户实测反馈：CAD画板只显示了两个视图，显示效果不理想；没有出现预期的参数按钮；
+  同步到 BIMBase 仍失败（0 成功，1 错误）。
+- 下一步需要用户重启 BIMBase 后重测，并提供 CADBoard/bimbase_sync_debug.log 最后 80~100 行。
+
+三、技术栈
+--------------------------------------------------------------------------------
+- 宿主软件：BIMBase 建模软件 2025
+- Python 运行时：BIMBase 内置 python-3.7.9-embed-amd64
+- 核心 SDK：pyp3d（BIMBase Python SDK 1.6.x）
+  – Component / Attr / Sweep / Section / Cube / Combine / rotate / translate
+  – create_geometry / place_to / place / UnifiedFunction / entityid_isvaid 等
+- GUI：PyQt5 / PyQt6（QDialog、QMainWindow、QGraphicsView 等）
+- 项目路径：C:\ProgramData\PKPM\BIMBase\Plugins\Pro\V1.6\pythonplugin
+- 主要入口：
+  – CADBoard.pyplugin → CADBoard/board.py
+  – 调试日志：CADBoard/bimbase_sync_debug.log
+- 关键依赖文件：
+  – CADBoard/bimbase_sync.py（BIMBase 同步引擎、参数化组件定义）
+  – CADBoard/board.py（CADBoard 主窗口、复杂识别入口）
+  – CADBoard/face_overview_dialog.py（面参数总览对话框）
+  – CADBoard/utils/component_registry.py（组件注册表）
+  – CADBoard/utils/face_mapper.py（三视图/面元素生成）
+
+四、本地版本管理
+--------------------------------------------------------------------------------
+- 已使用 Git 管理，当前仓库即为工作目录。
+- 当前 HEAD：e15d405 "fix: 复杂识别按钮、引桥桥墩面细节、自动放置"
+- 工作区存在大量未提交修改（含 CADBoard/bimbase_sync.py、board.py、
+  face_overview_dialog.py 等），建议在下一次实测前做一次 commit 或 stash，
+  以便失败后能快速回滚。
+- 建议命令：
+    git add CADBoard/bimbase_sync.py CADBoard/board.py CADBoard/face_overview_dialog.py
+    git commit -m "CAD01: 引桥桥墩三视图+参数面板+同步放置优化"
+
+五、下一步待办
+--------------------------------------------------------------------------------
+1. 根据用户重测反馈，确认三视图数量/显示问题（可能需调整面生成逻辑或视角）。
+2. 确认参数按钮/参数面板是否真的未弹出，还是被主窗口遮挡；必要时改为非模态窗口。
+3. 根据 bimbase_sync_debug.log 判断同步失败根因，继续修复放置逻辑。
