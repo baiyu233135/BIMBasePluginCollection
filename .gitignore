@@ -34,3 +34,4 @@ OrcaSlicer/
 # 操作系统文件
 Thumbs.db
 .DS_Store
+cad组件缓存/
