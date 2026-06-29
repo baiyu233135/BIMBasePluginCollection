@@ -4,12 +4,15 @@ CAD 组件缓存：复杂识别后，将参数化组件生成为独立 .py 脚�
 绕开 bimbase_sync.py 中组件类可能遇到的模块路径/状态问题。
 """
 import os
+import shutil
 import sys
+import tempfile
 import time
 import traceback
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 CACHE_DIR = os.path.join(PROJECT_ROOT, 'cad组件缓存')
+CADBOARD_DIR = os.path.join(PROJECT_ROOT, 'CADBoard')
 
 
 def _log(msg):
@@ -45,13 +48,77 @@ def clear_cache_dir():
                 os.remove(path)
                 removed += 1
             elif os.path.isdir(path) and name == '__pycache__':
-                import shutil
                 shutil.rmtree(path)
                 removed += 1
         except Exception as e:
             _log(f"clear cache failed for {path}: {e}")
     _log(f"cleared {removed} cache items")
     return removed
+
+
+def clear_all_caches():
+    """
+    清理 CADBoard 相关的所有运行时缓存：
+      - cad组件缓存/ 下的生成脚本
+      - CADBoard 内所有 __pycache__ 目录
+      - CADBoard 根目录下的 .log 日志文件
+      - /tmp 下 cadboard_ 前缀的临时目录
+    返回 (removed_count, detail_dict)。
+    """
+    detail = {
+        'component_scripts': 0,
+        'pycache_dirs': 0,
+        'log_files': 0,
+        'temp_dirs': 0,
+        'errors': [],
+    }
+
+    # 1) 组件脚本缓存
+    try:
+        detail['component_scripts'] = clear_cache_dir()
+    except Exception as e:
+        detail['errors'].append(f"cad组件缓存: {e}")
+
+    # 2) CADBoard 内 __pycache__
+    if os.path.isdir(CADBOARD_DIR):
+        for root, dirs, files in os.walk(CADBOARD_DIR):
+            for d in dirs:
+                if d == '__pycache__':
+                    path = os.path.join(root, d)
+                    try:
+                        shutil.rmtree(path)
+                        detail['pycache_dirs'] += 1
+                    except Exception as e:
+                        detail['errors'].append(f"__pycache__ {path}: {e}")
+
+    # 3) CADBoard 根目录日志
+    if os.path.isdir(CADBOARD_DIR):
+        for name in os.listdir(CADBOARD_DIR):
+            if name.endswith('.log'):
+                path = os.path.join(CADBOARD_DIR, name)
+                try:
+                    os.remove(path)
+                    detail['log_files'] += 1
+                except Exception as e:
+                    detail['errors'].append(f"log {path}: {e}")
+
+    # 4) /tmp 下 cadboard_ 前缀临时目录
+    tmp_root = tempfile.gettempdir()
+    if os.path.isdir(tmp_root):
+        for name in os.listdir(tmp_root):
+            if name.startswith('cadboard_'):
+                path = os.path.join(tmp_root, name)
+                if os.path.isdir(path):
+                    try:
+                        shutil.rmtree(path)
+                        detail['temp_dirs'] += 1
+                    except Exception as e:
+                        detail['errors'].append(f"temp dir {path}: {e}")
+
+    total = (detail['component_scripts'] + detail['pycache_dirs'] +
+             detail['log_files'] + detail['temp_dirs'])
+    _log(f"clear_all_caches: total={total}, detail={detail}")
+    return total, detail
 
 
 def _safe_id(sid):

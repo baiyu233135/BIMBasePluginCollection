@@ -1222,8 +1222,8 @@ class CADBoardWindow(QMainWindow):
         self.toolbar.addWidget(preview_btn)
 
         # ===== 缓存管理 =====
-        clear_cache_btn = QPushButton("清除缓存")
-        clear_cache_btn.setToolTip("清除 cad组件缓存 目录下的生成脚本")
+        clear_cache_btn = QPushButton("清除所有缓存")
+        clear_cache_btn.setToolTip("清除 CADBoard 运行时缓存：组件脚本、pycache、日志、临时目录")
         clear_cache_btn.setMinimumWidth(80)
         clear_cache_btn.setStyleSheet("QPushButton { background-color: #757575; color: white; }")
         clear_cache_btn.clicked.connect(self._clear_generated_cache)
@@ -1423,7 +1423,7 @@ class CADBoardWindow(QMainWindow):
         file_menu.addAction("同步到BIMBase", self._sync_to_bimbase)
         file_menu.addAction("从BIMBase更新", self._sync_from_bimbase)
         file_menu.addSeparator()
-        file_menu.addAction("清除组件缓存", self._clear_generated_cache)
+        file_menu.addAction("清除所有缓存", self._clear_generated_cache)
 
         view_menu = menubar.addMenu("视图")
         view_menu.addAction("重置视图", self._reset_view)
@@ -2142,13 +2142,21 @@ class CADBoardWindow(QMainWindow):
         QMessageBox.information(self, "测试 noumenon 结果", summary + f"\n\n完整日志已保存到:\n{out_path}")
 
     def _clear_generated_cache(self):
-        """清除 cad组件缓存 目录下的生成脚本"""
+        """清除 CADBoard 所有运行时缓存"""
         try:
-            from utils.generated_component_cache import clear_cache_dir
-            removed = clear_cache_dir()
-            QMessageBox.information(self, "清除缓存",
-                f"已清除 {removed} 个缓存文件/目录。\n路径：cad组件缓存/")
-            self.status_bar.showMessage(f"已清除 {removed} 个缓存文件")
+            from utils.generated_component_cache import clear_all_caches
+            total, detail = clear_all_caches()
+            msg = (
+                f"已清理 {total} 项缓存：\n"
+                f"- 组件脚本：{detail['component_scripts']}\n"
+                f"- __pycache__：{detail['pycache_dirs']}\n"
+                f"- 日志文件：{detail['log_files']}\n"
+                f"- 临时目录：{detail['temp_dirs']}"
+            )
+            if detail['errors']:
+                msg += f"\n\n部分项清理失败：\n" + "\n".join(detail['errors'][:5])
+            QMessageBox.information(self, "清除所有缓存", msg)
+            self.status_bar.showMessage(f"已清除 {total} 项缓存")
         except Exception as e:
             QMessageBox.warning(self, "清除缓存失败", f"清除缓存时出错：{e}")
             self.status_bar.showMessage("清除缓存失败")

@@ -1,0 +1,89 @@
+CAD02 - CAD画板收尾阶段技术文档
+=====================================
+
+1. 我的需求
+-----------
+1.1 按新的 `组件测试/引桥桥墩.py` 精简参数版，更新 CADBoard 中参数面板 / 面总览的显示参数与几何生成逻辑。
+1.2 在 CADBoard 工具栏 / 菜单新增"清除所有缓存"按钮，一键清理 CADBoard 及组件缓存的所有运行时缓存。
+1.3 继续稳定化 DWG/PDF 复杂识别 → 参数编辑 → 同步到 BIMBase 的全流程。
+1.4 将本次对话的关键内容整理为技术文档，便于新对话延续上下文。
+1.5 本地版本管理原则：未经用户确认，不得执行 Git 提交等版本变更操作。
+
+
+2. 当前已完成
+-------------
+2.1 参数体系统一为精简版 7 个核心参数：
+    盖梁总长、盖梁总高、盖梁宽、墩柱直径、墩柱间距、墩高、系梁根数。
+    其余细部尺寸（凸起、斜边、系梁长/宽/高/间距等）固定为图纸默认值，由系统自动计算。
+
+2.2 已更新的模块与逻辑：
+    - `CADBoard/utils/drawing_recognizer.py`：AI 识别提示词改为只输出 7 个核心参数。
+    - `CADBoard/face_overview_dialog.py`：`PIER_COMMON_PARAMS` 限定为 7 个核心参数；`_on_apply` 保持 `系梁根数` 为 int。
+    - `CADBoard/bimbase_sync.py`：`ApproachPierComponent` 改为精简参数与圆柱墩柱几何；`_sync_pier_via_generated_code`、`_make_component_by_type` 调用 `normalize_pier_params`。
+    - `CADBoard/geometry/faces.py`：面生成函数从精简参数推导细部尺寸，并修复系梁 Z 坐标重复加 `col_h` 的 bug。
+    - `CADBoard/utils/ai_executor.py`、`utils/ai_panel.py`、`utils/component_matcher.py`：创建/解析/匹配逻辑统一为精简参数。
+    - `CADBoard/utils/generated_component_cache.py`：生成脚本与 `normalize_pier_params` 已按精简参数实现。
+
+2.3 缓存清理：
+    - 新增 `clear_all_caches()`，清理范围包括：
+      * `cad组件缓存/` 下的生成脚本
+      * `CADBoard/**/__pycache__/` 目录
+      * `CADBoard/*.log` 日志文件
+      * `/tmp` 下 `cadboard_` 前缀的临时目录
+    - 工具栏按钮与菜单项均改为"清除所有缓存"，调用 `clear_all_caches()`。
+
+2.4 已提交版本：
+    - `0f85188` 收尾：引桥桥墩精简参数化全流程稳定化
+    - `d8ac46a` 清理：将 cad组件缓存/ 加入 .gitignore 并移除已提交的缓存脚本
+
+
+3. 技术栈
+--------
+- 操作系统：Windows
+- 宿主平台：BIMBase Python SDK 1.6.x / Python 3.7 embed
+- UI 框架：PyQt5 / PyQt6 兼容
+- 三维几何：pyp3d
+- AI 图纸识别：DashScope Qwen-VL
+- 图纸解析：PyMuPDF (fitz)、ezdxf
+- 版本控制：Git（main 分支）
+
+
+4. 本地版本管理
+--------------
+4.1 未经用户明确确认，不得执行 `git commit`、`git push`、`git reset`、`git rebase` 等任何 Git 变更操作。
+4.2 运行时产物不得提交：
+    - `cad组件缓存/`（已加入 `.gitignore`）
+    - `__pycache__/`、*.pyc
+    - `*.log` 日志文件
+    - `/tmp` 下 `cadboard_` 前缀临时目录
+4.3 提交前应对修改的 Python 文件执行语法检查，例如：
+    python -m py_compile CADBoard/board.py CADBoard/bimbase_sync.py ...
+
+
+5. 待后续确认 / 推进
+------------------
+5.1 继续在实际 DWG/PDF 图纸上验证：复杂识别 → 面参数编辑 → 同步到 BIMBase 的完整链路。
+5.2 观察 `create_geometry` / `_PlaceToDirect` 失败后的 `SendInput` 模拟点击兜底是否稳定。
+5.3 如用户新增构件类型或修改引桥桥墩参数，需同步更新：
+    - `normalize_pier_params()`
+    - `generate_pier_code()` 的脚本模板
+    - `PIER_COMMON_PARAMS`
+    - `geometry/faces.py` 对应面生成函数
+
+
+6. 关键文件清单
+--------------
+- 参数定义 / 归一化：CADBoard/utils/generated_component_cache.py
+- 画板主窗口 / 缓存按钮：CADBoard/board.py
+- 面参数对话框：CADBoard/face_overview_dialog.py
+- BIMBase 同步 / 组件类：CADBoard/bimbase_sync.py
+- 二维面生成：CADBoard/geometry/faces.py
+- AI 识别提示词：CADBoard/utils/drawing_recognizer.py
+- AI 解析与执行：CADBoard/utils/ai_panel.py、utils/ai_executor.py
+- 识别结果匹配：CADBoard/utils/component_matcher.py
+
+
+7. 备注
+-------
+- 当前对话已整理成本文档，新对话可直接读取 `docs/CAD02.txt` 作为上下文。
+- 如对上述内容有疑问或需调整，请随时提出。
