@@ -12,21 +12,11 @@ from typing import Dict, Tuple, Any
 APPROACH_PIER_DEFAULTS = {
     '盖梁总长': 1930.0,
     '盖梁总高': 300.0,
-    '凸起宽': 30.0,
-    '凸起高': 50.0,
-    '盖梁主体底宽': 1390.0,
-    '斜边水平投影': 270.0,
-    '斜边垂直投影': 120.0,
     '盖梁宽': 300.0,
-    '墩柱直径': 270.0,
+    '墩柱直径': 250.0,
     '墩柱间距': 1140.0,
     '墩高': 1200.0,
-    '系梁长': 890.0,
-    '系梁宽': 200.0,
-    '系梁高': 200.0,
-    '系梁数量': 2,
-    '系梁起始距顶': 200.0,
-    '系梁间距': 500.0,
+    '系梁根数': 2,
 }
 
 
@@ -98,7 +88,12 @@ def match_recognized_result(recognized: Dict, component_hint: str = None) -> Tup
     notes = recognized.get('notes', '') or ''
 
     if comp_type not in COMPONENT_TEMPLATES:
-        return '', {}, confidence, f"未识别的构件类型: {comp_type}"
+        # 类型识别失败且提供了明确提示时，回退到提示类型
+        if component_hint and component_hint in COMPONENT_TEMPLATES:
+            comp_type = component_hint
+            notes = (notes + f"\n注意：AI 返回的 component_type 无法识别（'{recognized.get('component_type', '')}'），已按提示类型 '{component_hint}' 处理。").strip()
+        else:
+            return '', {}, confidence, f"未识别的构件类型: {comp_type}"
 
     template = COMPONENT_TEMPLATES[comp_type]
     params = dict(template['default_params'])

@@ -64,6 +64,7 @@ class ModelingCommandParser:
             'position': {'mode': 'absolute', 'x': 0, 'y': 0, 'z': 0},
             'array': None,
             'route': None,
+            'path': None,
             'target': None,
         }
 
@@ -76,13 +77,24 @@ class ModelingCommandParser:
             # 默认假设是创建
             result['action'] = 'create'
 
-        # 2. 检测组件类型
-        for cn, en in cls.COMPONENT_MAP.items():
-            if cn.lower() in text:
-                result['component_type'] = en
-                break
+        # 2. 检测沿组件路径布置（如“沿选中正方体的顶面前边放圆柱”）
+        path_info = cls._extract_component_path(text)
+        if path_info:
+            result['path'] = path_info
 
-        # 3. 修改/删除操作的目标检测
+        # 3. 检测组件类型
+        # 如果是沿组件路径布置，目标组件类型通常是路径描述之后的“小构件”
+        if path_info:
+            child_type = cls._extract_child_component_type(text, path_info)
+            if child_type:
+                result['component_type'] = child_type
+        if not result['component_type']:
+            for cn, en in cls.COMPONENT_MAP.items():
+                if cn.lower() in text:
+                    result['component_type'] = en
+                    break
+
+        # 4. 修改/删除操作的目标检测
         if result['action'] in ('modify', 'delete'):
             result['target'] = cls._parse_target(text)
             # 修改操作也需要组件类型（可选）
@@ -110,6 +122,62 @@ class ModelingCommandParser:
         result['route'] = cls._extract_route(text)
 
         return result
+
+    @classmethod
+    def _extract_component_path(cls, text):
+        """
+        检测“沿选中正方体的顶面前边放圆柱”这类沿组件路径布置。
+        返回: {
+            'host_type': 'cube'|'cylinder'|... 或 None（表示使用当前选中组件）,
+            'path_desc': '顶面前边',
+            'spacing': float or None,
+            'count': int or None,
+        } or None
+        """
+        # 必须以“沿”开头，并包含后续放置动作
+        if '沿' not in text:
+            return None
+
+        # 允许的主机组件中文类型
+        host_types = list(cls.COMPONENT_MAP.keys()) + ['正方体', '长方体', '圆柱体']
+        host_pat = r'((?:' + '|'.join(re.escape(h) for h in host_types) + r'))?'
+        # 路径描述：从“沿...的”到“每隔/间距/放/生成/布置/放置/摆”之前
+        full_pat = r'沿\s*(?:选中|当前|该)?\s*' + host_pat + r'\s*(?:的|之)?\s*(.+?)\s*(?:每隔|间距|间隔|放|生成|布置|放置|摆|共)'
+        m = re.search(full_pat, text)
+        if not m:
+            return None
+
+        host_cn = m.group(1).strip() if m.group(1) else None
+        host_type = cls.COMPONENT_MAP.get(host_cn) if host_cn else None
+        path_desc = m.group(2).strip()
+        if not path_desc:
+            return None
+
+        # 排除被“沿直线/曲线/圆弧/路线”或显式几何参数（圆心/半径/起点/终点等）误匹配的情况
+        route_keywords = ('直线', '曲线', '圆弧', '路线', '圆心', '半径', '起点', '终点', '角度', '坐标', '轴')
+        if path_desc in ('直线', '曲线', '圆弧', '路线') or any(kw in path_desc for kw in route_keywords):
+            return None
+
+        spacing, count = cls._extract_route_spacing(text)
+        return {
+            'host_type': host_type,
+            'path_desc': path_desc,
+            'spacing': spacing,
+            'count': count,
+        }
+
+    @classmethod
+    def _extract_child_component_type(cls, text, path_info):
+        """在沿组件路径语句中，提取被放置的小构件类型"""
+        # 从路径描述之后开始查找第一个组件类型
+        # 简单策略：找到“放/生成/布置/放置”之后的组件名
+        marker_match = re.search(r'(放|生成|布置|放置|摆)\s*(?:一个|些|若干)?\s*(半径|直径|边长|长|高)?\s*', text)
+        start = marker_match.end() if marker_match else 0
+        sub = text[start:]
+        for cn, en in cls.COMPONENT_MAP.items():
+            if cn.lower() in sub:
+                return en
+        return None
 
     @classmethod
     def _extract_params(cls, text):
@@ -282,16 +350,52 @@ class ModelingCommandParser:
         """
         提取路线信息（沿路线布置）。
         返回: {
-            'mode': 'line' | 'selected_line',
+            'mode': 'line' | 'selected_line' | 'selected_curve' | 'arc',
             'start': (x,y,z) or None,
             'end': (x,y,z) or None,
+            'center': (x,y,z) or None,
+            'radius': float or None,
+            'start_angle': float or None,
+            'end_angle': float or None,
             'axis': 'x'|'y'|'z' or None,
             'length': float or None,
             'spacing': float or None,
             'count': int or None,
         } or None
         """
-        # 1. 直线路线：从(0,0,0)到(100000,0,0)
+        spacing, count = cls._extract_route_spacing(text)
+
+        # 0. 选中的曲线（参数化曲线组件或原始曲线），必须出现“选中/当前/该”+“曲线/圆弧”
+        if re.search(r'(?:沿|沿着)\s*(?:选中|当前|该)', text) and ('曲线' in text or '圆弧' in text):
+            if spacing or count:
+                return {'mode': 'selected_curve', 'start': None, 'end': None,
+                        'center': None, 'radius': None, 'start_angle': None, 'end_angle': None,
+                        'axis': None, 'length': None, 'spacing': spacing, 'count': count}
+
+        # 1. 显式圆弧：圆心(0,0,0)半径500从0°到180°的圆弧
+        arc_center_3d = r'圆心\s*\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)'
+        arc_center_2d = r'圆心\s*\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)'
+        arc_radius = r'半径\s*(\d+\.?\d*)'
+        arc_angles = r'从\s*(-?\d+\.?\d*)\s*[°度]\s*到\s*(-?\d+\.?\d*)\s*[°度]'
+        if '圆弧' in text or '圆心' in text:
+            m_center = re.search(arc_center_3d, text) or re.search(arc_center_2d, text)
+            m_radius = re.search(arc_radius, text)
+            m_angles = re.search(arc_angles, text)
+            if m_center and m_radius and m_angles:
+                if m_center.re.pattern == arc_center_3d:
+                    center = tuple(float(m_center.group(i)) for i in range(1, 4))
+                else:
+                    center = (float(m_center.group(1)), float(m_center.group(2)), 0.0)
+                radius = float(m_radius.group(1))
+                start_angle = float(m_angles.group(1))
+                end_angle = float(m_angles.group(2))
+                axis = cls._extract_axis_hint(text) or 'z'
+                return {'mode': 'arc', 'start': None, 'end': None,
+                        'center': center, 'radius': radius,
+                        'start_angle': start_angle, 'end_angle': end_angle,
+                        'axis': axis, 'length': None, 'spacing': spacing, 'count': count}
+
+        # 2. 直线路线：从(0,0,0)到(100000,0,0)
         line_pat = r'(?:从|起点)?\s*\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)\s*到\s*\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)'
         m = re.search(line_pat, text)
         if m:
@@ -353,21 +457,23 @@ class ModelingCommandParser:
 
     @classmethod
     def _extract_route_spacing(cls, text):
-        """提取路线布置间距或数量"""
+        """提取路线布置间距或数量（两者可同时存在）"""
+        spacing = None
+        count = None
+
         # 每隔 X mm/m/米
         spacing_pat = r'(?:每隔|间距|间隔)\s*(\d+\.?\d*)\s*(?:m|米|mm)?'
         m = re.search(spacing_pat, text)
         if m:
-            val = cls._parse_length_with_unit(m.group(1), text)
-            return val, None
+            spacing = cls._parse_length_with_unit(m.group(1), text)
 
         # 共 N 个
         count_pat = r'(?:共|生成)\s*(\d+)\s*个'
         m = re.search(count_pat, text)
         if m:
-            return None, int(m.group(1))
+            count = int(m.group(1))
 
-        return None, None
+        return spacing, count
 
     @classmethod
     def _extract_axis_hint(cls, text):

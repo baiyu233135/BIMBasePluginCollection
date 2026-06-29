@@ -322,20 +322,32 @@ class ReportGenerator:
             run.font.color.rgb = RGBColor(0xC6, 0x28, 0x28)
             
             # 信息表格
+            severity = getattr(r, "severity", "") or _get_severity(r.confidence)
             info = [
                 ("病害类型", r.disease_class),
                 ("所属构件", r.component_type),
+                ("严重程度", severity),
                 ("检测置信度", f"{r.confidence:.1%}"),
                 ("检测时间", r.created_at),
             ]
-            
+            if getattr(r, "ai_diagnosed", False):
+                info.append(("AI 智能诊断", getattr(r, "ai_diagnosis", "") or "已诊断"))
+
             for label, value in info:
                 p = doc.add_paragraph(style='List Bullet')
                 p.add_run(f"{label}: ").bold = True
                 p.add_run(str(value))
-            
-            # 尝试插入照片（如果存在）
-            if os.path.exists(r.photo_path):
+
+            # 插入照片：优先使用带框/标注图，否则使用原图
+            image_to_insert = getattr(r, "marked_image_path", "") or r.photo_path
+            if image_to_insert and os.path.exists(image_to_insert):
+                try:
+                    doc.add_picture(image_to_insert, width=Inches(4.0))
+                    last_paragraph = doc.paragraphs[-1]
+                    last_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                except Exception as e:
+                    _log(f"插入图片失败 {image_to_insert}: {e}")
+            elif r.photo_path and os.path.exists(r.photo_path):
                 try:
                     doc.add_picture(r.photo_path, width=Inches(4.0))
                     last_paragraph = doc.paragraphs[-1]
@@ -355,7 +367,7 @@ class ReportGenerator:
         from collections import defaultdict
         advice_groups = defaultdict(list)
         for r in records:
-            severity = _get_severity(r.confidence)
+            severity = getattr(r, "severity", "") or _get_severity(r.confidence)
             advice = DISEASE_TREATMENT_ADVICE.get(r.disease_class, {}).get(severity, "建议进一步检测评估。")
             advice_groups[r.disease_class].append({
                 'component': r.component_type,

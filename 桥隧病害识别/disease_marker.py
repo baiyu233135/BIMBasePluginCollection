@@ -322,6 +322,10 @@ class MarkerRecord:
     marker_y: float = 0.0    # 标记3D位置Y
     marker_z: float = 0.0    # 标记3D位置Z
     created_at: str = ""     # 创建时间
+    marked_image_path: str = ""   # 带框/标注的照片路径
+    ai_diagnosis: str = ""        # AI 智能诊断结论
+    ai_diagnosed: bool = False    # 是否已完成 AI 诊断
+    severity: str = ""            # 严重程度（轻微/中等/严重/极严重）
     
     def __post_init__(self):
         if not self.created_at:

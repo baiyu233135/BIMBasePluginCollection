@@ -1,18 +1,29 @@
 from pyp3d import *
 
-# 定义圆柱体组件
-class 圆柱体(Component):
+class 定位立方体(Component):
     def __init__(self):
         Component.__init__(self)
-        self['圆柱体'] = Attr(None, show=True)
+        # 定义组件属性
+        self['X坐标'] = Attr(100.0, obvious=True)
+        self['Y坐标'] = Attr(100.0, obvious=True)
+        self['Z坐标'] = Attr(100.0, obvious=True)
+        self['立方体'] = Attr(None, show=True)
         self.replace()
     
     @export
     def replace(self):
-        # 创建一个圆柱体，底面圆心在(0, 0, 0)，顶面圆心在(0, 0, 100)，底面和顶面半径均为50
-        # 当两个半径相等时，Cone函数生成的是圆柱体
-        self['圆柱体'] = Cone(Vec3(0, 0, 0), Vec3(0, 0, 100), 50, 50).color(1, 0, 0, 1)
+        # 获取坐标参数
+        x = self['X坐标']
+        y = self['Y坐标']
+        z = self['Z坐标']
+        
+        # 生成立方体模型
+        # Cube()生成单位立方体，通过translate平移到指定坐标
+        cube = translate(x, y, z) * Cube()
+        self['立方体'] = cube
 
-if __name__ == "__main__":
-    demo = 圆柱体()
-    place(demo)
+if __name__ == '__main__':
+    # 创建组件实例
+    final_geometry = 定位立方体()
+    # 布置组件
+    place(final_geometry)

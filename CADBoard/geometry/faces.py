@@ -475,22 +475,24 @@ def _make_approach_pier_top(p):
 
 
 def _make_approach_pier_front(p):
-    """引桥桥墩主视图：盖梁梯形轮廓 + 双墩柱 + 系梁"""
+    """引桥桥墩主视图：盖梁梯形轮廓 + 双墩柱 + 系梁（精简参数版）"""
     from geometry.elements import PolylineElement
     L = float(p.get('盖梁总长', 1930))
     H_cap = float(p.get('盖梁总高', 300))
-    L_bottom = float(p.get('盖梁主体底宽', 1390))
-    chamfer_x = float(p.get('斜边水平投影', 270))
-    chamfer_h = float(p.get('斜边垂直投影', 120))
-    boss_h = float(p.get('凸起高', 50))
     col_s = float(p.get('墩柱间距', 1140))
-    col_d = float(p.get('墩柱直径', 270))
+    col_d = float(p.get('墩柱直径', 250))
     col_h = float(p.get('墩高', 1200))
-    tie_l = float(p.get('系梁长', 890))
-    tie_h = float(p.get('系梁高', 200))
-    tie_n = int(p.get('系梁数量', 2))
-    tie_start = float(p.get('系梁起始距顶', 200))
-    tie_step = float(p.get('系梁间距', 500))
+    tie_n = int(p.get('系梁根数', p.get('系梁数量', 2)))
+
+    # 细部尺寸固定为图纸默认值（与 组件测试/引桥桥墩.py 一致）
+    L_bottom = 1390.0
+    chamfer_h = 120.0
+    boss_h = 50.0
+    tie_h = 200.0
+    tie_start = 200.0
+    tie_step = 500.0
+    # 系梁长随墩柱间距自动适配
+    tie_l = max(col_s - col_d, 100.0)
 
     z_bottom = float(p.get('z_bottom', 0))
     z_col_top = z_bottom + col_h
@@ -517,7 +519,7 @@ def _make_approach_pier_front(p):
 
     # 系梁（双墩柱之间的小矩形）
     for i in range(tie_n):
-        z_top = z_col_top + col_h - tie_start - i * tie_step
+        z_top = z_col_top - tie_start - i * tie_step
         z = z_top - tie_h / 2.0
         if z < z_bottom:
             z = z_bottom
@@ -534,17 +536,19 @@ def _make_approach_pier_front(p):
 
 
 def _make_approach_pier_left(p):
-    """引桥桥墩左视图：盖梁侧面 + 墩柱 + 系梁"""
+    """引桥桥墩左视图：盖梁侧面 + 墩柱 + 系梁（精简参数版）"""
     from geometry.elements import PolylineElement
     W = float(p.get('盖梁宽', 300))
     H_cap = float(p.get('盖梁总高', 300))
-    col_d = float(p.get('墩柱直径', 270))
+    col_d = float(p.get('墩柱直径', 250))
     col_h = float(p.get('墩高', 1200))
-    tie_w = float(p.get('系梁宽', 200))
-    tie_h = float(p.get('系梁高', 200))
-    tie_n = int(p.get('系梁数量', 2))
-    tie_start = float(p.get('系梁起始距顶', 200))
-    tie_step = float(p.get('系梁间距', 500))
+    tie_n = int(p.get('系梁根数', p.get('系梁数量', 2)))
+
+    # 细部尺寸固定为图纸默认值（与 组件测试/引桥桥墩.py 一致）
+    tie_w = 200.0
+    tie_h = 200.0
+    tie_start = 200.0
+    tie_step = 500.0
 
     z_bottom = float(p.get('z_bottom', 0))
     z_col_top = z_bottom + col_h
@@ -565,7 +569,7 @@ def _make_approach_pier_left(p):
 
     # 系梁
     for i in range(tie_n):
-        z_top = z_col_top + col_h - tie_start - i * tie_step
+        z_top = z_col_top - tie_start - i * tie_step
         z = z_top - tie_h / 2.0
         if z < z_bottom:
             z = z_bottom

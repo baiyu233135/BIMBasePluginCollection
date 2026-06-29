@@ -702,11 +702,12 @@ def auto_associate_from_pdf_views(board) -> Tuple[bool, str]:
     board.elements.append(source_elem)
     cid = source_elem.id
 
-    # 隐藏原始PDF线条
+    # 隐藏原始PDF线条，并标记为不应被同步的参考线
     for view_name, view_data in views.items():
         for elem in view_data['elements']:
             elem.visible = False
             elem._pdf_hidden_original = True
+            elem._pdf_original_line = True
 
     # 绘制标准轮廓面元素
     from geometry.elements import RectangleElement, CircleElement, PolylineElement
@@ -771,3 +772,252 @@ def auto_associate_from_pdf_views(board) -> Tuple[bool, str]:
                   f"视图尺寸: {view_desc}\n"
                   f"已绘制 {created} 个三视图轮廓（不参与BIMBase同步）"
                   f"{placement_msg}")
+
+
+def group_lines_into_views(elements):
+    """
+    宽松分组：把导入的线条元素按空间位置分成若干视图区域。
+    与 recognize_three_views 不同，本函数不限制视图尺寸，也不推断组件类型，
+    仅返回 {view_name: {'elements': [...], 'bounds': (...)} }。
+    """
+    usable = []
+    for e in elements:
+        if not getattr(e, 'visible', True):
+            continue
+        if getattr(e, 'component_type', ''):
+            continue
+        if getattr(e, 'face_info', {}):
+            continue
+        if getattr(e, 'text_content', ''):
+            continue
+        et = getattr(e, 'element_type', None)
+        if et and getattr(et, 'value', '') == '点':
+            continue
+        if not hasattr(e, 'get_bounds'):
+            continue
+        b = e.get_bounds()
+        if (b[2] - b[0]) < 1.0 and (b[3] - b[1]) < 1.0:
+            continue
+        usable.append(e)
+
+    if len(usable) < 2:
+        return None
+
+    centers = []
+    for e in usable:
+        b = e.get_bounds()
+        cx = (b[0] + b[2]) / 2
+        cy = (b[1] + b[3]) / 2
+        centers.append((cx, cy, e, b))
+
+    centers = _filter_outer_frame(centers)
+    if len(centers) < 2:
+        return None
+
+    groups = _split_into_three_views(centers)
+    if not groups:
+        groups = {'front': centers}
+
+    views = {}
+    for vn, group in groups.items():
+        bounds = _group_bounds(group)
+        views[vn] = {
+            'elements': [item[2] for item in group],
+            'bounds': bounds,
+        }
+    return views
+
+
+def _bounds_distance(a, b):
+    """两个包围盒之间的最小距离（0 表示相交）"""
+    dx = max(0, max(b[0] - a[2], a[0] - b[2]))
+    dy = max(0, max(b[1] - a[3], a[1] - b[3]))
+    return max(dx, dy)
+
+
+def group_lines_into_views_connected(elements, tolerance=15.0):
+    """
+    使用连通区域分组：把空间上相互靠近的线条聚类为视图。
+    比基于单一间隙阈值的分割更鲁棒，适用于复杂构件（如引桥桥墩）。
+    返回 {view_name: {'elements': [...], 'bounds': (...)} }
+    """
+    usable = []
+    bounds_list = []
+    for e in elements:
+        if not getattr(e, 'visible', True):
+            continue
+        if getattr(e, 'component_type', ''):
+            continue
+        if getattr(e, 'face_info', {}):
+            continue
+        if getattr(e, 'text_content', ''):
+            continue
+        et = getattr(e, 'element_type', None)
+        if et and getattr(et, 'value', '') == '点':
+            continue
+        if not hasattr(e, 'get_bounds'):
+            continue
+        b = e.get_bounds()
+        if (b[2] - b[0]) < 1.0 and (b[3] - b[1]) < 1.0:
+            continue
+        usable.append(e)
+        bounds_list.append(b)
+
+    n = len(usable)
+    if n == 0:
+        return None
+    if n == 1:
+        return {'front': {'elements': usable, 'bounds': bounds_list[0]}}
+
+    # Union-Find
+    parent = list(range(n))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(x, y):
+        rx, ry = find(x), find(y)
+        if rx != ry:
+            parent[rx] = ry
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if _bounds_distance(bounds_list[i], bounds_list[j]) <= tolerance:
+                union(i, j)
+
+    groups = {}
+    for i in range(n):
+        root = find(i)
+        groups.setdefault(root, []).append(i)
+
+    # 合并过小的噪声组到最近的大组
+    min_area = tolerance * tolerance * 2
+    big_roots = [r for r, idxs in groups.items()
+                 if sum((bounds_list[i][2] - bounds_list[i][0]) * (bounds_list[i][3] - bounds_list[i][1]) for i in idxs) >= min_area]
+    if not big_roots:
+        big_roots = list(groups.keys())
+
+    merged = {r: [] for r in big_roots}
+    for r, idxs in groups.items():
+        if r in merged:
+            merged[r].extend(idxs)
+        else:
+            # 找到最近的大组并合并
+            best = min(big_roots,
+                       key=lambda br: min(_bounds_distance(bounds_list[i], _group_bounds_idx(bounds_list, merged[br])) for i in idxs) if merged[br] else float('inf'))
+            merged[best].extend(idxs)
+
+    # 计算每个分组的包围盒和中心
+    comps = []
+    for idxs in merged.values():
+        elems = [usable[i] for i in idxs]
+        b = _group_bounds_idx(bounds_list, idxs)
+        cx = (b[0] + b[2]) / 2
+        cy = (b[1] + b[3]) / 2
+        comps.append({'elements': elems, 'bounds': b, 'cx': cx, 'cy': cy})
+
+    # 按标准三视图布局命名（第一角投影）
+    # 常见布局：top 在 front 上方，left 在 front 右侧。
+    # 优先通过空间邻居关系识别 front；再用包围盒/长宽比作兜底。
+    def _comp_area(c):
+        b = c['bounds']
+        return (b[2] - b[0]) * (b[3] - b[1])
+
+    def _comp_aspect(c):
+        b = c['bounds']
+        w = b[2] - b[0]
+        h = b[3] - b[1]
+        return (w / h) if h > 0 else 9999.0
+
+    result = {}
+    if len(comps) == 1:
+        result['front'] = comps[0]
+    elif len(comps) == 2:
+        c1, c2 = comps[0], comps[1]
+        dx = c2['cx'] - c1['cx']
+        dy = c1['cy'] - c2['cy']  # 正数表示 c2 在 c1 下方
+        # 若一个在上、一个在右，则上为 top，右为 left，剩余为 front
+        if dy > tolerance and dx > tolerance:
+            result['top'] = c1
+            result['left'] = c2
+            # front 取面积较大者（兜底）
+            result['front'] = c1 if _comp_area(c1) >= _comp_area(c2) else c2
+        elif dy > tolerance:
+            result['top'] = c1
+            result['front'] = c2
+        elif dx > tolerance:
+            result['front'] = c1
+            result['left'] = c2
+        else:
+            # 兜底：面积大者为 front，宽者为 top，高者为 left
+            if _comp_area(c1) >= _comp_area(c2):
+                result['front'] = c1
+                result['top' if _comp_aspect(c2) >= 1.0 else 'left'] = c2
+            else:
+                result['front'] = c2
+                result['top' if _comp_aspect(c1) >= 1.0 else 'left'] = c1
+    else:
+        # 3+ 个视图：找同时具有"上方邻居"和"右侧邻居"的组件作为 front
+        best_front = None
+        best_score = -1.0
+        for c in comps:
+            score = _comp_area(c)
+            # 上方邻居（top view）
+            above = [o for o in comps
+                     if o is not c
+                     and o['cy'] > c['cy'] + tolerance / 2
+                     and abs(o['cx'] - c['cx']) <= tolerance * 3]
+            if above:
+                score += 1e6
+            # 右侧邻居（left view）
+            right = [o for o in comps
+                     if o is not c
+                     and o['cx'] > c['cx'] + tolerance / 2
+                     and abs(o['cy'] - c['cy']) <= tolerance * 3]
+            if right:
+                score += 1e6
+            if score > best_score:
+                best_score = score
+                best_front = c
+        front = best_front if best_front is not None else max(comps, key=_comp_area)
+        result['front'] = front
+
+        remaining = [c for c in comps if c is not front]
+        # top：在 front 上方且 x 最接近的组件
+        above = [c for c in remaining
+                 if c['cy'] > front['cy'] + tolerance / 2]
+        if above:
+            top = min(above, key=lambda c: abs(c['cx'] - front['cx']))
+            result['top'] = top
+            remaining = [c for c in remaining if c is not top]
+        # left：在 front 右侧且 y 最接近的组件
+        right = [c for c in remaining
+                 if c['cx'] > front['cx'] + tolerance / 2]
+        if right:
+            left = min(right, key=lambda c: abs(c['cy'] - front['cy']))
+            result['left'] = left
+            remaining = [c for c in remaining if c is not left]
+        # 兜底：剩余视图按长宽比分配
+        for c in remaining:
+            if 'top' not in result and 'left' not in result:
+                result['top' if _comp_aspect(c) >= 1.0 else 'left'] = c
+            elif 'top' not in result:
+                result['top'] = c
+            elif 'left' not in result:
+                result['left'] = c
+
+    return {k: {'elements': v['elements'], 'bounds': v['bounds']} for k, v in result.items() if k in result}
+
+
+def _group_bounds_idx(bounds_list, idxs):
+    if not idxs:
+        return (0, 0, 0, 0)
+    return (
+        min(bounds_list[i][0] for i in idxs),
+        min(bounds_list[i][1] for i in idxs),
+        max(bounds_list[i][2] for i in idxs),
+        max(bounds_list[i][3] for i in idxs),
+    )

@@ -54,12 +54,14 @@ class DiseaseDialog(QDialog):
 
         # 状态
         self.current_image_path = ""
+        self.current_marked_image_path = ""
         self.current_component_type = ""
         self.records = []  # 手动录入的病害记录列表
         self._selected_component = None  # 当前选中的BIMBase组件 {key, params, comp_type}
         self._marker_manager = get_marker_manager()
 
         self._init_ui()
+        self._update_key_status()
 
     def _init_ui(self):
         main_layout = QHBoxLayout(self)
@@ -95,6 +97,29 @@ class DiseaseDialog(QDialog):
         self.btn_detect_anomalies.setEnabled(False)
         v.addWidget(self.btn_detect_anomalies)
 
+        self.btn_ai_diagnose = QPushButton("🧠 AI 智能诊断")
+        self.btn_ai_diagnose.setMinimumHeight(36)
+        self.btn_ai_diagnose.setStyleSheet(
+            "QPushButton{background:#6A1B9A;color:white;font-weight:bold;}"
+        )
+        self.btn_ai_diagnose.setToolTip("使用阿里云 Qwen-VL 多模态大模型分析异常区域")
+        self.btn_ai_diagnose.clicked.connect(self._on_ai_diagnose)
+        self.btn_ai_diagnose.setEnabled(False)
+        v.addWidget(self.btn_ai_diagnose)
+
+        self.btn_config_key = QPushButton("🔑 配置 AI Key")
+        self.btn_config_key.setMinimumHeight(30)
+        self.btn_config_key.setStyleSheet(
+            "QPushButton{background:#455A64;color:white;}"
+        )
+        self.btn_config_key.setToolTip("配置阿里云 DashScope API Key")
+        self.btn_config_key.clicked.connect(self._on_config_api_key)
+        v.addWidget(self.btn_config_key)
+
+        self.lbl_key_status = QLabel("AI Key: 未配置")
+        self.lbl_key_status.setStyleSheet("color:#666;font-size:11px;")
+        v.addWidget(self.lbl_key_status)
+
         self.lbl_photo_name = QLabel("未选择照片")
         self.lbl_photo_name.setStyleSheet("color:#666;")
         v.addWidget(self.lbl_photo_name)
@@ -121,28 +146,14 @@ class DiseaseDialog(QDialog):
         self.btn_get_selected.clicked.connect(self._on_get_selected)
         f.addRow(self.btn_get_selected)
         
-        # 面投影测试（半透明薄片）
-        self.btn_face_project = QPushButton("🔴 面投影测试(薄片)")
-        self.btn_face_project.setStyleSheet("QPushButton{background:#C62828;color:white;font-weight:bold;}")
-        self.btn_face_project.setToolTip("根据构件参数，在指定面上创建彩色半透明薄片")
-        self.btn_face_project.clicked.connect(self._on_face_project)
-        f.addRow(self.btn_face_project)
+        # 统一投影按钮（纹理/点云根据构件形态自动选择）
+        self.btn_disease_project = QPushButton("🎯 病害投影")
+        self.btn_disease_project.setStyleSheet("QPushButton{background:#2E7D32;color:white;font-weight:bold;}")
+        self.btn_disease_project.setToolTip("将病害投影到BIMBase：直线构件优先纹理，曲线构件使用点云")
+        self.btn_disease_project.clicked.connect(self._on_disease_project)
+        f.addRow(self.btn_disease_project)
         
-        # 纹理贴图测试
-        self.btn_texture_project = QPushButton("🎨 纹理贴图测试")
-        self.btn_texture_project.setStyleSheet("QPushButton{background:#E65100;color:white;font-weight:bold;}")
-        self.btn_texture_project.setToolTip("生成PNG纹理图片并贴到构件表面")
-        self.btn_texture_project.clicked.connect(self._on_texture_project)
-        f.addRow(self.btn_texture_project)
-        
-        # 点云投影测试
-        self.btn_pointcloud_project = QPushButton("☁️ 点云投影测试")
-        self.btn_pointcloud_project.setStyleSheet("QPushButton{background:#2E7D32;color:white;font-weight:bold;}")
-        self.btn_pointcloud_project.setToolTip("在构件表面生成大量彩色小点模拟点云投影")
-        self.btn_pointcloud_project.clicked.connect(self._on_pointcloud_project)
-        f.addRow(self.btn_pointcloud_project)
-        
-        self.lbl_scan_result = QLabel("请先点击【获取当前选中组件】扫描构件，再选择投影方式")
+        self.lbl_scan_result = QLabel("请先点击【获取当前选中组件】扫描构件，再点击病害投影")
         self.lbl_scan_result.setStyleSheet("color:#666;font-size:11px;")
         f.addRow(self.lbl_scan_result)
         layout.addWidget(group_comp)
@@ -254,9 +265,11 @@ class DiseaseDialog(QDialog):
         if not path:
             return
         self.current_image_path = path
+        self.current_marked_image_path = ""
         self.lbl_photo_name.setText(os.path.basename(path))
         self.lbl_photo_name.setStyleSheet("color:#1565C0;font-weight:bold;")
         self.btn_detect_anomalies.setEnabled(True)
+        self.btn_ai_diagnose.setEnabled(False)
 
         # 显示预览
         pix = QPixmap(path)
@@ -266,6 +279,87 @@ class DiseaseDialog(QDialog):
                 Qt.KeepAspectRatio, Qt.SmoothTransformation
             )
             self.lbl_image.setPixmap(scaled)
+
+    def _update_key_status(self):
+        """更新界面上的 API Key 配置状态提示"""
+        try:
+            from ai_diagnosis import load_config
+            cfg = load_config()
+            key = cfg.get("dashscope_api_key", "").strip()
+            if key:
+                masked = key[:4] + "****" + key[-4:] if len(key) > 8 else "****"
+                self.lbl_key_status.setText(f"AI Key: 已配置 ({masked})")
+                self.lbl_key_status.setStyleSheet("color:#2E7D32;font-size:11px;")
+            else:
+                self.lbl_key_status.setText("AI Key: 未配置，请点击上方按钮配置")
+                self.lbl_key_status.setStyleSheet("color:#C62828;font-size:11px;")
+        except Exception:
+            pass
+
+    def _on_config_api_key(self):
+        """弹出对话框配置阿里云 DashScope API Key"""
+        from ai_diagnosis import load_config, set_api_key
+
+        cfg = load_config()
+        current_key = cfg.get("dashscope_api_key", "")
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("配置阿里云 DashScope API Key")
+        dialog.setMinimumWidth(420)
+        layout = QVBoxLayout(dialog)
+
+        info = QLabel(
+            "请输入阿里云 DashScope 的 API Key。\n"
+            "获取方式：登录阿里云 → 开通 DashScope 灵积模型服务 → 创建 API Key"
+        )
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        edit = QLineEdit()
+        edit.setEchoMode(QLineEdit.Password)
+        edit.setPlaceholderText("sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+        edit.setText(current_key)
+        edit.setMinimumHeight(28)
+        layout.addWidget(edit)
+
+        chk = QPushButton("👁 显示/隐藏")
+        chk.setCheckable(True)
+        chk.setStyleSheet("QPushButton{background:#e0e0e0;}")
+        def _toggle_show(checked):
+            edit.setEchoMode(QLineEdit.Normal if checked else QLineEdit.Password)
+        chk.toggled.connect(_toggle_show)
+        layout.addWidget(chk)
+
+        btn_layout = QHBoxLayout()
+        btn_ok = QPushButton("保存")
+        btn_ok.setStyleSheet("QPushButton{background:#1565C0;color:white;font-weight:bold;}")
+        btn_ok.setDefault(True)
+        btn_cancel = QPushButton("取消")
+        btn_layout.addStretch()
+        btn_layout.addWidget(btn_cancel)
+        btn_layout.addWidget(btn_ok)
+        layout.addLayout(btn_layout)
+
+        btn_ok.clicked.connect(dialog.accept)
+        btn_cancel.clicked.connect(dialog.reject)
+
+        if dialog.exec_() != QDialog.Accepted:
+            return
+
+        new_key = edit.text().strip()
+        if not new_key:
+            reply = QMessageBox.question(
+                self, "确认清空", "API Key 为空，确定要清空已保存的 Key 吗？",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                return
+
+        if set_api_key(new_key):
+            self._update_key_status()
+            QMessageBox.information(self, "保存成功", "API Key 已保存到 disease_config.json")
+        else:
+            QMessageBox.critical(self, "保存失败", "无法保存 API Key，请检查文件权限")
 
     def _on_detect_anomalies(self):
         """使用传统 CV 自动识别异常区域，并在照片上圈出。"""
@@ -292,8 +386,9 @@ class DiseaseDialog(QDialog):
             # 生成带框预览图
             from cv_anomaly_detector import draw_anomaly_results
             preview_path = draw_anomaly_results(self.current_image_path, results)
-            if preview_path and os.path.exists(preview_path):
-                pix = QPixmap(preview_path)
+            self.current_marked_image_path = preview_path if preview_path and os.path.exists(preview_path) else ""
+            if self.current_marked_image_path:
+                pix = QPixmap(self.current_marked_image_path)
                 if not pix.isNull():
                     scaled = pix.scaled(
                         self.scroll.width() - 20, self.scroll.height() - 20,
@@ -318,6 +413,7 @@ class DiseaseDialog(QDialog):
                 record = {
                     "id": str(uuid.uuid4())[:8],
                     "photo": self.current_image_path,
+                    "marked_image": self.current_marked_image_path,
                     "component": component_type,
                     "bridge": bridge_name,
                     "component_no": component_no,
@@ -327,11 +423,14 @@ class DiseaseDialog(QDialog):
                     "size": f"宽{w} × 高{h} 像素",
                     "note": f"自动识别第 {idx} 处异常区域，置信度 {r.confidence:.2f}",
                     "time": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "ai_diagnosed": False,
+                    "ai_diagnosis": "",
                 }
                 self.records.append(record)
 
             self._refresh_table()
             self.btn_report.setEnabled(True)
+            self.btn_ai_diagnose.setEnabled(True)
             if self._selected_component is not None:
                 self.btn_project.setEnabled(True)
 
@@ -356,6 +455,97 @@ class DiseaseDialog(QDialog):
             return "中等"
         else:
             return "轻微"
+
+    def _on_ai_diagnose(self):
+        """调用阿里云 Qwen-VL 对当前图片进行 AI 智能诊断。"""
+        if not self.current_image_path:
+            QMessageBox.warning(self, "提示", "请先导入照片")
+            return
+        if not self.current_marked_image_path or not os.path.exists(self.current_marked_image_path):
+            QMessageBox.warning(self, "提示", "请先进行【自动识别异常区域】生成带框图片")
+            return
+
+        # 收集当前图片未诊断的异常区域记录
+        pending = [r for r in self.records
+                   if r.get("photo") == self.current_image_path
+                   and r.get("disease") == "异常区域"
+                   and not r.get("ai_diagnosed", False)]
+
+        if not pending:
+            QMessageBox.information(self, "提示", "当前照片没有待 AI 诊断的异常区域记录")
+            return
+
+        # 准备边界框
+        bboxes = []
+        for r in pending:
+            pos = r.get("position", "")
+            try:
+                # 格式: "像素坐标: x=123, y=456"
+                parts = pos.replace("像素坐标: ", "").split(", ")
+                x = int(parts[0].split("=")[1])
+                y = int(parts[1].split("=")[1])
+                size = r.get("size", "")
+                # 格式: "宽100 × 高200 像素"
+                sw = size.split(" × ")[0].replace("宽", "")
+                sh = size.split(" × ")[1].split(" ")[0]
+                w = int(sw)
+                h = int(sh)
+                bboxes.append((x, y, x + w, y + h))
+            except Exception:
+                bboxes.append((0, 0, 0, 0))
+
+        self.btn_ai_diagnose.setEnabled(False)
+        self.btn_ai_diagnose.setText("🧠 AI 诊断中...")
+        QApplication.processEvents()
+
+        try:
+            from ai_diagnosis import diagnose_image_safe
+            component_type = self.combo_component.currentText()
+            ok, diagnoses, err = diagnose_image_safe(
+                self.current_image_path,
+                self.current_marked_image_path,
+                bboxes,
+                component_type,
+            )
+
+            if not ok:
+                QMessageBox.critical(self, "AI 诊断失败", f"调用 Qwen-VL 失败:\n{err}")
+                return
+
+            if not diagnoses:
+                QMessageBox.information(self, "AI 诊断完成", "AI 未返回结构化诊断结果，可稍后重试。")
+                return
+
+            # 更新记录
+            updated = 0
+            for r, diag in zip(pending, diagnoses):
+                r["disease"] = diag.get("disease_type", "异常区域")
+                r["severity"] = diag.get("severity", r.get("severity", "轻微"))
+                pos = diag.get("position", "")
+                if pos:
+                    r["position"] = pos
+                size = diag.get("size", "")
+                if size:
+                    r["size"] = size
+                diag_text = diag.get("diagnosis", "")
+                r["ai_diagnosis"] = diag_text
+                r["note"] = f"AI诊断: {diag_text}" if diag_text else r.get("note", "")
+                r["ai_diagnosed"] = True
+                updated += 1
+
+            self._refresh_table()
+            QMessageBox.information(
+                self, "AI 诊断完成",
+                f"已完成 {updated} 处异常区域的 AI 智能诊断，\n"
+                f"病害类型和严重程度已更新。"
+            )
+
+        except Exception as e:
+            import traceback
+            QMessageBox.critical(self, "AI 诊断异常", f"AI 诊断出错:\n{e}\n\n{traceback.format_exc()}")
+        finally:
+            self.btn_ai_diagnose.setEnabled(True)
+            self.btn_ai_diagnose.setText("🧠 AI 智能诊断")
 
     def _on_add_record(self):
         if not self.current_image_path:
@@ -424,16 +614,22 @@ class DiseaseDialog(QDialog):
         # 组装为MarkerRecord格式
         mr_list = []
         for r in self.records:
+            severity = r.get("severity", "轻微")
+            confidence = {"轻微": 0.3, "中等": 0.55, "严重": 0.8, "极严重": 0.95}.get(severity, 0.5)
             mr_list.append(MarkerRecord(
                 record_id=r["id"],
                 photo_path=r["photo"],
                 component_type=r["component"],
                 component_key=r["component_no"],
                 disease_class=r["disease"],
-                confidence={"轻微": 0.3, "中等": 0.55, "严重": 0.8, "极严重": 0.95}.get(r["severity"], 0.5),
+                confidence=confidence,
                 bbox=(0, 0, 0, 0),
                 marker_x=0, marker_y=0, marker_z=0,
                 created_at=r["time"],
+                marked_image_path=r.get("marked_image", ""),
+                ai_diagnosis=r.get("ai_diagnosis", ""),
+                ai_diagnosed=r.get("ai_diagnosed", False),
+                severity=severity,
             ))
 
         default_name = f"桥梁病害诊断报告_{datetime.now().strftime('%Y%m%d')}.docx"
@@ -967,6 +1163,50 @@ class DiseaseDialog(QDialog):
             import traceback
             QMessageBox.critical(self, "点云投影失败",
                 f"点云投影测试出错:\n{e}\n\n{traceback.format_exc()}")
+
+    def _on_disease_project(self):
+        """统一病害投影入口（纹理/点云根据构件形态自动选择）。
+
+        当前版本：根据已获取的构件类型给出提示，实际投影逻辑在后续迭代中实现。
+        直线/平面型构件优先纹理贴图，曲线/复杂构件使用点云投影。
+        """
+        if self._selected_component is None:
+            self._auto_get_selected()
+            if self._selected_component is None:
+                QMessageBox.information(
+                    self, "提示",
+                    "请先点击【获取当前选中组件】获取BIMBase中的组件，\n"
+                    "或确保BIMBase中已选中一个构件后再点击此按钮。"
+                )
+                return
+
+        comp_type = self._selected_component.get("comp_type", "")
+        params = self._selected_component.get("params", {})
+
+        # 直线/平面型构件
+        straight_types = {"T梁", "箱梁", "工字钢混凝土组合梁", "湿接缝", "防撞护栏", "波形护栏",
+                          "路面及交通标线", "人行道及护栏", "长方体", "正方体", "薄壁墩"}
+        # 曲线/复杂构件
+        curved_types = {"圆柱", "主塔", "斜拉索", "主塔群桩承台", "异形盖梁", "扩大基础",
+                        "柱式桥台", "柱式桥墩", "桩基承台", "重力式桥台", "直角三棱柱"}
+
+        if comp_type in straight_types:
+            mode = "纹理贴图（平面展开）"
+        elif comp_type in curved_types:
+            mode = "点云投影（曲面适配）"
+        else:
+            mode = "自动判断（默认纹理）"
+
+        # 临时提示：实际投影逻辑待后续迭代
+        QMessageBox.information(
+            self, "病害投影",
+            f"当前构件: {comp_type}\n"
+            f"推荐投影方式: {mode}\n\n"
+            f"该功能将在后续迭代中实现：\n"
+            f"- 直线/平面构件：将病害框对应纹理贴到构件表面\n"
+            f"- 曲线/复杂构件：生成彩色点云贴合曲面\n\n"
+            f"当前可先通过右侧【投影选中记录到BIMBase】放置红色标记。"
+        )
 
     def _estimate_base_position(self, params: dict):
         """从组件参数估算基准位置（世界坐标）"""

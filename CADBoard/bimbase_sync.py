@@ -24,6 +24,7 @@ from utils.bimbase_pid import ensure_bimbase_pid_argv
 ensure_bimbase_pid_argv()
 
 from utils.component_registry import ComponentRegistry, apply_component_params_to_element
+from utils.generated_component_cache import generate_pier_code, execute_generated_code
 
 _log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bimbase_sync_debug.log')
 
@@ -74,6 +75,7 @@ get_all_instancekey = None
 get_entity_property = None
 get_entityid_from_boxselection = None
 get_current_entityId = None
+BPDataKey_isvaid = None
 
 try:
     from pyp3d import (
@@ -86,6 +88,7 @@ try:
         get_entity_property,
         get_entityid_from_boxselection,
         get_current_entityId,
+        BPDataKey_isvaid,
     )
     _log("BIMBase entity query APIs imported OK")
 except ImportError as e:
@@ -117,30 +120,30 @@ _PlaceToDirect = None
 
 
 def _ensure_pyp3d_port():
-    """检查 pyp3d _Core 通信端口是否健康；若损坏则尝试重新初始化。
+    """检查 pyp3d _Core 通信是否健康；若损坏则尝试重新初始化。
 
     当 CADBoard 窗口成为前台窗口或 BIMBase 进程变化时，已有的 _Core 可能
     指向错误/失效的 named pipe，后续 UnifiedFunction 调用会抛出
-    'NoneType' object has no attribute 'send'。本函数在放置前检测并重建
-    _Core 单例。
+    'NoneType' object has no attribute 'send'。本函数通过一次轻量调用检测，
+    只有在真正失败时才重建 _Core 单例，避免误伤健康的连接。
     """
     try:
+        from pyp3d import UnifiedFunction, PARACMPT_PARAMETRIC_COMPONENT
+        # 先做一次轻量调用验证通信是否真正可用
+        try:
+            UnifiedFunction(PARACMPT_PARAMETRIC_COMPONENT, 'get_version')()
+            return True
+        except Exception as probe_e:
+            _log(f"_ensure_pyp3d_port: probe failed ({probe_e}), reinitializing...")
+
         import pyp3d.runtime as _rt
         core_cls = getattr(_rt, '_Core', None)
-        if core_cls is None:
-            return False
-        core = core_cls._ins.get(core_cls)
-        if core is None:
-            return False
-        port = getattr(core, '_port', None)
-        if port is None or getattr(port, '_pipe', None) is None:
-            _log("_ensure_pyp3d_port: core port is unhealthy, reinitializing...")
+        if core_cls is not None:
             # 清除损坏的单例，让下一次 UnifiedFunction 调用重建 _Core
             core_cls._ins.pop(core_cls, None)
-            ensure_bimbase_pid_argv()
-            from pyp3d import UnifiedFunction, PARACMPT_PARAMETRIC_COMPONENT
-            UnifiedFunction(PARACMPT_PARAMETRIC_COMPONENT, 'get_version')()
-            _log("_ensure_pyp3d_port: reinitialized successfully")
+        ensure_bimbase_pid_argv()
+        UnifiedFunction(PARACMPT_PARAMETRIC_COMPONENT, 'get_version')()
+        _log("_ensure_pyp3d_port: reinitialized successfully")
         return True
     except Exception as e:
         _log(f"_ensure_pyp3d_port: failed: {e}")
@@ -167,13 +170,28 @@ def _ensure_place_to_direct():
             _log("_ensure_place_to_direct: PARACMPT_PLACE_INSTANCE_TO not available, will use BPParametricComponentManager::create")
 
         def _place_impl(noumenon, transform):
-            _log("_place_impl: calling create_component...")
-            create_component(noumenon)
-            _log("_place_impl: create_component done")
+            try:
+                _log("_place_impl: calling create_component...")
+                create_component(noumenon)
+                _log("_place_impl: create_component done")
+            except Exception as e:
+                _log(f"_place_impl: create_component failed: {e}")
+                raise
             noumenon[PARACMPT_KEYWORD_TRANSFORMATION] = transform
-            _log("_place_impl: calling BPParametricComponentManager::create...")
-            UnifiedFunction(PARACMPT_PARAMETRIC_COMPONENT, "BPParametricComponentManager::create")(noumenon)
-            _log("_place_impl: BPParametricComponentManager::create done")
+            # 某些版本需要 PLACE_INSTANCE_TO 标志才能直接放置
+            if _place_to_flag is not None:
+                try:
+                    noumenon[_place_to_flag] = transform
+                    _log(f"_place_impl: set {_place_to_flag}")
+                except Exception as e:
+                    _log(f"_place_impl: set PLACE_INSTANCE_TO failed: {e}")
+            try:
+                _log("_place_impl: calling BPParametricComponentManager::create...")
+                UnifiedFunction(PARACMPT_PARAMETRIC_COMPONENT, "BPParametricComponentManager::create")(noumenon)
+                _log("_place_impl: BPParametricComponentManager::create done")
+            except Exception as e:
+                _log(f"_place_impl: BPParametricComponentManager::create failed: {e}")
+                raise
             try:
                 from pyp3d import get_place_to_entityId, entityid_isvaid
                 eid = get_place_to_entityId()
@@ -181,6 +199,9 @@ def _ensure_place_to_direct():
                 mid = getattr(eid, '_ModelId', 'N/A')
                 eid_val = getattr(eid, '_ElementId', 'N/A')
                 _log(f"_place_impl: get_place_to_entityId() = ModelId={mid}, ElementId={eid_val}, valid={is_valid}")
+                if not is_valid:
+                    # 某些版本 create 后不会立即给出有效 entityId，不能据此判定失败
+                    _log("_place_impl: entityId not valid immediately, will rely on caller validation")
             except Exception as e2:
                 _log(f"_place_impl: get_place_to_entityId() failed: {e2}")
 
@@ -276,6 +297,65 @@ def _set_argv_for_place():
 
 def _restore_argv(original):
     sys.argv[0] = original
+
+
+def _place_via_active_tool(comp, x, y, z):
+    """
+    利用 place() 启动的活跃工具上下文直接 create_geometry，不使用 SendInput。
+    把坐标烘焙到组件隐藏偏移参数后，启动 place()，再调用 create_geometry()，
+    某些 BIMBase 版本下 create_geometry 在工具上下文内会返回有效实体。
+    返回 True/False。
+    """
+    import time
+    pos = (float(x), float(y), float(z))
+    _log(f"_place_via_active_tool: start pos={pos}")
+
+    # 坐标烘焙
+    try:
+        for axis, key in [('x', '偏移X'), ('y', '偏移Y'), ('z', '偏移Z')]:
+            if key in comp:
+                comp[key] = float(pos[{'x': 0, 'y': 1, 'z': 2}[axis]])
+        if hasattr(comp, 'replace'):
+            comp.replace()
+            _log("_place_via_active_tool: baked offset and replaced")
+    except Exception as e:
+        _log(f"_place_via_active_tool: bake offset failed: {e}")
+        return False
+
+    # 启动 place 工具
+    try:
+        place(comp)
+        _log("_place_via_active_tool: place() tool started")
+        time.sleep(0.6)
+    except Exception as e:
+        _log(f"_place_via_active_tool: place() failed: {e}")
+        return False
+
+    # 在工具上下文内尝试 create_geometry
+    try:
+        from pyp3d import create_geometry, entityid_isvaid, exit_tool, zoom_all_view
+        eid = create_geometry(comp)
+        valid = entityid_isvaid(eid) if eid is not None else False
+        _log(f"_place_via_active_tool: create_geometry valid={valid}")
+        if valid:
+            try:
+                exit_tool()
+                time.sleep(0.3)
+                zoom_all_view()
+            except Exception as e2:
+                _log(f"_place_via_active_tool: cleanup failed: {e2}")
+            return True
+    except Exception as e:
+        _log(f"_place_via_active_tool: create_geometry in tool failed: {e}")
+
+    # 无效则退出工具
+    try:
+        from pyp3d import exit_tool
+        exit_tool()
+        time.sleep(0.3)
+    except Exception as e:
+        _log(f"_place_via_active_tool: exit_tool failed: {e}")
+    return False
 
 
 def _auto_place_click_and_move(comp, x, y, z):
@@ -495,8 +575,26 @@ def _auto_place_click_and_move(comp, x, y, z):
         _log(f"_auto_place: zoom_all_view() failed: {e}")
 
 
-def place_component_at(comp, x, y, z, _in_modal=False):
-    """将组件自动布置到指定三维坐标（画板自主处理，不再调用 AI_Modeling）"""
+def _is_core_broken_error(e):
+    """判断异常是否由 _Core 通信中断导致"""
+    if e is None:
+        return False
+    msg = str(e)
+    return "'NoneType' object has no attribute 'send'" in msg or "_Core" in msg
+
+
+def place_component_at(comp, x, y, z, _in_modal=False, auto_only=True):
+    """将组件自动布置到指定三维坐标（对齐 AI 智能建模的放置策略）。
+    默认 auto_only=True：不启用 place() 手动工具和 SendInput 模拟点击，
+    避免 BIMBase 进入未关闭的放置工具状态。
+
+    放置优先级（2026-06-25 调整）：
+      1. create_geometry + translate（官方推荐，不破坏 _Core）
+      2. _PlaceToDirect（底层直接创建）
+      3. place_to
+      4. 坐标烘焙 + place_to(identity)
+      5. place() 手动工具（auto_only=False 时）
+    """
     if not _pyp3d_ok:
         return False, "pyp3d 未加载"
     if comp is None:
@@ -525,31 +623,33 @@ def place_component_at(comp, x, y, z, _in_modal=False):
         except Exception as e:
             _log(f"place_component_at: core recover failed: {e}")
 
-    # 初始化 place 需要的依赖
-    _ensure_place_to_direct()
-    original_argv = _set_argv_for_place()
-    try:
-        # 方案1：底层 _PlaceToDirect（绕过 interface 覆盖，直接设置 transformation 后创建实例）
-        if _PlaceToDirect is not None:
-            _core_recover()
+    def _valid_eid(eid):
+        if eid is None:
+            return False
+        try:
+            if entityid_isvaid is not None and entityid_isvaid(eid):
+                return True
+        except Exception:
+            pass
+        # 参数化组件代理的 entity id 可能 entityid_isvaid 为 False，
+        # 但如果能拿到有效的 datakey，也视为放置成功
+        if get_datakey_from_entity is not None and BPDataKey_isvaid is not None:
             try:
-                _log(f"place_component_at: trying _PlaceToDirect({pos})")
-                before = _count_entities()
-                _PlaceToDirect(comp, _translate(*pos))
-                import time
-                time.sleep(0.3)
-                after = _count_entities()
-                _log(f"place_component_at: _PlaceToDirect SUCCESS, entity count before={before}, after={after}")
-                if after <= before and before >= 0:
-                    _log("place_component_at: entity count did not increase, treating as failure")
-                    raise RuntimeError(f"实体数量未增加（before={before}, after={after}）")
-                _refresh_view()
-                return True, f"已自动布置到 {pos}"
-            except Exception as e:
-                _log(f"place_component_at: _PlaceToDirect failed: {e}")
+                dk = get_datakey_from_entity(eid)
+                if dk is not None and BPDataKey_isvaid(dk):
+                    return True
+            except Exception:
+                pass
+        return False
 
-        # 方案2：create_geometry 直接创建（不依赖 place 工具上下文）
-        _core_recover()
+    # create_geometry / place_to 都依赖 sys.argv[0] 读取 DependentFile
+    original_argv = _set_argv_for_place()
+    global _PlaceToDirect
+    try:
+        # ============================================================
+        # 方案0（官方推荐）：create_geometry + 平移变换
+        # 不依赖 place 工具上下文，不会破坏 _Core 通信线程
+        # ============================================================
         try:
             _log(f"place_component_at: trying create_geometry at {pos}")
             if hasattr(comp, 'replace'):
@@ -558,57 +658,150 @@ def place_component_at(comp, x, y, z, _in_modal=False):
                     _log("place_component_at: comp.replace() done")
                 except Exception as e:
                     _log(f"place_component_at: comp.replace() warning: {e}")
-            placed_geom = _translate(*pos) * comp
-            eid = create_geometry(placed_geom)
-            eid_detail = "None"
-            is_valid = False
-            if eid is not None:
-                try:
-                    eid_detail = f"ModelId={getattr(eid, '_ModelId', '?')}, ElementId={getattr(eid, '_ElementId', '?')}"
-                    is_valid = entityid_isvaid(eid)
-                except Exception as ve:
-                    eid_detail = f"<{type(eid).__name__}>(inspect error: {ve})"
-            _log(f"place_component_at: create_geometry returned eid={eid_detail}, valid={is_valid}")
-            if is_valid:
+            before = _count_entities()
+            eid = create_geometry(_translate(*pos) * comp)
+            after = _count_entities()
+            valid = _valid_eid(eid)
+            count_increased = (before >= 0 and after > before)
+            _log(f"place_component_at: create_geometry eid={eid}, valid={valid}, count={before}->{after}")
+            if valid or count_increased:
                 _refresh_view()
                 return True, f"已自动布置到 {pos}"
         except Exception as e:
             _log(f"place_component_at: create_geometry failed: {e}")
 
-        # 方案3：原生 place_to（可能被 interface 覆盖为手动工具）
+        # ============================================================
+        # 方案1：底层 _PlaceToDirect（绕过 interface 覆盖）
+        # 注意：必须在 create_geometry 之后使用；若 _Core 已损坏先恢复
+        # ============================================================
+        _core_recover()
+        _ensure_place_to_direct()
+
+        if _PlaceToDirect is not None:
+            def _try_place_to_direct():
+                _log(f"place_component_at: trying _PlaceToDirect({pos})")
+                before = _count_entities()
+                _PlaceToDirect(comp, _translate(*pos))
+                import time
+                time.sleep(0.5)
+
+                placed_ok = False
+                try:
+                    from pyp3d import get_place_to_entityId
+                    eid = get_place_to_entityId()
+                    if _valid_eid(eid):
+                        placed_ok = True
+                        _log("place_component_at: get_place_to_entityId valid")
+                except Exception as e2:
+                    _log(f"place_component_at: entityId validation failed: {e2}")
+
+                if not placed_ok:
+                    after = _count_entities()
+                    _log(f"place_component_at: entity count before={before}, after={after}")
+                    if after > before or before < 0:
+                        placed_ok = True
+                    else:
+                        raise RuntimeError(f"实体数量未增加（before={before}, after={after}）")
+
+                if placed_ok:
+                    _refresh_view()
+                    return True, f"已自动布置到 {pos}"
+                return False, ""
+
+            try:
+                result = _try_place_to_direct()
+                if result and result[0]:
+                    return result
+            except Exception as e:
+                _log(f"place_component_at: _PlaceToDirect failed: {e}")
+                # 无论是 core 损坏还是 UnifiedFunction 状态异常，都尝试重新初始化并再试一次
+                _log("place_component_at: reinitializing _PlaceToDirect and retrying")
+                _PlaceToDirect = None
+                _core_recover()
+                _ensure_place_to_direct()
+                try:
+                    result = _try_place_to_direct()
+                    if result and result[0]:
+                        return result
+                except Exception as e2:
+                    _log(f"place_component_at: _PlaceToDirect retry failed: {e2}")
+
+        # ============================================================
+        # 方案2：原生 place_to
+        # ============================================================
         _core_recover()
         try:
-            from pyp3d import place_to as _place_to
             _log(f"place_component_at: trying place_to({pos})")
-            _place_to(comp, _translate(*pos))
+            place_to(comp, _translate(*pos))
             _log("place_component_at: place_to SUCCESS")
             _refresh_view()
             return True, f"已自动布置到 {pos}"
         except Exception as e:
             _log(f"place_component_at: place_to failed: {e}")
 
-        # 方案4：坐标烘焙 + place() + create_geometry/SendInput
+        # ============================================================
+        # 方案3：坐标烘焙到组件隐藏偏移参数 + place_to(identity)
+        # ============================================================
         _core_recover()
         try:
-            _log(f"place_component_at: trying offset bake + auto click placement {pos}")
-            _auto_place_click_and_move(comp, *pos)
-            _log("place_component_at: offset bake + auto click placement SUCCESS")
+            _log(f"place_component_at: trying baked offset + place_to at {pos}")
+            for axis, key in [('x', '偏移X'), ('y', '偏移Y'), ('z', '偏移Z')]:
+                if key in comp:
+                    comp[key] = float(pos[{'x': 0, 'y': 1, 'z': 2}[axis]])
+            if hasattr(comp, 'replace'):
+                try:
+                    comp.replace()
+                    _log("place_component_at: comp.replace() with offset done")
+                except Exception as e:
+                    _log(f"place_component_at: comp.replace() with offset warning: {e}")
+            place_to(comp, _translate(0, 0, 0))
+            _log("place_component_at: baked offset + place_to SUCCESS")
             _refresh_view()
             return True, f"已自动布置到 {pos}"
         except Exception as e:
-            _log(f"place_component_at: offset bake + auto click placement failed: {e}")
+            _log(f"place_component_at: baked offset + place_to failed: {e}")
+            # 重置偏移
+            try:
+                for key in ('偏移X', '偏移Y', '偏移Z'):
+                    if key in comp:
+                        comp[key] = 0.0
+                if hasattr(comp, 'replace'):
+                    comp.replace()
+            except Exception as e2:
+                _log(f"place_component_at: reset offset failed: {e2}")
 
-        # 方案5：回退到手动放置
-        _core_recover()
-        try:
-            from pyp3d import place as _place
-            _log("place_component_at: falling back to place()")
-            _place(comp)
-            return True, "已启动手动放置工具"
-        except Exception as e:
-            _log(f"place_component_at: place() fallback failed: {e}")
+        # ============================================================
+        # 方案4：回退到 place() 手动工具（仅在显式允许时）
+        # ============================================================
+        if not auto_only:
+            _core_recover()
+            try:
+                from pyp3d import place as _place
+                _log("place_component_at: falling back to place()")
+                _place(comp)
+                return True, "已启动手动放置工具"
+            except Exception as e:
+                _log(f"place_component_at: place() fallback failed: {e}")
 
-        _log("place_component_at: all placement methods failed")
+        # ============================================================
+        # 引桥桥墩兜底：复杂几何全部失败时，用简单长方体近似占位
+        # ============================================================
+        if type(comp).__name__ == 'ApproachPierComponent':
+            try:
+                _log("place_component_at: trying bounding-box fallback for ApproachPierComponent")
+                cap_l = float(comp['盖梁总长'])
+                cap_w = float(comp['盖梁宽'])
+                pier_h = float(comp['墩高']) + float(comp['盖梁总高'])
+                # BoxComponent 使用中文参数名
+                bbox_comp = BoxComponent(长度=cap_l, 宽度=cap_w, 高度=pier_h)
+                ok, msg = place_component_at(bbox_comp, x, y, z, auto_only=auto_only)
+                _log(f"place_component_at: bounding-box fallback result ok={ok}, msg={msg}")
+                if ok:
+                    return ok, f"已用长方体近似布置桥墩占位（{msg}）"
+            except Exception as e:
+                _log(f"place_component_at: bounding-box fallback failed: {e}")
+
+        _log("place_component_at: all auto placement methods failed")
         return False, "自动布置失败"
     except Exception as e:
         _log(f"place_component_at: exception: {e}")
@@ -1143,26 +1336,16 @@ class Polyline3DComponent(Component):
 
 class ApproachPierComponent(Component):
     """引桥桥墩：带斜边和凸起的盖梁 + 双墩柱 + 多根系梁
-    与 组件测试/引桥桥墩.py 保持一致的参数与几何逻辑。"""
+    与 组件测试/引桥桥墩.py 保持一致的精简参数与几何逻辑。"""
 
     DEFAULT_PARAMS = {
         '盖梁总长': 1930.0,
         '盖梁总高': 300.0,
-        '凸起宽': 30.0,
-        '凸起高': 50.0,
-        '盖梁主体底宽': 1390.0,
-        '斜边水平投影': 270.0,
-        '斜边垂直投影': 120.0,
         '盖梁宽': 300.0,
-        '墩柱直径': 270.0,
+        '墩柱直径': 250.0,
         '墩柱间距': 1140.0,
         '墩高': 1200.0,
-        '系梁长': 890.0,
-        '系梁宽': 200.0,
-        '系梁高': 200.0,
-        '系梁数量': 2,
-        '系梁起始距顶': 200.0,
-        '系梁间距': 500.0,
+        '系梁根数': 2,
     }
 
     def __init__(self, **kwargs):
@@ -1175,7 +1358,7 @@ class ApproachPierComponent(Component):
         # 允许外部传入参数覆盖默认值
         for k, v in kwargs.items():
             if k in self.DEFAULT_PARAMS or k in ('偏移X', '偏移Y', '偏移Z'):
-                self[k] = Attr(float(v) if isinstance(v, (int, float)) and k != '系梁数量' else v,
+                self[k] = Attr(float(v) if isinstance(v, (int, float)) and k != '系梁根数' else v,
                                show=(k in self.DEFAULT_PARAMS), obvious=(k in self.DEFAULT_PARAMS))
         self['引桥桥墩'] = Attr(None, show=True, obvious=True)
         self.replace()
@@ -1185,30 +1368,32 @@ class ApproachPierComponent(Component):
         try:
             cap_l = self['盖梁总长']
             cap_h = self['盖梁总高']
-            boss_w = self['凸起宽']
-            boss_h = self['凸起高']
-            cap_bottom_w = self['盖梁主体底宽']
-            chamfer_x = self['斜边水平投影']
-            chamfer_h = self['斜边垂直投影']
             cap_w = self['盖梁宽']
             col_d = self['墩柱直径']
             col_s = self['墩柱间距']
             col_h = self['墩高']
-            tie_l = self['系梁长']
-            tie_w = self['系梁宽']
-            tie_h = self['系梁高']
-            tie_n = int(self['系梁数量'])
-            tie_start = self['系梁起始距顶']
-            tie_step = self['系梁间距']
+            tie_n = int(self['系梁根数'])
             ox = float(self['偏移X']) if '偏移X' in self else 0.0
             oy = float(self['偏移Y']) if '偏移Y' in self else 0.0
             oz = float(self['偏移Z']) if '偏移Z' in self else 0.0
+
+            # 细部尺寸固定为图纸默认值
+            boss_w = 30.0
+            boss_h = 50.0
+            cap_bottom_w = 1390.0
+            chamfer_h = 120.0
+            tie_w = 200.0
+            tie_h = 200.0
+            tie_start = 200.0
+            tie_step = 500.0
+            # 系梁长随墩柱间距自动适配，保证与两圆柱墩柱相连接
+            tie_l = max(col_s - col_d, 100.0)
 
             half_l = cap_l / 2.0
             half_bottom = cap_bottom_w / 2.0
             mid_h = cap_h - boss_h
 
-            # 盖梁截面（外轮廓 - 内轮廓 = 两端凸起）
+            # 盖梁整体截面（含梯形台、矩形主体、顶部两端凸起），一次 Sweep 成型
             outer = Section(
                 Vec2(-half_bottom, 0),
                 Vec2(half_bottom, 0),
@@ -1223,23 +1408,29 @@ class ApproachPierComponent(Component):
                 Vec2(half_l - boss_w, cap_h),
                 Vec2(-half_l + boss_w, cap_h)
             )
-            section = rotate(Vec3(1, 0, 0), 0.5 * math.pi) * (outer - inner)
             path = Line(Vec3(0, -cap_w / 2, 0), Vec3(0, cap_w / 2, 0))
-            cap = translate(ox, oy, oz + col_h) * Sweep(section, path)
+            try:
+                section = rotate(Vec3(1, 0, 0), 0.5 * math.pi) * (outer - inner)
+                cap = translate(ox, oy, oz + col_h) * Sweep(section, path)
+            except Exception as e:
+                _log(f"  ApproachPierComponent cap beam boolean difference failed, fallback to solid section: {e}")
+                section = rotate(Vec3(1, 0, 0), 0.5 * math.pi) * outer
+                cap = translate(ox, oy, oz + col_h) * Sweep(section, path)
 
-            # 双墩柱（长方体）
-            col1 = translate(ox - col_s / 2 - col_d / 2, oy - col_d / 2, oz) * scale(col_d, col_d, col_h) * Cube()
-            col2 = translate(ox + col_s / 2 - col_d / 2, oy - col_d / 2, oz) * scale(col_d, col_d, col_h) * Cube()
+            # 双墩柱（圆柱）
+            col_r = col_d / 2.0
+            col1 = translate(ox - col_s / 2, oy, oz + col_h / 2) * Cone(Vec3(0, 0, -col_h / 2), Vec3(0, 0, col_h / 2), col_r, col_r)
+            col2 = translate(ox + col_s / 2, oy, oz + col_h / 2) * Cone(Vec3(0, 0, -col_h / 2), Vec3(0, 0, col_h / 2), col_r, col_r)
 
             # 系梁
             ties = None
             if tie_n > 0 and col_h > 0:
                 for i in range(tie_n):
                     z_top = col_h - tie_start - i * tie_step
-                    z = z_top - tie_h / 2.0
+                    z = z_top - tie_h / 2
                     if z < 0:
                         z = 0
-                    tie = translate(ox - tie_l / 2, oy - tie_w / 2, oz + z) * scale(tie_l, tie_w, tie_h) * Cube()
+                    tie = translate(ox, oy, oz + z + tie_h / 2) * Cone(Vec3(-tie_l / 2, 0, 0), Vec3(tie_l / 2, 0, 0), tie_h / 2, tie_h / 2)
                     if ties is None:
                         ties = tie
                     else:
@@ -1259,6 +1450,7 @@ class BIMBaseSync:
         self.board = board
         self.registry = ComponentRegistry()
         self.replaced_bimbase_origins = []  # 记录来源于BIMBase、重新放置了新组件的元素（旧组件仍在BIMBase中）
+        self.manual_placed = []  # 记录通过生成脚本触发 place() 手动放置的元素
         _log("BIMBaseSync initialized")
 
     def _get_params_from_datakey(self, datakey):
@@ -1395,6 +1587,7 @@ class BIMBaseSync:
 
     def sync_all(self, elements=None):
         self.replaced_bimbase_origins = []
+        self.manual_placed = []
         if elements is None:
             elements = getattr(self.board, 'elements', [])
         # 过滤掉面元素，避免每个面被同步为独立组件
@@ -1425,6 +1618,8 @@ class BIMBaseSync:
 
     def _sync_element(self, elem):
         try:
+            # 组件类型，后续多处使用
+            comp_type_for_skip = getattr(elem, 'component_type', '')
             # 先检查该元素是否已有已放置的BIMBase实例（画板独立创建并 place 过的）
             info = self.registry.get(elem.id)
             if info and info.get('instance'):
@@ -1487,15 +1682,16 @@ class BIMBaseSync:
                 _log(f"  element {elem.id} originates from BIMBase (_bimbase_datakey present). Will re-place as new component (old one remains in BIMBase).")
                 # 继续执行下面的 place() 逻辑，而不是跳过
 
-            # PDF 识别来源的元素：首次同步时弹出坐标对话框让用户输入放置位置
+            # PDF 识别来源的元素：首次同步时弹出坐标对话框，输入坐标后自动放置
             if getattr(elem, 'pdf_recognized', False) and not (info and info.get('instance')):
+                defaults = (
+                    float(getattr(elem, 'pdf_anchor_x', 0.0)),
+                    float(getattr(elem, 'pdf_anchor_y', 0.0)),
+                    float(getattr(elem, 'pdf_anchor_z', 0.0)),
+                )
+                # 所有 PDF 识别来源的构件都弹出坐标输入对话框（包括引桥桥墩）
                 _log(f"  PDF recognized element {elem.id}, requesting placement coordinate...")
                 try:
-                    defaults = (
-                        float(getattr(elem, 'pdf_anchor_x', 0.0)),
-                        float(getattr(elem, 'pdf_anchor_y', 0.0)),
-                        float(getattr(elem, 'pdf_anchor_z', 0.0)),
-                    )
                     coord = _request_placement_coordinate(self.board, defaults=defaults)
                 except Exception as e:
                     _log(f"  coordinate dialog failed: {e}")
@@ -1504,8 +1700,7 @@ class BIMBaseSync:
                     _log("  user cancelled coordinate input")
                     return False
                 px, py, pz = coord
-                # 保存用户输入的放置坐标到 PDF 锚点属性（兼容无 x/y/cx/cy 的元素，
-                # 例如由 PolylineElement 表示的直角三棱柱）
+                # 保存用户输入的放置坐标到 PDF 锚点属性（兼容无 x/y/cx/cy 的元素）
                 elem.pdf_anchor_x = float(px)
                 elem.pdf_anchor_y = float(py)
                 elem.pdf_anchor_z = float(pz)
@@ -1521,6 +1716,22 @@ class BIMBaseSync:
                 elem.z_start = pz
                 elem.pdf_recognized = False
                 _log(f"  user selected placement coordinate: ({px}, {py}, {pz})")
+
+            # 引桥桥墩：优先使用代码生成缓存路径，生成独立 .py 脚本并执行
+            # 绕开 bimbase_sync 内部组件类可能遇到的模块路径/状态问题
+            if comp_type_for_skip == '引桥桥墩':
+                try:
+                    _log(f"  pier element {elem.id}: trying generated code path")
+                    ok, msg, is_manual = self._sync_pier_via_generated_code(elem)
+                    _log(f"  generated code path result: ok={ok}, is_manual={is_manual}, msg={msg}")
+                    if ok:
+                        if is_manual:
+                            # 把手动放置标记写回元素，供上层提示用户
+                            elem._generated_code_manual_place = True
+                        return True
+                    _log("  generated code path failed, fallback to standard place_component_at")
+                except Exception as e:
+                    _log(f"  generated code path exception: {e}")
 
             # 首次同步：创建新组件并 place
             comp, params, comp_type = self._make_component(elem)
@@ -1543,7 +1754,7 @@ class BIMBaseSync:
             else:
                 # 非实体组件（线、矩形、多边形等）：坐标已 baked 进组件参数，用 identity 自动放置
                 x, y, z = 0, 0, 0
-            ok, pmsg = place_component_at(comp, x, y, z)
+            ok, pmsg = place_component_at(comp, x, y, z, auto_only=True)
             _log(f"  auto place result: ok={ok}, msg={pmsg}")
             if not ok:
                 return False
@@ -1663,11 +1874,16 @@ class BIMBaseSync:
             return comp, params, '球体'
 
         if comp_type == '引桥桥墩':
-            cp = getattr(elem, 'component_params', {})
+            cp = dict(getattr(elem, 'component_params', {}))
+            try:
+                from utils.generated_component_cache import normalize_pier_params
+                cp = normalize_pier_params(cp)
+            except Exception:
+                pass
             params = dict(ApproachPierComponent.DEFAULT_PARAMS)
             for k in params:
                 if k in cp:
-                    params[k] = float(cp[k])
+                    params[k] = float(cp[k]) if k != '系梁根数' else int(cp[k])
             comp = ApproachPierComponent(**params)
             return comp, params, '引桥桥墩'
 
@@ -1741,9 +1957,177 @@ class BIMBaseSync:
         return None, None, None
 
     def _is_face_element(self, e):
-        """判断元素是否为面元素（用于过滤）"""
+        """判断元素是否为面元素或原始PDF/DWG线条（用于过滤）"""
         fi = getattr(e, 'face_info', None)
-        return isinstance(fi, dict) and fi.get('face_name') is not None
+        if isinstance(fi, dict) and fi.get('face_name') is not None:
+            return True
+        # 被复杂识别隐藏的原始导入线条不应单独同步
+        if getattr(e, '_pdf_hidden_original', False):
+            return True
+        # 退出面编辑后保留的 PDF/DWG 原始参考线也不应单独同步
+        if getattr(e, '_pdf_original_line', False):
+            return True
+        return False
+
+    def _sync_pier_via_generated_code(self, elem):
+        """为引桥桥墩生成独立 pyp3d 脚本并执行/导入，返回 (ok, msg, is_manual)。"""
+        params = dict(getattr(elem, 'component_params', {}))
+        try:
+            from utils.generated_component_cache import normalize_pier_params
+            params = normalize_pier_params(params)
+        except Exception:
+            pass
+        x = float(getattr(elem, 'pdf_anchor_x',
+                          getattr(elem, 'x', getattr(elem, 'cx', 0))))
+        y = float(getattr(elem, 'pdf_anchor_y',
+                          getattr(elem, 'y', getattr(elem, 'cy', 0))))
+        z = float(getattr(elem, 'pdf_anchor_z', getattr(elem, 'z_start', 0)))
+        file_path = generate_pier_code(elem.id, params, x, y, z)
+
+        # 1) 尝试以模块方式导入生成脚本，拿到组件类并自动放置
+        try:
+            import importlib.util
+            mod_name = '_generated_pier_' + ''.join(c if c.isalnum() else '_' for c in elem.id)[:32]
+            spec = importlib.util.spec_from_file_location(mod_name, file_path)
+            module = importlib.util.module_from_spec(spec)
+            # 关键：把动态模块注册到 sys.modules，让 pyp3d create_component 能找到
+            sys.modules[mod_name] = module
+            cache_dir = os.path.dirname(file_path)
+            if cache_dir not in sys.path:
+                sys.path.insert(0, cache_dir)
+            # 注入 pyp3d，避免模块 import 时路径问题
+            try:
+                import pyp3d
+                module.__dict__.update({name: getattr(pyp3d, name) for name in dir(pyp3d)
+                                         if not name.startswith('_')})
+            except Exception as e:
+                _log(f"  inject pyp3d into generated module failed: {e}")
+            spec.loader.exec_module(module)
+
+            # 找到生成的组件类（唯一以 引桥桥墩_ 开头的类）
+            comp_class = None
+            for name in dir(module):
+                obj = getattr(module, name)
+                if isinstance(obj, type) and name.startswith('引桥桥墩_'):
+                    comp_class = obj
+                    break
+            if comp_class is None:
+                raise RuntimeError("生成脚本中未找到组件类")
+
+            comp = comp_class()
+            from pyp3d import translate as _translate, create_geometry, entityid_isvaid
+
+            # 2) 先尝试 create_geometry 自动放置
+            auto_ok = False
+            try:
+                _log(f"  generated code: trying create_geometry at ({x}, {y}, {z})")
+                eid = create_geometry(_translate(x, y, z) * comp)
+                valid = entityid_isvaid(eid) if eid is not None else False
+                auto_ok = valid
+                _log(f"  generated code: create_geometry valid={valid}")
+            except Exception as e:
+                _log(f"  generated code: create_geometry failed: {e}")
+
+            if auto_ok:
+                self.registry.register(
+                    elem.id, comp,
+                    {k: v for k, v in params.items() if isinstance(v, (int, float, str, bool))},
+                    '引桥桥墩')
+                elem.pdf_recognized = False
+                elem.bimbase_component_id = id(comp)
+                elem.component_type = '引桥桥墩'
+                elem.component_params = params.copy()
+                elem.is_3d = True
+                return True, f"已自动放置: {os.path.basename(file_path)}", False
+
+            # 3) create_geometry 无效：尝试 place 工具上下文内 create_geometry（不用点击）
+            _log("  generated code: create_geometry invalid, trying _place_via_active_tool")
+            try:
+                if _place_via_active_tool(comp, x, y, z):
+                    self.registry.register(
+                        elem.id, comp,
+                        {k: v for k, v in params.items() if isinstance(v, (int, float, str, bool))},
+                        '引桥桥墩')
+                    elem.pdf_recognized = False
+                    elem.bimbase_component_id = id(comp)
+                    elem.component_type = '引桥桥墩'
+                    elem.component_params = params.copy()
+                    elem.is_3d = True
+                    return True, f"已在 place 工具上下文内自动放置: {os.path.basename(file_path)}", False
+            except Exception as e:
+                _log(f"  generated code: _place_via_active_tool failed: {e}")
+
+            # 4) create_geometry 无效：尝试 _PlaceToDirect 底层直接放置（使用用户输入的精确坐标）
+            _log("  generated code: _place_via_active_tool invalid, trying _PlaceToDirect")
+            try:
+                _ensure_place_to_direct()
+                if _PlaceToDirect is not None:
+                    from pyp3d import translate as _translate
+                    _PlaceToDirect(comp, _translate(x, y, z))
+                    # 校验实体是否真正生成
+                    from pyp3d import get_place_to_entityId, entityid_isvaid
+                    eid = get_place_to_entityId()
+                    if entityid_isvaid(eid):
+                        self.registry.register(
+                            elem.id, comp,
+                            {k: v for k, v in params.items() if isinstance(v, (int, float, str, bool))},
+                            '引桥桥墩')
+                        elem.pdf_recognized = False
+                        elem.bimbase_component_id = id(comp)
+                        elem.component_type = '引桥桥墩'
+                        elem.component_params = params.copy()
+                        elem.is_3d = True
+                        return True, f"已直接放置: {os.path.basename(file_path)}", False
+                    else:
+                        _log("  generated code: _PlaceToDirect returned invalid entityId")
+                else:
+                    _log("  generated code: _PlaceToDirect not available")
+            except Exception as e:
+                _log(f"  generated code: _PlaceToDirect failed: {e}")
+                # _Core 可能被破坏，尝试恢复后继续后续兜底
+                try:
+                    _ensure_pyp3d_port()
+                except Exception as e2:
+                    _log(f"  generated code: core recover after _PlaceToDirect failed: {e2}")
+
+            # 4) _PlaceToDirect 也失败：使用 _auto_place_click_and_move 模拟点击自动放置
+            _log("  generated code: create_geometry & _PlaceToDirect invalid, trying _auto_place_click_and_move")
+            try:
+                _auto_place_click_and_move(comp, x, y, z)
+                self.registry.register(
+                    elem.id, comp,
+                    {k: v for k, v in params.items() if isinstance(v, (int, float, str, bool))},
+                    '引桥桥墩')
+                elem.pdf_recognized = False
+                elem.bimbase_component_id = id(comp)
+                elem.component_type = '引桥桥墩'
+                elem.component_params = params.copy()
+                elem.is_3d = True
+                return True, f"已模拟点击自动放置: {os.path.basename(file_path)}", False
+            except Exception as e:
+                _log(f"  generated code: _auto_place_click_and_move failed: {e}")
+
+            # 4) 兜底：执行脚本中的 place() 手动放置
+            _log("  generated code: falling back to script place()")
+        except Exception as e:
+            _log(f"  generated code: import/instantiate failed: {e}")
+
+        # 兜底：直接执行生成脚本，让它自己走 create_geometry + place()
+        ok, msg, is_manual = execute_generated_code(file_path)
+        if ok:
+            if is_manual:
+                self.manual_placed.append(elem)
+            elem.pdf_recognized = False
+            self.registry.register(
+                elem.id,
+                None,
+                {k: v for k, v in params.items() if isinstance(v, (int, float, str, bool))},
+                '引桥桥墩')
+            elem.bimbase_component_id = None
+            elem.component_type = '引桥桥墩'
+            elem.component_params = params.copy()
+            elem.is_3d = True
+        return ok, msg, is_manual
 
     def sync_from_bimbase(self, selected_elements=None):
         _log("sync_from_bimbase() start")
@@ -2076,16 +2460,17 @@ def sync_to_bimbase(board):
     """
     兼容board.py的调用接口。
     board: 画板对象 (含 elements 属性)
-    返回: (success_count, error_list, replaced_bimbase_origins)
+    返回: (success_count, error_list, replaced_bimbase_origins, manual_placed)
     """
     sync = BIMBaseSync(board)
     sync.sync_all()
     replaced = getattr(sync, 'replaced_bimbase_origins', [])
+    manual = getattr(sync, 'manual_placed', [])
     success_count, error_count = getattr(sync, '_sync_stats', (0, 0))
     errors = []
     if error_count > 0:
         errors.append(f"{error_count} 个元素同步失败，详见 bimbase_sync_debug.log")
-    return success_count, errors, replaced
+    return success_count, errors, replaced, manual
 
 
 def sync_from_bimbase(board, selected_elements=None):

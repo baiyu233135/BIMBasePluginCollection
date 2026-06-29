@@ -150,8 +150,10 @@ def _sync_to_bimbase_patched(self):
         self.status_bar.showMessage(f"已同步 {count} 个元素到BIMBase (请逐个点击放置位置)")
     else:
         # 旧API
-        count, errors = bimbase_sync.sync_to_bimbase(self.elements)
+        count, errors, replaced, manual = bimbase_sync.sync_to_bimbase(self.elements)
         msg = f"同步到BIMBase完成: {count} 个元素成功"
+        if manual:
+            msg += f"\n手动放置: {len(manual)} 个"
         if errors:
             msg += f"\n错误: {len(errors)} 个"
             for e in errors[:5]:

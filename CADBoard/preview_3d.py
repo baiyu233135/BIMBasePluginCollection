@@ -935,7 +935,7 @@ class Preview3DWindow(QMainWindow):
             from bimbase_sync import sync_to_bimbase
             if self.canvas_widget and hasattr(self.canvas_widget, 'board'):
                 board = self.canvas_widget.board
-                count, errors = sync_to_bimbase(board)
+                count, errors, replaced, manual = sync_to_bimbase(board)
                 msg = f"Sync: {count} placed"
                 if errors:
                     msg += f", {len(errors)} errors"

@@ -38,10 +38,14 @@ from ai_modeling.chat_thread import AIChatThread, AIChatNonStreamThread
 from ai_modeling.command_parser import ModelingCommandParser
 from ai_modeling.component_factory import create_component, place_component_at, batch_place
 from ai_modeling.array_generator import linear_array, rectangular_array, polar_array
-from ai_modeling.route import Route, sample_route_for_components
+from ai_modeling.route import Route, ArcRoute, sample_route_for_components
+from ai_modeling.component_path import (
+    sample_placement_frames, orient_component, resolve_path_name,
+    get_component_route, build_oriented_components
+)
 from ai_modeling.bimbase_modifier import (
     modify_selected_component, get_selected_component_info, infer_component_type_from_params,
-    get_selected_line_endpoints
+    get_selected_line_endpoints, get_selected_curve_arc_params
 )
 
 
@@ -195,7 +199,7 @@ class AIModelingWindow(QDialog):
         tips_layout = QHBoxLayout()
         for tip_text in [
             "生成圆柱", "生成正方体", "生成球体",
-            "修改选中", "沿X轴阵列",
+            "修改选中", "沿X轴阵列", "沿曲线布置",
         ]:
             btn = QPushButton(tip_text)
             btn.setStyleSheet("QPushButton { font-size: 10px; padding: 2px 6px; background: #e3f2fd; color: #1565C0; }")
@@ -364,6 +368,8 @@ class AIModelingWindow(QDialog):
             "<li><b>生成组件：</b>在(1000,2000,500)生成半径300高800的圆柱</li>"
             "<li><b>相对位置：</b>在选中的实体上方500mm生成一个正方体，边长200</li>"
             "<li><b>阵列生成：</b>沿X轴每隔1000mm生成一个圆柱，共5个，半径200高500</li>"
+            "<li><b>沿直线布置：</b>沿选中的直线每隔500mm放半径50高100的圆柱，共10个</li>"
+            "<li><b>沿曲线布置：</b>沿圆心(0,0,0)半径500从0°到180°的圆弧每隔200mm放圆柱</li>"
             "<li><b>修改组件：</b>把选中的圆柱半径改成400，高度改成1000</li>"
             "<li><b>批量布置：</b>生成3×3方阵，间距2000，每个位置放一个正方体边长300</li>"
             "</ul>"
@@ -437,17 +443,26 @@ class AIModelingWindow(QDialog):
         arr = parsed.get('array')
         route_info = parsed.get('route')
 
-        # 处理路线（最高优先级）
-        coords = None
-        if route_info:
-            coords = self._build_route_coords(route_info)
-            if coords is None:
-                self._append_system("❌ 无法解析路线信息，请提供起点/终点或轴线长度", "#d32f2f")
+        # 处理沿组件路径布置（最高优先级）
+        path_info = parsed.get('path')
+        path_placements = None
+        if path_info:
+            path_placements = self._build_component_path_placements(path_info, comp_type, params)
+            if path_placements is None:
+                self.status_label.setText("就绪")
+                return
+
+        # 处理路线
+        route_placements = None
+        if path_placements is None and route_info:
+            route_placements = self._build_route_placements(route_info, comp_type, params)
+            if route_placements is None:
                 self.status_label.setText("就绪")
                 return
 
         # 处理位置
-        if coords is None:
+        coords = None
+        if path_placements is None and route_placements is None:
             base_x, base_y, base_z = 0, 0, 0
             if pos['mode'] == 'manual':
                 # 未指定位置时：有阵列/路线则默认从原点开始，完全没有位置信息才弹窗
@@ -501,61 +516,180 @@ class AIModelingWindow(QDialog):
 
         # 生成并放置
         results = []
-        for x, y, z in coords:
-            ok, msg = place_component_at(
-                create_component(comp_type, params),
-                x, y, z
-            )
-            results.append((ok, msg))
+        if path_placements:
+            for x, y, z, child_comp in path_placements:
+                ok, msg = place_component_at(child_comp, x, y, z)
+                results.append((ok, msg))
+        elif route_placements:
+            for x, y, z, child_comp in route_placements:
+                ok, msg = place_component_at(child_comp, x, y, z)
+                results.append((ok, msg))
+        else:
+            for x, y, z in coords:
+                ok, msg = place_component_at(
+                    create_component(comp_type, params),
+                    x, y, z
+                )
+                results.append((ok, msg))
 
         success = sum(1 for ok, _ in results if ok)
-        if route_info:
-            self._append_system(f"✅ 沿路线布置完成：{success}/{len(coords)} 个成功", "#2E7D32")
-            for i, (x, y, z) in enumerate(coords):
+        total = len(results)
+        if path_info:
+            self._append_system(f"✅ 沿组件路径布置完成：{success}/{total} 个成功", "#2E7D32")
+        elif route_info:
+            self._append_system(f"✅ 沿路线布置完成：{success}/{total} 个成功", "#2E7D32")
+            for i, (x, y, z, _) in enumerate(route_placements):
                 self._append_system(f"  [{i+1}] 坐标: ({x:.1f}, {y:.1f}, {z:.1f})", "#666")
-        elif len(coords) == 1:
+        elif total == 1:
             self._append_system(f"✅ {results[0][1]}" if results[0][0] else f"❌ {results[0][1]}",
                                 "#2E7D32" if results[0][0] else "#d32f2f")
         else:
-            self._append_system(f"✅ 批量布置完成：{success}/{len(coords)} 个成功", "#2E7D32")
+            self._append_system(f"✅ 批量布置完成：{success}/{total} 个成功", "#2E7D32")
         for i, (ok, msg) in enumerate(results):
             if not ok:
                 self._append_system(f"  [{i+1}] ❌ {msg}", "#d32f2f")
 
         self.status_label.setText("就绪")
 
-    def _build_route_coords(self, route_info):
-        """根据解析出的 route 信息生成坐标列表"""
+    def _build_route_placements(self, route_info, comp_type, comp_params):
+        """根据解析出的 route 信息生成沿路线的 (x, y, z, oriented_child_comp) 列表"""
         mode = route_info.get('mode', 'line')
-        start = route_info.get('start')
-        end = route_info.get('end')
-
-        # 模式1：读取 BIMBase 中已选中的线；未选中则使用默认路线
-        if mode == 'selected_line':
-            line_pts = get_selected_line_endpoints()
-            if line_pts is None:
-                self._append_system("⚠️ 未在 BIMBase 中选中有效的线，使用默认路线", "#999")
-            else:
-                start, end = line_pts
-                self._append_system(f"🛤 已读取选中线：{start} → {end}")
-
-        # 模式2：只有"沿路线"但没有几何信息，使用默认路线：从原点沿 X 轴 100m
-        if start is None or end is None:
-            start = (0.0, 0.0, 0.0)
-            end = (100000.0, 0.0, 0.0)
-            self._append_system("🛤 未指定路线几何，使用默认路线：原点 → (100000,0,0)")
-
-        route = Route.line(start, end)
         spacing = route_info.get('spacing')
         count = route_info.get('count')
 
-        # 默认间距：如果给了数量，按数量均匀分布；否则每隔 20000
-        if spacing is None and count is None:
-            spacing = 20000.0
+        route = None
+        route_desc = ""
 
-        coords = sample_route_for_components(route, spacing=spacing, count=count, include_end=True)
-        _log(f"_build_route_coords: mode={mode}, start={start}, end={end}, spacing={spacing}, count={count}, coords={len(coords)}")
-        return coords
+        if mode == 'arc':
+            center = route_info.get('center')
+            radius = route_info.get('radius')
+            start_angle = route_info.get('start_angle')
+            end_angle = route_info.get('end_angle')
+            axis = route_info.get('axis', 'z')
+            if center is None or radius is None or start_angle is None or end_angle is None:
+                self._append_system("❌ 圆弧参数不完整，请提供圆心、半径、起始角、终止角", "#d32f2f")
+                return None
+            route = ArcRoute(center, radius, start_angle, end_angle, axis=axis)
+            route_desc = f"圆弧 圆心{center} 半径{radius} 角度{start_angle}°→{end_angle}°"
+
+        elif mode == 'selected_curve':
+            arc = get_selected_curve_arc_params()
+            if arc is None:
+                self._append_system("❌ 未在 BIMBase 中读取到有效的曲线（圆弧）参数", "#d32f2f")
+                return None
+            route = ArcRoute(
+                arc['center'], arc['radius'],
+                arc['start_angle'], arc['end_angle'],
+                axis=arc.get('axis', 'z')
+            )
+            route_desc = (f"选中曲线 圆心{arc['center']} 半径{arc['radius']} "
+                          f"角度{arc['start_angle']}°→{arc['end_angle']}°")
+            self._append_system(f"🛤 已读取选中曲线：{route_desc}", "#666")
+
+        else:
+            # line / selected_line / 默认路线
+            start = route_info.get('start')
+            end = route_info.get('end')
+
+            if mode == 'selected_line':
+                line_pts = get_selected_line_endpoints()
+                if line_pts is None:
+                    self._append_system("⚠️ 未在 BIMBase 中选中有效的线，使用默认路线", "#999")
+                else:
+                    start, end = line_pts
+                    self._append_system(f"🛤 已读取选中线：{start} → {end}", "#666")
+
+            if start is None or end is None:
+                axis = route_info.get('axis', 'x')
+                length = route_info.get('length') or 100000.0
+                start = (0.0, 0.0, 0.0)
+                if axis == 'x':
+                    end = (length, 0.0, 0.0)
+                elif axis == 'y':
+                    end = (0.0, length, 0.0)
+                else:
+                    end = (0.0, 0.0, length)
+                self._append_system(f"🛤 未指定路线几何，使用默认路线：{start} → {end}", "#999")
+
+            route = Route.line(start, end)
+            route_desc = f"直线 {start} → {end}"
+
+        if spacing is None and count is None:
+            spacing = 20000.0 if mode in ('line', 'selected_line') else 1000.0
+
+        frames = route.sample_frames(spacing=spacing, count=count, include_end=True)
+        _log(f"_build_route_placements: mode={mode}, route={route_desc}, spacing={spacing}, count={count}, frames={len(frames)}")
+
+        if not frames:
+            self._append_system("❌ 路线采样未生成任何点", "#d32f2f")
+            return None
+
+        placements = []
+        for pos, tangent in frames:
+            child = create_component(comp_type, comp_params)
+            if child is None:
+                continue
+            oriented = orient_component(child, tangent, comp_type=comp_type)
+            placements.append((pos[0], pos[1], pos[2], oriented))
+
+        self._append_system(f"🛤 沿 {route_desc} 生成 {len(placements)} 个放置点", "#666")
+        return placements
+
+    def _build_component_path_placements(self, path_info, child_type, child_params):
+        """
+        根据 parsed['path'] 生成沿组件路径的 (x, y, z, oriented_child_comp) 列表。
+        若未指定 host_type，则使用当前 BIMBase 中选中的第一个组件。
+        """
+        host_type = path_info.get('host_type')
+        path_desc = path_info.get('path_desc', '')
+        spacing = path_info.get('spacing')
+        count = path_info.get('count')
+
+        # 未指定 host 类型时，读取当前选中组件
+        if host_type is None:
+            infos = get_selected_component_info()
+            if not infos:
+                self._append_system("❌ 未指定基准组件，也未在 BIMBase 中选中组件", "#d32f2f")
+                return None
+            host_info = infos[0]
+            host_type = host_info.get('type')
+            host_params = host_info.get('params', {})
+            self._append_system(f"📦 使用选中组件作为路径基准：{host_type}", "#666")
+        else:
+            # 即使指定了类型，也尝试用选中组件获取更准确的参数（位置等）
+            infos = get_selected_component_info()
+            if infos and infer_component_type_from_params(infos[0].get('params', {})) == host_type:
+                host_params = infos[0].get('params', {})
+            else:
+                host_params = {}
+
+        # 解析路径名
+        path_name = resolve_path_name(host_type, path_desc)
+        if path_name is None:
+            self._append_system(f"❌ 无法解析路径描述：'{path_desc}'", "#d32f2f")
+            return None
+
+        # 默认间距/数量
+        if spacing is None and count is None:
+            spacing = 1000.0
+
+        try:
+            placements = build_oriented_components(
+                host_type, host_params, path_desc,
+                child_type, child_params,
+                spacing=spacing, count=count, include_end=True
+            )
+        except Exception as e:
+            _log(f"_build_component_path_placements error: {e}")
+            self._append_system(f"❌ 沿组件路径采样失败：{e}", "#d32f2f")
+            return None
+
+        if not placements:
+            self._append_system("❌ 未生成任何放置点", "#d32f2f")
+            return None
+
+        self._append_system(f"🛤 沿 {host_type} 的 {path_desc} 生成 {len(placements)} 个放置点", "#666")
+        return placements
 
     def _execute_local_modify(self, parsed, original_text):
         """本地执行修改命令"""
@@ -614,10 +748,16 @@ class AIModelingWindow(QDialog):
             "\"changes\": {\"radius\":400, \"height\":1000}}\n"
             "删除组件: {\"action\": \"delete\", \"target\": {\"mode\":\"selected\"}}\n\n"
             "## 路线说明\n"
-            "route 用于沿一条路线等距布置组件。start/end 是路线起点/终点（mm），spacing 是沿路线的间距（mm）。\n"
+            "route 用于沿一条路线等距布置组件，被放置的组件会自动旋转使其轴线/长边与路线切线方向一致。\n"
+            "mode 可以是 line（直线）、arc（圆弧）、selected_line（读取 BIMBase 中已选中的直线/直线组件）、selected_curve（读取已选中的曲线/圆弧组件）。\n"
+            "line: start/end 是路线起点/终点（mm）。\n"
+            "arc: center 是圆心，radius 是半径，start_angle/end_angle 是起止角（度），axis 是圆弧所在平面的法向（默认 z）。\n"
             "例如：沿一条 100m 直线每隔 20m 生成半径 10 高 50 的圆柱：\n"
             "{\"action\":\"create\",\"component_type\":\"cylinder\",\"params\":{\"radius\":10,\"height\":50},"
-            "\"route\":{\"mode\":\"line\",\"start\":[0,0,0],\"end\":[100000,0,0],\"spacing\":20000}}\n\n"
+            "\"route\":{\"mode\":\"line\",\"start\":[0,0,0],\"end\":[100000,0,0],\"spacing\":20000}}\n"
+            "例如：沿圆心(0,0,0)半径500从0°到180°的圆弧每隔200mm放圆柱：\n"
+            "{\"action\":\"create\",\"component_type\":\"cylinder\",\"params\":{\"radius\":50,\"height\":100},"
+            "\"route\":{\"mode\":\"arc\",\"center\":[0,0,0],\"radius\":500,\"start_angle\":0,\"end_angle\":180,\"axis\":\"z\",\"spacing\":200}}\n\n"
             "## 坐标系说明\n"
             "BIMBase使用右手坐标系，单位mm：X向右，Y向前，Z向上。\n"
             "相对位置描述：上方=+Z，下方=-Z，右方=+X，左方=-X，前方=+Y，后方=-Y。\n\n"

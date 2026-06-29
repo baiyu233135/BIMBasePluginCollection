@@ -66,9 +66,10 @@ from utils.layer_manager import LayerManager
 from utils.snap import SnapSystem
 from utils.dwg_handler import import_dwg, convert_dxf_to_dwg
 from utils.pdf_handler import import_pdf
-from utils.pdf_view_recognizer import auto_associate_from_pdf_views
+from utils.pdf_view_recognizer import auto_associate_from_pdf_views, group_lines_into_views_connected
 from utils.drawing_recognizer import recognize_drawing_file, has_api_key, load_config
 from drawing_ai_config_dialog import DrawingAIConfigDialog
+from geometry.faces import FaceManager
 from geometry.elements import BaseElement, LineElement, RectangleElement
 from geometry.elements import CircleElement, ArcElement, PolylineElement
 from geometry.elements import EllipseElement, PointElement
@@ -943,6 +944,66 @@ class CADBoardWindow(QMainWindow):
             self.prop_inputs['width'].setEnabled(True)
             self.prop_inputs['height'].setEnabled(True)
 
+    def _show_face_overview_for_component(self, component_id, visible_keys=None):
+        """为指定组件弹出面参数总览对话框（用于识别后自动弹出）。
+        确保对话框显示在最前面，避免被 CADBoard 主窗口遮挡。"""
+        if not self._face_group:
+            return
+        face_elems = self._face_group.get_elements_by_component(component_id)
+        if not face_elems:
+            return
+        component_type = face_elems[0].component_type
+        component_params = dict(face_elems[0].component_params)
+        from face_overview_dialog import FaceOverviewDialog, PIER_COMMON_PARAMS
+        if component_type == '引桥桥墩' and visible_keys is None:
+            visible_keys = PIER_COMMON_PARAMS
+
+        # 先确保主窗口在父级层级中处于活跃状态，再弹出模态对话框
+        self.raise_()
+        self.activateWindow()
+
+        dlg = FaceOverviewDialog(self, component_type, component_params, face_elems, visible_keys=visible_keys)
+        # 居中显示并强制置顶，避免被 CADBoard 主窗口遮挡
+        try:
+            from PyQt5.QtCore import Qt, QPoint
+        except ImportError:
+            from PyQt6.QtCore import Qt, QPoint
+        dlg.setWindowFlags(dlg.windowFlags() | Qt.WindowStaysOnTopHint | Qt.WindowCloseButtonHint)
+        dlg.setWindowModality(Qt.ApplicationModal)
+        if dlg.parent():
+            parent_geo = dlg.parent().geometry()
+            dlg_geo = dlg.geometry()
+            new_x = parent_geo.x() + (parent_geo.width() - dlg_geo.width()) // 2
+            new_y = parent_geo.y() + (parent_geo.height() - dlg_geo.height()) // 2
+            dlg.move(QPoint(max(0, new_x), max(0, new_y)))
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+        if dlg.exec_() != QDialog.Accepted:
+            return
+        new_params = dlg.get_new_params()
+        if not new_params or new_params == component_params:
+            return
+        if component_type == '引桥桥墩':
+            try:
+                from utils.generated_component_cache import normalize_pier_params
+                new_params = normalize_pier_params(new_params)
+            except Exception:
+                pass
+        self._save_undo_state()
+        self._face_group.apply_params_and_regenerate(component_id, new_params)
+        source_elem = None
+        for e in self.elements:
+            if e.id == component_id:
+                e.component_params = dict(new_params)
+                source_elem = e
+                break
+        if source_elem and source_elem.component_type == '引桥桥墩':
+            pier_h = float(new_params.get('墩高', 1200)) + float(new_params.get('盖梁总高', 300))
+            source_elem.z_end = source_elem.z_start + pier_h
+        self._update_property_panel()
+        self.viewport.update()
+
     def _show_face_overview(self):
         """打开面参数总览对话框，批量修改组件参数。"""
         elem = self._current_prop_element
@@ -965,13 +1026,24 @@ class CADBoardWindow(QMainWindow):
 
         # 弹出对话框
         from face_overview_dialog import FaceOverviewDialog
-        dlg = FaceOverviewDialog(self, component_type, component_params, face_elems)
+        visible_keys = None
+        if component_type == '引桥桥墩':
+            from face_overview_dialog import PIER_COMMON_PARAMS
+            visible_keys = PIER_COMMON_PARAMS
+        dlg = FaceOverviewDialog(self, component_type, component_params, face_elems, visible_keys=visible_keys)
         if dlg.exec_() != QDialog.Accepted:
             return
 
         new_params = dlg.get_new_params()
         if not new_params or new_params == component_params:
             return
+
+        if component_type == '引桥桥墩':
+            try:
+                from utils.generated_component_cache import normalize_pier_params
+                new_params = normalize_pier_params(new_params)
+            except Exception:
+                pass
 
         self._save_undo_state()
 
@@ -989,7 +1061,10 @@ class CADBoardWindow(QMainWindow):
 
         # 更新源元素高度
         if source_elem:
-            if source_elem.component_type == '直角三棱柱':
+            if source_elem.component_type == '引桥桥墩':
+                pier_h = float(new_params.get('墩高', 1200)) + float(new_params.get('盖梁总高', 300))
+                source_elem.z_end = source_elem.z_start + pier_h
+            elif source_elem.component_type == '直角三棱柱':
                 if '高度' in new_params:
                     source_elem.z_end = source_elem.z_start + float(new_params['高度'])
             else:
@@ -1145,6 +1220,14 @@ class CADBoardWindow(QMainWindow):
         preview_btn.setStyleSheet("QPushButton { background-color: #4a90d9; color: white; font-weight: bold; }")
         preview_btn.clicked.connect(self._show_3d_preview)
         self.toolbar.addWidget(preview_btn)
+
+        # ===== 缓存管理 =====
+        clear_cache_btn = QPushButton("清除缓存")
+        clear_cache_btn.setToolTip("清除 cad组件缓存 目录下的生成脚本")
+        clear_cache_btn.setMinimumWidth(80)
+        clear_cache_btn.setStyleSheet("QPushButton { background-color: #757575; color: white; }")
+        clear_cache_btn.clicked.connect(self._clear_generated_cache)
+        self.toolbar.addWidget(clear_cache_btn)
 
         self.toolbar.addSeparator()
 
@@ -1339,6 +1422,8 @@ class CADBoardWindow(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction("同步到BIMBase", self._sync_to_bimbase)
         file_menu.addAction("从BIMBase更新", self._sync_from_bimbase)
+        file_menu.addSeparator()
+        file_menu.addAction("清除组件缓存", self._clear_generated_cache)
 
         view_menu = menubar.addMenu("视图")
         view_menu.addAction("重置视图", self._reset_view)
@@ -2056,6 +2141,18 @@ class CADBoardWindow(QMainWindow):
         summary = '\n'.join(log_lines[:60])
         QMessageBox.information(self, "测试 noumenon 结果", summary + f"\n\n完整日志已保存到:\n{out_path}")
 
+    def _clear_generated_cache(self):
+        """清除 cad组件缓存 目录下的生成脚本"""
+        try:
+            from utils.generated_component_cache import clear_cache_dir
+            removed = clear_cache_dir()
+            QMessageBox.information(self, "清除缓存",
+                f"已清除 {removed} 个缓存文件/目录。\n路径：cad组件缓存/")
+            self.status_bar.showMessage(f"已清除 {removed} 个缓存文件")
+        except Exception as e:
+            QMessageBox.warning(self, "清除缓存失败", f"清除缓存时出错：{e}")
+            self.status_bar.showMessage("清除缓存失败")
+
     def _sync_to_bimbase(self):
         if not bimbase_sync.is_bimbase_available():
             QMessageBox.warning(self, "同步失败",
@@ -2064,10 +2161,12 @@ class CADBoardWindow(QMainWindow):
         if not self.elements:
             QMessageBox.information(self, "同步", "画板为空，没有可同步的内容。")
             return
-        count, errors, replaced = bimbase_sync.sync_to_bimbase(self)
+        count, errors, replaced, manual = bimbase_sync.sync_to_bimbase(self)
         msg = f"同步到BIMBase完成: {count} 个元素成功"
         if replaced:
             msg += f"\n重新放置: {len(replaced)} 个（来源于BIMBase，已生成新组件）"
+        if manual:
+            msg += f"\n手动放置: {len(manual)} 个（请在BIMBase 3D视图中点击放置）"
         if errors:
             msg += f"\n错误: {len(errors)} 个"
             for e in errors[:5]:
@@ -2080,6 +2179,12 @@ class CADBoardWindow(QMainWindow):
             msg += "\n\n旧组件仍保留在BIMBase中，请手动删除："
             msg += "\n1. 在BIMBase 3D视图中选中旧组件"
             msg += "\n2. 按 Delete 键删除"
+        elif manual:
+            msg += "\n\n以下元素已生成参数化组件，并启动了 BIMBase 手动放置工具："
+            for elem in manual[:5]:
+                ct = getattr(elem, 'component_type', '未知')
+                msg += f"\n- {ct}"
+            msg += "\n\n请在 BIMBase 3D 视图中点击以完成放置。"
         else:
             if errors:
                 msg += "\n\n部分元素自动放置失败，错误信息见上方。"
@@ -2335,8 +2440,7 @@ class CADBoardWindow(QMainWindow):
             self.status_bar.showMessage("三视图识别出错")
 
     def _recognize_complex_views(self):
-        """复杂识别：使用 Qwen-VL 从 PDF/图片识别引桥桥墩等复杂构件"""
-        # 未配置 API Key 时提示用户
+        """复杂识别：PDF/DWG 导入原始线条作为面元素，图片 fallback 到参数化面"""
         if not has_api_key():
             reply = QMessageBox.question(
                 self,
@@ -2349,15 +2453,17 @@ class CADBoardWindow(QMainWindow):
                 self._show_drawing_ai_config()
             return
 
-        # 选择图纸文件
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "选择图纸文件",
             "",
-            "PDF 文件 (*.pdf);;图片文件 (*.png *.jpg *.jpeg *.bmp);;所有文件 (*)",
+            "PDF 文件 (*.pdf);;DWG 文件 (*.dwg);;图片文件 (*.png *.jpg *.jpeg *.bmp);;所有文件 (*)",
         )
         if not file_path:
             return
+
+        ext = os.path.splitext(file_path)[1].lower()
+        is_line_source = ext in ('.pdf', '.dwg', '.dxf')
 
         self.status_bar.showMessage("正在使用 Qwen-VL 识别图纸，请稍候...")
         try:
@@ -2368,51 +2474,66 @@ class CADBoardWindow(QMainWindow):
             result = results[0]
             comp_type = result.get('component_type')
             params = result.get('params') or {}
+            try:
+                from utils.generated_component_cache import normalize_pier_params
+                params = normalize_pier_params(params)
+            except Exception:
+                pass
             if not comp_type:
                 raise ValueError(f"无法识别构件类型：{result.get('notes', '')}")
 
-            # 创建源占位元素
             from utils.component_registry import create_element_from_params
             params.setdefault('x', 0.0)
             params.setdefault('y', 0.0)
             params.setdefault('z_bottom', 0.0)
-            elem = create_element_from_params(params, comp_type)
-            if elem is None:
+            source = create_element_from_params(params, comp_type)
+            if source is None:
                 raise ValueError(f"无法根据参数创建 {comp_type} 占位元素")
 
-            self.apply_current_layer_style(elem)
-            elem.component_type = comp_type
-            elem.component_params = dict(params)
-            elem.is_3d = True
-            elem.pdf_recognized = True
-            elem.pdf_anchor_x = float(params.get('x', 0.0))
-            elem.pdf_anchor_y = float(params.get('y', 0.0))
-            elem.pdf_anchor_z = float(params.get('z_bottom', 0.0))
+            self.apply_current_layer_style(source)
+            source.component_type = comp_type
+            source.component_params = dict(params)
+            source.is_3d = True
+            source.pdf_recognized = True
+            source.pdf_anchor_x = float(params.get('x', 0.0))
+            source.pdf_anchor_y = float(params.get('y', 0.0))
+            source.pdf_anchor_z = float(params.get('z_bottom', 0.0))
+            source.visible = False
 
             self._save_undo_state()
-            self.add_element(elem)
+            self.add_element(source)
 
-            # 选中并生成三视图面元素
             for e in self.elements:
                 e.selected = False
-            elem.selected = True
+            source.selected = True
 
-            if self._face_group is None:
-                self._face_group = ComponentFaceGroup(self)
-            elem.component_params['_face_mode'] = '三视图'
-            faces = self._face_group.generate_faces_for_element(elem, mode='三视图')
-            if not faces:
-                raise ValueError("无法生成三视图面元素")
-            self._face_group.replace_faces(elem.id, faces)
-            elem.visible = False
+            if is_line_source:
+                ok, msg = self._build_faces_from_imported_lines(file_path, source, comp_type, params)
+                if not ok:
+                    raise ValueError(msg)
+            else:
+                if self._face_group is None:
+                    self._face_group = ComponentFaceGroup(self)
+                source.component_params['_face_mode'] = '三视图'
+                faces = self._face_group.generate_faces_for_element(source, mode='三视图')
+                if not faces:
+                    raise ValueError("无法生成三视图面元素")
+                self._face_group.replace_faces(source.id, faces)
 
-            face_elems = self._face_group.get_elements_by_component(elem.id)
+            face_elems = self._face_group.get_elements_by_component(source.id) if self._face_group else []
             if face_elems:
+                # 取消源元素的选中状态，避免属性面板因多选而隐藏"面参数总览"按钮
+                source.selected = False
                 face_elems[0].selected = True
-            self._enter_face_edit_mode(comp_type, elem.id)
+            self._enter_face_edit_mode(comp_type, source.id)
 
+            # 先更新属性面板，确保"面参数总览"按钮可见，再弹出模态对话框
             self._update_property_panel()
             self.viewport.update()
+
+            # 引桥桥墩识别成功后自动弹出常用参数编辑面板
+            if comp_type == '引桥桥墩':
+                self._show_face_overview_for_component(source.id)
 
             conf = result.get('confidence', 0.0)
             notes = result.get('notes', '')
@@ -2428,6 +2549,175 @@ class CADBoardWindow(QMainWindow):
             _write_board_log(f"_recognize_complex_views crash: {e}\n{err}")
             QMessageBox.critical(self, "图纸识别错误", f"识别过程中出错:\n{e}\n\n已记录到 drawing_recognizer.log")
             self.status_bar.showMessage("图纸识别出错")
+
+    def _build_faces_from_imported_lines(self, file_path, source, comp_type, params):
+        """
+        PDF/DWG 导入原始线条 → 按视图分组 → 缩放对齐到 AI 识别尺寸 → 转为面元素。
+        返回 (ok, message)
+        """
+        ext = os.path.splitext(file_path)[1].lower()
+        imported = []
+        errors = []
+        if ext == '.pdf':
+            imported, errors = import_pdf(file_path)
+        elif ext in ('.dwg', '.dxf'):
+            imported, errors = import_dwg(file_path)
+        else:
+            return False, f"不支持的线条源文件：{ext}"
+
+        if errors:
+            _write_board_log(f"_build_faces_from_imported_lines import errors: {errors}")
+        if not imported:
+            return False, f"未能从 {ext} 导入任何线条，请检查文件内容。"
+
+        # 先把导入的线条加入画板（后续隐藏），供分组使用
+        for e in imported:
+            self.apply_current_layer_style(e)
+            e.component_type = ''
+            e.visible = True
+            self.elements.append(e)
+
+        # 1) 如果图纸单位过大（DWG 常见），先做整体归一化缩放，便于按间隙分组
+        all_bounds = [e.get_bounds() for e in imported if hasattr(e, 'get_bounds')]
+        if all_bounds:
+            min_x = min(b[0] for b in all_bounds)
+            min_y = min(b[1] for b in all_bounds)
+            max_x = max(b[2] for b in all_bounds)
+            max_y = max(b[3] for b in all_bounds)
+            cur_w = max_x - min_x
+            cur_h = max_y - min_y
+            max_dim = max(cur_w, cur_h)
+            if max_dim > 5000:
+                target_max = 1000.0
+                scale = target_max / max_dim
+                for e in imported:
+                    if hasattr(e, 'scale') and hasattr(e, 'translate'):
+                        e.translate(-min_x, -min_y)
+                        e.scale(0, 0, scale)
+
+        # 2) 视图分组（使用连通区域，比单一间隙阈值更鲁棒）
+        views = group_lines_into_views_connected(imported, tolerance=15.0)
+        if not views:
+            # 分组失败：回退为单个 front 视图
+            views = {'front': {'elements': imported, 'bounds': (min_x, min_y, max_x, max_y)}}
+
+        # 3) 确定每个视图的目标尺寸
+        target = {}
+        if comp_type == '引桥桥墩':
+            cap_len = float(params.get('盖梁总长', 2000))
+            cap_h = float(params.get('盖梁总高', 300))
+            cap_w = float(params.get('盖梁宽', 300))
+            pier_h = float(params.get('墩高', 1200))
+            total_h = cap_h + pier_h
+            target['front'] = (cap_len, total_h)
+            target['top'] = (cap_len, cap_w)
+            target['left'] = (cap_w, total_h)
+        else:
+            # 非引桥桥墩：不强制缩放，保持原始包围盒作为面大小
+            for vn, vd in views.items():
+                target[vn] = (vd['bounds'][2] - vd['bounds'][0], vd['bounds'][3] - vd['bounds'][1])
+
+        # 4) 把每个视图下的原始线条合并成一根 PolylineElement（保留断点）并缩放
+        outline_color = {
+            'top': (0, 200, 100),
+            'front': (255, 100, 100),
+            'left': (100, 150, 255),
+        }
+        face_dict = {}
+        plane_map = {'front': 'xz', 'top': 'xy', 'left': 'yz'}
+        cid = source.id
+
+        for vn in ['front', 'top', 'left']:
+            vd = views.get(vn)
+            group = vd.get('elements', []) if vd else []
+
+            pts = []
+            if group:
+                for e in group:
+                    if isinstance(e, LineElement):
+                        pts.append((e.x1, e.y1))
+                        pts.append((e.x2, e.y2))
+                        pts.append(None)
+                    elif isinstance(e, PolylineElement):
+                        for p in e.points:
+                            pts.append(p)
+                        pts.append(None)
+
+            # 如果该视图在 PDF/DWG 中缺失，用参数目标尺寸生成一个矩形占位轮廓
+            if not pts:
+                tgt_w, tgt_h = target.get(vn, (0, 0))
+                if tgt_w > 0 and tgt_h > 0:
+                    # 以原点为中心生成矩形，后续 _layout_faces 会自动排版
+                    half_w = tgt_w / 2.0
+                    half_h = tgt_h / 2.0
+                    pts = [
+                        (-half_w, -half_h), (half_w, -half_h),
+                        (half_w, half_h), (-half_w, half_h),
+                        (-half_w, -half_h)
+                    ]
+                else:
+                    continue
+
+            poly = PolylineElement(pts, closed=False)
+
+            # 缩放到目标尺寸（以包围盒中心为基准）
+            tgt_w, tgt_h = target.get(vn, (0, 0))
+            if tgt_w > 0 and tgt_h > 0:
+                pb = poly.get_bounds()
+                pw = pb[2] - pb[0]
+                ph = pb[3] - pb[1]
+                if pw > 0 and ph > 0:
+                    sx = tgt_w / pw
+                    sy = tgt_h / ph
+                    cx = (pb[0] + pb[2]) / 2
+                    cy = (pb[1] + pb[3]) / 2
+                    new_pts = []
+                    for p in poly.points:
+                        if p is None:
+                            new_pts.append(None)
+                        else:
+                            new_pts.append((cx + (p[0] - cx) * sx, cy + (p[1] - cy) * sy))
+                    poly.points = new_pts
+
+            poly.component_type = comp_type
+            poly.component_params = dict(params)
+            poly.face_info = {
+                'component_id': cid,
+                'face_name': vn,
+                'is_pdf_original': True,
+                'plane': plane_map.get(vn, 'xy'),
+            }
+            poly.style.color = outline_color.get(vn, (200, 200, 200))
+            poly.style.line_width = 1.5
+            face_dict[vn] = poly
+
+        if not face_dict:
+            return False, "未能从导入线条生成任何面元素。"
+
+        # 5) 三视图排版，避免重叠
+        FaceManager._layout_faces(face_dict)
+
+        # 6) 隐藏原始导入线条，并标记为 PDF 原始参考线（不应被同步为独立 BIMBase 元素）
+        imported_ids = {e.id for e in imported}
+        for e in self.elements:
+            if e.id in imported_ids:
+                e.visible = False
+                e._pdf_hidden_original = True
+                e._pdf_original_line = True
+
+        # 7) 把面元素加入画板并注册到 ComponentFaceGroup
+        if self._face_group is None:
+            self._face_group = ComponentFaceGroup(self)
+        source.component_params['_face_mode'] = '三视图'
+        self._face_group.replace_faces(cid, face_dict)
+
+        # 8) 自动调整画布，确保三视图完整可见
+        try:
+            self._fit_canvas_to_elements(list(face_dict.values()), margin=100)
+        except Exception as e:
+            _write_board_log(f"_build_faces_from_imported_lines fit canvas error: {e}")
+
+        return True, f"已使用原始线条生成 {len(face_dict)} 个面元素。"
 
     def _exit_face_edit_mode(self):
         """退出面编辑模式：恢复源元素显示，清理面元素，恢复正常交互"""
@@ -2800,7 +3090,23 @@ class CADBoardWindow(QMainWindow):
                 if fb:
                     new_params['高度'] = round(fb[3] - fb[1], 1)
                     break
-        
+
+        elif component_type == '引桥桥墩':
+            top = face_bounds.get('top')
+            front = face_bounds.get('front')
+            left = face_bounds.get('left')
+            if top:
+                new_params['盖梁总长'] = round(top[2] - top[0], 1)
+                new_params['盖梁宽'] = round(top[3] - top[1], 1)
+            if front:
+                new_params['盖梁总长'] = round(front[2] - front[0], 1)
+                new_h = front[3] - front[1]
+                new_params['墩高'] = round(max(0, new_h - new_params.get('盖梁总高', 300)), 1)
+            if left:
+                new_params['盖梁宽'] = round(left[2] - left[0], 1)
+                new_h = left[3] - left[1]
+                new_params['墩高'] = round(max(0, new_h - new_params.get('盖梁总高', 300)), 1)
+
         return new_params
 
     def _on_face_filter_changed(self, text):

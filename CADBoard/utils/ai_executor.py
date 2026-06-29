@@ -489,21 +489,11 @@ class AICommandExecutor:
                 'x': float(x), 'y': float(y), 'z_bottom': float(z),
                 '盖梁总长': float(params.get('盖梁总长', 1930)),
                 '盖梁总高': float(params.get('盖梁总高', 300)),
-                '凸起宽': float(params.get('凸起宽', 30)),
-                '凸起高': float(params.get('凸起高', 50)),
-                '盖梁主体底宽': float(params.get('盖梁主体底宽', 1390)),
-                '斜边水平投影': float(params.get('斜边水平投影', 270)),
-                '斜边垂直投影': float(params.get('斜边垂直投影', 120)),
                 '盖梁宽': float(params.get('盖梁宽', 300)),
-                '墩柱直径': float(params.get('墩柱直径', 270)),
+                '墩柱直径': float(params.get('墩柱直径', 250)),
                 '墩柱间距': float(params.get('墩柱间距', 1140)),
                 '墩高': float(params.get('墩高', 1200)),
-                '系梁长': float(params.get('系梁长', 890)),
-                '系梁宽': float(params.get('系梁宽', 200)),
-                '系梁高': float(params.get('系梁高', 200)),
-                '系梁数量': int(params.get('系梁数量', 2)),
-                '系梁起始距顶': float(params.get('系梁起始距顶', 200)),
-                '系梁间距': float(params.get('系梁间距', 500)),
+                '系梁根数': int(params.get('系梁根数', params.get('系梁数量', 2))),
             }
             elem = create_element_from_params(comp_params, '引桥桥墩')
             if elem is None:

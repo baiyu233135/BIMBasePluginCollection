@@ -572,30 +572,20 @@ class LocalCommandParser:
                 params['thickness'] = float(m.group(1))
                 break
 
-        # 引桥桥墩专用参数
+        # 引桥桥墩专用参数（精简参数版）
         pier_param_patterns = {
             '盖梁总长': r'盖梁总长\s*(\d+\.?\d*)',
             '盖梁总高': r'盖梁总高\s*(\d+\.?\d*)',
-            '凸起宽': r'凸起宽\s*(\d+\.?\d*)',
-            '凸起高': r'凸起高\s*(\d+\.?\d*)',
-            '盖梁主体底宽': r'盖梁主体底宽\s*(\d+\.?\d*)',
-            '斜边水平投影': r'斜边水平投影\s*(\d+\.?\d*)',
-            '斜边垂直投影': r'斜边垂直投影\s*(\d+\.?\d*)',
             '盖梁宽': r'盖梁宽\s*(\d+\.?\d*)',
             '墩柱直径': r'墩柱直径\s*(\d+\.?\d*)',
             '墩柱间距': r'墩柱间距\s*(\d+\.?\d*)',
             '墩高': r'墩高\s*(\d+\.?\d*)',
-            '系梁长': r'系梁长\s*(\d+\.?\d*)',
-            '系梁宽': r'系梁宽\s*(\d+\.?\d*)',
-            '系梁高': r'系梁高\s*(\d+\.?\d*)',
-            '系梁数量': r'系梁数量\s*(\d+)',
-            '系梁起始距顶': r'系梁起始距顶\s*(\d+\.?\d*)',
-            '系梁间距': r'系梁间距\s*(\d+\.?\d*)',
+            '系梁根数': r'系梁根数\s*(\d+)',
         }
         for pname, pat in pier_param_patterns.items():
             m = re.search(pat, text)
             if m:
-                params[pname] = float(m.group(1)) if pname != '系梁数量' else int(m.group(1))
+                params[pname] = float(m.group(1)) if pname != '系梁根数' else int(m.group(1))
 
         return params
 

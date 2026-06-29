@@ -415,6 +415,9 @@ class BIMBaseAgent:
             elif new_type == '长方体':
                 if '高度' in new_params:
                     elem.z_end = elem.z_start + float(new_params['高度'])
+            elif new_type == '引桥桥墩':
+                pier_h = float(new_params.get('墩高', 1200)) + float(new_params.get('盖梁总高', 300))
+                elem.z_end = elem.z_start + pier_h
             else:
                 z_bottom = new_params.get('z_bottom') or new_params.get('z1') or new_params.get('z', 0)
                 z_top = new_params.get('z_top') or new_params.get('z2') or new_params.get('z', 0)

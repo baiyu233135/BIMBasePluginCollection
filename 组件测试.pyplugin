@@ -1,7 +1,7 @@
 ﻿<?xml version="1.0" encoding="UTF-8"?>
 <BIMPyPlugin>
     <BfaLibName/>
-    <PluginVersion>1.0.0</PluginVersion>
+    <PluginVersion>1.0.1</PluginVersion>
     <LoadStatus>true</LoadStatus>
     <Category name="组件测试">
         <Panel name="基本图元">
@@ -38,6 +38,12 @@
             <Button name="曲线">
                 <command>曲线.py</command>
                 <iconPath>曲线.ico</iconPath>
+            </Button>
+        </Panel>
+        <Panel name="AI_Modeling诊断">
+            <Button name="读取选中参数">
+                <command>debug_ai_modeling.py</command>
+                <iconPath>直线.ico</iconPath>
             </Button>
         </Panel>
     </Category>

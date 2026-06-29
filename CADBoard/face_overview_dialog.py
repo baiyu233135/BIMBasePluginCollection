@@ -47,7 +47,33 @@ PARAM_LABELS = {
     'ry': 'Y半径',
     'chamfer': '倒角',
     'point_count': '顶点数',
+    # 引桥桥墩参数
+    '盖梁总长': '盖梁总长',
+    '盖梁总高': '盖梁总高',
+    '凸起宽': '凸起宽',
+    '凸起高': '凸起高',
+    '盖梁主体底宽': '盖梁主体底宽',
+    '斜边水平投影': '斜边水平投影',
+    '斜边垂直投影': '斜边垂直投影',
+    '盖梁宽': '盖梁宽',
+    '墩柱直径': '墩柱直径',
+    '墩柱间距': '墩柱间距',
+    '墩高': '墩高',
+    '系梁长': '系梁长',
+    '系梁宽': '系梁宽',
+    '系梁高': '系梁高',
+    '系梁数量': '系梁数量',
+    '系梁根数': '系梁根数',
+    '系梁起始距顶': '系梁起始距顶',
+    '系梁间距': '系梁间距',
 }
+
+# 引桥桥墩常用参数（识别后自动弹出的面板只显示这些）
+PIER_COMMON_PARAMS = [
+    '盖梁总长', '盖梁总高', '盖梁宽',
+    '墩柱直径', '墩柱间距', '墩高',
+    '系梁根数',
+]
 
 # 面中文名映射
 FACE_LABELS = {
@@ -65,12 +91,13 @@ FACE_LABELS = {
 class FaceOverviewDialog(QDialog):
     """面参数总览对话框：显示组件参数（可编辑）和所有面信息（只读）"""
 
-    def __init__(self, parent, component_type, component_params, face_elements):
+    def __init__(self, parent, component_type, component_params, face_elements, visible_keys=None):
         super().__init__(parent)
         self.component_type = component_type
         self.original_params = dict(component_params)
         self.new_params = dict(component_params)
         self.face_elements = face_elements
+        self.visible_keys = visible_keys  # 若为 None 则显示所有可编辑数字参数
         self.param_inputs = {}
         self._setup_ui()
 
@@ -92,6 +119,10 @@ class FaceOverviewDialog(QDialog):
                 continue
             if isinstance(val, (int, float)):
                 editable_keys.append(key)
+
+        # 如果指定了可见参数列表，只显示这些
+        if self.visible_keys is not None:
+            editable_keys = [k for k in self.visible_keys if k in editable_keys]
 
         if not editable_keys:
             layout.addWidget(QLabel("此组件没有可编辑的参数。"))
@@ -145,8 +176,13 @@ class FaceOverviewDialog(QDialog):
         changed = False
         for key, line in self.param_inputs.items():
             try:
-                val = float(line.text())
-                if abs(val - self.original_params.get(key, 0)) > 0.001:
+                raw = line.text()
+                # 原始值为整数则保持整数，避免系梁根数等参数变成浮点
+                if isinstance(self.original_params.get(key), int):
+                    val = int(raw)
+                else:
+                    val = float(raw)
+                if abs(float(val) - float(self.original_params.get(key, 0))) > 0.001:
                     changed = True
                 self.new_params[key] = val
             except ValueError:

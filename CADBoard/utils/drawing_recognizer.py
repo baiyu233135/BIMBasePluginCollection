@@ -153,21 +153,11 @@ def _build_prompt(component_hint: Optional[str]) -> str:
   "parameters": {{
     "盖梁总长": {{"value": 1930, "unit": "mm"}},
     "盖梁总高": {{"value": 300, "unit": "mm"}},
-    "凸起宽": {{"value": 30, "unit": "mm"}},
-    "凸起高": {{"value": 50, "unit": "mm"}},
-    "盖梁主体底宽": {{"value": 1390, "unit": "mm"}},
-    "斜边水平投影": {{"value": 270, "unit": "mm"}},
-    "斜边垂直投影": {{"value": 120, "unit": "mm"}},
     "盖梁宽": {{"value": 300, "unit": "mm"}},
-    "墩柱直径": {{"value": 270, "unit": "mm"}},
+    "墩柱直径": {{"value": 250, "unit": "mm"}},
     "墩柱间距": {{"value": 1140, "unit": "mm"}},
     "墩高": {{"value": 1200, "unit": "mm"}},
-    "系梁长": {{"value": 890, "unit": "mm"}},
-    "系梁宽": {{"value": 200, "unit": "mm"}},
-    "系梁高": {{"value": 200, "unit": "mm"}},
-    "系梁数量": {{"value": 2, "unit": "个"}},
-    "系梁起始距顶": {{"value": 200, "unit": "mm"}},
-    "系梁间距": {{"value": 500, "unit": "mm"}}
+    "系梁根数": {{"value": 2, "unit": "个"}}
   }},
   "notes": "任何补充说明"
 }}
@@ -177,6 +167,7 @@ def _build_prompt(component_hint: Optional[str]) -> str:
 2. 单位支持 mm/cm/m，输出时统一标注实际单位，系统会自动换算为 mm。
 3. 若图纸中某些尺寸缺失，可省略该字段，系统会使用默认值。
 4. confidence 为 0~1 的识别置信度。
+5. 当前使用精简参数版：只输出上述 7 个核心外轮廓参数，不要输出凸起、斜边、系梁细节等内部尺寸，这些由系统自动按默认值计算。
 """
 
 
@@ -253,7 +244,11 @@ def recognize_with_qwen_vl(image_path: str, component_hint: Optional[str] = None
     try:
         _log(f"开始识别: image={image_path}, model={payload['model']}, hint={component_hint}")
         if _requests is not None:
-            resp = _requests.post(api_base, headers=headers, json=payload, timeout=120)
+            # 绕过系统代理，避免 ProxyError 导致 SSL 握手失败
+            resp = _requests.post(
+                api_base, headers=headers, json=payload, timeout=120,
+                proxies={"http": None, "https": None}
+            )
             if not resp.ok:
                 detail = resp.text[:500]
                 _log(f"API 请求失败: {resp.status_code}, {detail}")
@@ -261,13 +256,15 @@ def recognize_with_qwen_vl(image_path: str, component_hint: Optional[str] = None
             result = resp.json()
         else:
             import urllib.request
+            proxy_handler = urllib.request.ProxyHandler({})
+            opener = urllib.request.build_opener(proxy_handler)
             req = urllib.request.Request(
                 api_base,
                 data=json.dumps(payload).encode("utf-8"),
                 headers=headers,
                 method="POST"
             )
-            with urllib.request.urlopen(req, timeout=120) as resp:
+            with opener.open(req, timeout=120) as resp:
                 result = json.loads(resp.read().decode("utf-8"))
 
         content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
@@ -300,8 +297,10 @@ def recognize_drawing_file(file_path: str, component_hint: Optional[str] = None)
         image_paths = pdf_to_images(file_path)
     elif ext in image_exts:
         image_paths = [file_path]
+    elif ext == ".dwg":
+        image_paths = [dwg_to_image(file_path)]
     else:
-        raise ValueError(f"暂不支持的文件格式: {ext}，请使用 PDF 或图片")
+        raise ValueError(f"暂不支持的文件格式: {ext}，请使用 PDF、DWG 或图片")
 
     results = []
     for img_path in image_paths:
@@ -316,3 +315,59 @@ def recognize_drawing_file(file_path: str, component_hint: Optional[str] = None)
             'notes': notes,
         })
     return results
+
+
+def dwg_to_image(dwg_path: str, output_dir: Optional[str] = None, dpi: int = 150) -> str:
+    """
+    将 DWG 文件渲染为 PNG 图片，供 Qwen-VL 识别。
+    依赖：ezdxf + matplotlib。
+    """
+    from utils.dwg_handler import _convert_dwg_to_dxf
+
+    if output_dir is None:
+        output_dir = tempfile.mkdtemp(prefix="cadboard_dwg_img_")
+    os.makedirs(output_dir, exist_ok=True)
+
+    dxf_path, err = _convert_dwg_to_dxf(dwg_path)
+    if err:
+        raise RuntimeError(f"DWG 转 DXF 失败: {err}")
+    if not dxf_path or not os.path.exists(dxf_path):
+        raise RuntimeError("DWG 转 DXF 未生成文件")
+
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        import ezdxf
+        from ezdxf.addons.drawing import Frontend, RenderContext
+        from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
+
+        doc = ezdxf.readfile(dxf_path)
+        msp = doc.modelspace()
+
+        fig = plt.figure(figsize=(12, 9))
+        ax = fig.add_axes([0, 0, 1, 1])
+        ax.set_aspect('equal')
+        ax.axis('off')
+
+        ctx = RenderContext(doc)
+        out = MatplotlibBackend(ax)
+        Frontend(ctx, out).draw_layout(msp)
+
+        # 根据实体范围调整显示区域
+        try:
+            extents = msp.extents()
+            min_x, min_y, _ = extents[0]
+            max_x, max_y, _ = extents[1]
+            margin = max(max_x - min_x, max_y - min_y) * 0.05
+            ax.set_xlim(min_x - margin, max_x + margin)
+            ax.set_ylim(min_y - margin, max_y + margin)
+        except Exception:
+            pass
+
+        out_path = os.path.join(output_dir, os.path.splitext(os.path.basename(dwg_path))[0] + ".png")
+        fig.savefig(out_path, dpi=dpi, pad_inches=0)
+        plt.close(fig)
+        return out_path
+    except Exception as e:
+        raise RuntimeError(f"DWG 渲染为图片失败: {e}")
