@@ -954,9 +954,11 @@ class CADBoardWindow(QMainWindow):
             return
         component_type = face_elems[0].component_type
         component_params = dict(face_elems[0].component_params)
-        from face_overview_dialog import FaceOverviewDialog, PIER_COMMON_PARAMS
+        from face_overview_dialog import FaceOverviewDialog, PIER_COMMON_PARAMS, CABLE_ANCHOR_COMMON_PARAMS
         if component_type == '引桥桥墩' and visible_keys is None:
             visible_keys = PIER_COMMON_PARAMS
+        elif component_type == '索缆锚锭' and visible_keys is None:
+            visible_keys = CABLE_ANCHOR_COMMON_PARAMS
 
         # 先确保主窗口在父级层级中处于活跃状态，再弹出模态对话框
         self.raise_()
@@ -1001,6 +1003,9 @@ class CADBoardWindow(QMainWindow):
         if source_elem and source_elem.component_type == '引桥桥墩':
             pier_h = float(new_params.get('墩高', 1200)) + float(new_params.get('盖梁总高', 300))
             source_elem.z_end = source_elem.z_start + pier_h
+        elif source_elem and source_elem.component_type == '索缆锚锭':
+            anchor_h = float(new_params.get('底柱高度', 1000)) + float(new_params.get('承台高度', 400)) + float(new_params.get('锚块总高', 2039))
+            source_elem.z_end = source_elem.z_start + anchor_h
         self._update_property_panel()
         self.viewport.update()
 
@@ -1030,6 +1035,9 @@ class CADBoardWindow(QMainWindow):
         if component_type == '引桥桥墩':
             from face_overview_dialog import PIER_COMMON_PARAMS
             visible_keys = PIER_COMMON_PARAMS
+        elif component_type == '索缆锚锭':
+            from face_overview_dialog import CABLE_ANCHOR_COMMON_PARAMS
+            visible_keys = CABLE_ANCHOR_COMMON_PARAMS
         dlg = FaceOverviewDialog(self, component_type, component_params, face_elems, visible_keys=visible_keys)
         if dlg.exec_() != QDialog.Accepted:
             return
@@ -1044,6 +1052,8 @@ class CADBoardWindow(QMainWindow):
                 new_params = normalize_pier_params(new_params)
             except Exception:
                 pass
+        elif component_type == '索缆锚锭':
+            new_params = self._normalize_cable_anchor_params(new_params)
 
         self._save_undo_state()
 
@@ -1064,6 +1074,9 @@ class CADBoardWindow(QMainWindow):
             if source_elem.component_type == '引桥桥墩':
                 pier_h = float(new_params.get('墩高', 1200)) + float(new_params.get('盖梁总高', 300))
                 source_elem.z_end = source_elem.z_start + pier_h
+            elif source_elem.component_type == '索缆锚锭':
+                anchor_h = float(new_params.get('底柱高度', 1000)) + float(new_params.get('承台高度', 400)) + float(new_params.get('锚块总高', 2039))
+                source_elem.z_end = source_elem.z_start + anchor_h
             elif source_elem.component_type == '直角三棱柱':
                 if '高度' in new_params:
                     source_elem.z_end = source_elem.z_start + float(new_params['高度'])
@@ -1243,19 +1256,11 @@ class CADBoardWindow(QMainWindow):
 
         # Phase 3 Enhancement: 智能识别三视图按钮
         self._recognize_views_btn = QPushButton("🔍 识别三视图")
-        self._recognize_views_btn.setToolTip("基于本地规则识别导入的PDF三视图")
+        self._recognize_views_btn.setToolTip("识别导入的PDF/DWG三视图；复杂构件（引桥桥墩/索缆锚锭）自动调用 AI 复杂识图")
         self._recognize_views_btn.setMinimumWidth(110)
         self._recognize_views_btn.setStyleSheet("QPushButton { background-color: #1565C0; color: white; font-weight: bold; }")
         self._recognize_views_btn.clicked.connect(self._recognize_pdf_views)
         self.toolbar.addWidget(self._recognize_views_btn)
-
-        # Phase 2 Enhancement: 复杂识别（Qwen-VL 多模态 AI）
-        self._complex_recognize_btn = QPushButton("🧠 复杂识别")
-        self._complex_recognize_btn.setToolTip("使用 Qwen-VL 从 PDF/图片识别复杂构件（如引桥桥墩）")
-        self._complex_recognize_btn.setMinimumWidth(110)
-        self._complex_recognize_btn.setStyleSheet("QPushButton { background-color: #7B1FA2; color: white; font-weight: bold; }")
-        self._complex_recognize_btn.clicked.connect(self._recognize_complex_views)
-        self.toolbar.addWidget(self._complex_recognize_btn)
 
         # Phase 3 Enhancement: 退出面编辑模式按钮（默认隐藏，进入面编辑后显示）
         self._exit_face_btn = QPushButton("❌ 退出面编辑")
@@ -1678,6 +1683,8 @@ class CADBoardWindow(QMainWindow):
         )
         if not file_path:
             return
+
+        self._last_imported_file_path = file_path
 
         ext = os.path.splitext(file_path)[1].lower()
         if ext == '.pdf':
@@ -2427,9 +2434,24 @@ class CADBoardWindow(QMainWindow):
         _write_board_log(f"Entered face edit mode: component={component_type} id={component_id}")
 
     def _recognize_pdf_views(self):
-        """智能识别导入的PDF三视图并自动创建参数化组件"""
+        """智能识别导入的PDF/DWG三视图：先尝试本地规则识别，复杂构件走 AI 复杂识图"""
         self.status_bar.showMessage("正在分析三视图布局...")
         try:
+            # 1. 若最近导入的文件路径暗示复杂构件，直接走复杂识图
+            last_path = getattr(self, '_last_imported_file_path', None) or ''
+            hinted_type = None
+            lower_path = last_path.lower()
+            if '引桥桥墩' in lower_path or '桥墩' in lower_path:
+                hinted_type = '引桥桥墩'
+            elif '索缆锚锭' in lower_path or '锚锭' in lower_path:
+                hinted_type = '索缆锚锭'
+
+            if hinted_type:
+                self.status_bar.showMessage(f"检测到复杂构件图纸：{hinted_type}，调用 AI 复杂识图...")
+                self._recognize_complex_views(file_path=last_path, component_hint=hinted_type)
+                return
+
+            # 2. 否则先尝试本地简单识别
             success, msg = auto_associate_from_pdf_views(self)
             if success:
                 try:
@@ -2438,6 +2460,12 @@ class CADBoardWindow(QMainWindow):
                     pass
                 QMessageBox.information(self, "三视图识别", msg)
                 self.status_bar.showMessage("三视图识别成功，画布已自适应")
+                return
+
+            # 3. 本地识别失败且存在最近导入文件，尝试复杂识图兜底
+            if last_path and os.path.exists(last_path):
+                self.status_bar.showMessage("本地规则识别未匹配，尝试 AI 复杂识图...")
+                self._recognize_complex_views(file_path=last_path, component_hint=None)
             else:
                 QMessageBox.warning(self, "三视图识别", msg)
                 self.status_bar.showMessage("三视图识别失败")
@@ -2447,8 +2475,13 @@ class CADBoardWindow(QMainWindow):
             QMessageBox.critical(self, "三视图识别错误", f"识别过程中出错:\n{e}")
             self.status_bar.showMessage("三视图识别出错")
 
-    def _recognize_complex_views(self):
-        """复杂识别：PDF/DWG 导入原始线条作为面元素，图片 fallback 到参数化面"""
+    def _recognize_complex_views(self, file_path=None, component_hint=None):
+        """复杂识别：PDF/DWG 导入原始线条作为面元素，图片 fallback 到参数化面
+        
+        Args:
+            file_path: 可选，指定图纸文件路径。为 None 时弹出文件选择对话框。
+            component_hint: 可选，指定优先识别的构件类型提示。
+        """
         if not has_api_key():
             reply = QMessageBox.question(
                 self,
@@ -2461,12 +2494,13 @@ class CADBoardWindow(QMainWindow):
                 self._show_drawing_ai_config()
             return
 
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "选择图纸文件",
-            "",
-            "PDF 文件 (*.pdf);;DWG 文件 (*.dwg);;图片文件 (*.png *.jpg *.jpeg *.bmp);;所有文件 (*)",
-        )
+        if file_path is None:
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "选择图纸文件",
+                "",
+                "PDF 文件 (*.pdf);;DWG 文件 (*.dwg);;图片文件 (*.png *.jpg *.jpeg *.bmp);;所有文件 (*)",
+            )
         if not file_path:
             return
 
@@ -2475,16 +2509,20 @@ class CADBoardWindow(QMainWindow):
 
         self.status_bar.showMessage("正在使用 Qwen-VL 识别图纸，请稍候...")
         try:
-            results = recognize_drawing_file(file_path, component_hint='引桥桥墩')
+            results = recognize_drawing_file(file_path, component_hint=component_hint)
             if not results:
                 raise ValueError("未返回任何识别结果")
 
             result = results[0]
             comp_type = result.get('component_type')
             params = result.get('params') or {}
+            # 按组件类型归一化参数
             try:
-                from utils.generated_component_cache import normalize_pier_params
-                params = normalize_pier_params(params)
+                if comp_type == '引桥桥墩':
+                    from utils.generated_component_cache import normalize_pier_params
+                    params = normalize_pier_params(params)
+                elif comp_type == '索缆锚锭':
+                    params = self._normalize_cable_anchor_params(params)
             except Exception:
                 pass
             if not comp_type:
@@ -2539,8 +2577,8 @@ class CADBoardWindow(QMainWindow):
             self._update_property_panel()
             self.viewport.update()
 
-            # 引桥桥墩识别成功后自动弹出常用参数编辑面板
-            if comp_type == '引桥桥墩':
+            # 识别成功后自动弹出常用参数编辑面板
+            if comp_type in ('引桥桥墩', '索缆锚锭'):
                 self._show_face_overview_for_component(source.id)
 
             conf = result.get('confidence', 0.0)
@@ -2557,6 +2595,26 @@ class CADBoardWindow(QMainWindow):
             _write_board_log(f"_recognize_complex_views crash: {e}\n{err}")
             QMessageBox.critical(self, "图纸识别错误", f"识别过程中出错:\n{e}\n\n已记录到 drawing_recognizer.log")
             self.status_bar.showMessage("图纸识别出错")
+
+    def _normalize_cable_anchor_params(self, params: dict) -> dict:
+        """把 AI 识别出的索缆锚锭参数归一化为标准参数集。"""
+        normalized = {}
+        core_keys = {
+            '锚块总长': 5450.0,
+            '锚块总高': 2039.0,
+            '锚块宽度': 1200.0,
+            '承台长度': 5680.0,
+            '承台宽度': 1600.0,
+            '承台高度': 400.0,
+            '底柱半径': 170.0,
+            '底柱高度': 1000.0,
+        }
+        for k, default in core_keys.items():
+            normalized[k] = float(params.get(k, default))
+        for k in ('x', 'y', 'z', 'z_bottom', 'z_top'):
+            if k in params:
+                normalized[k] = params[k]
+        return normalized
 
     def _build_faces_from_imported_lines(self, file_path, source, comp_type, params):
         """
@@ -2620,8 +2678,18 @@ class CADBoardWindow(QMainWindow):
             target['front'] = (cap_len, total_h)
             target['top'] = (cap_len, cap_w)
             target['left'] = (cap_w, total_h)
+        elif comp_type == '索缆锚锭':
+            L = float(params.get('锚块总长', 5450))
+            W = float(params.get('锚块宽度', 1200))
+            H = float(params.get('锚块总高', 2039))
+            CH = float(params.get('承台高度', 400))
+            DH = float(params.get('底柱高度', 1000))
+            total_h = H + CH + DH
+            target['front'] = (L, total_h)
+            target['top'] = (float(params.get('承台长度', 5680)), float(params.get('承台宽度', 1600)))
+            target['left'] = (W, total_h)
         else:
-            # 非引桥桥墩：不强制缩放，保持原始包围盒作为面大小
+            # 非复杂构件：不强制缩放，保持原始包围盒作为面大小
             for vn, vd in views.items():
                 target[vn] = (vd['bounds'][2] - vd['bounds'][0], vd['bounds'][3] - vd['bounds'][1])
 
@@ -2997,6 +3065,9 @@ class CADBoardWindow(QMainWindow):
             elif source_elem.component_type == '引桥桥墩':
                 pier_h = float(new_params.get('墩高', 1200)) + float(new_params.get('盖梁总高', 300))
                 source_elem.z_end = source_elem.z_start + pier_h
+            elif source_elem.component_type == '索缆锚锭':
+                anchor_h = float(new_params.get('底柱高度', 1000)) + float(new_params.get('承台高度', 400)) + float(new_params.get('锚块总高', 2039))
+                source_elem.z_end = source_elem.z_start + anchor_h
             else:
                 z_bottom = new_params.get('z_bottom') or new_params.get('z1') or new_params.get('z', 0)
                 z_top = new_params.get('z_top') or new_params.get('z2') or new_params.get('z', 0)

@@ -339,6 +339,11 @@ PARAM_MAP_RULES = {
         '盖梁宽': ('height', 'direct'),
         'z_bottom': ('z_start', 'direct'),
     },
+    '索缆锚锭': {
+        '承台长度': ('width', 'direct'),
+        '承台宽度': ('height', 'direct'),
+        'z_bottom': ('z_start', 'direct'),
+    },
 }
 
 
@@ -646,6 +651,17 @@ def create_element_from_params(params, component_type):
             elem = RectangleElement(cx - L / 2, cy - W / 2, L, W)
             elem.z_start = float(params.get('z_bottom', 0))
             elem.z_end = elem.z_start + float(params.get('墩高', 1200)) + float(params.get('盖梁总高', 300))
+            return elem
+
+        elif component_type == '索缆锚锭':
+            from geometry.elements import RectangleElement
+            cx = float(params.get('x', 0))
+            cy = float(params.get('y', 0))
+            CL = float(params.get('承台长度', 5680))
+            CW = float(params.get('承台宽度', 1600))
+            elem = RectangleElement(cx - CL / 2, cy - CW / 2, CL, CW)
+            elem.z_start = float(params.get('z_bottom', 0))
+            elem.z_end = elem.z_start + float(params.get('底柱高度', 1000)) + float(params.get('承台高度', 400)) + float(params.get('锚块总高', 2039))
             return elem
 
     except Exception:

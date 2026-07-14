@@ -136,6 +136,30 @@ def pdf_to_images(pdf_path: str, output_dir: Optional[str] = None, dpi: int = 15
 
 def _build_prompt(component_hint: Optional[str]) -> str:
     hint_text = f"本次优先识别构件类型：{component_hint}。" if component_hint else ""
+
+    # 根据提示动态选择示例类型与参数
+    if component_hint == '索缆锚锭':
+        example_type = "索缆锚锭"
+        example_params = """    "锚块总长": {{"value": 5450, "unit": "mm"}},
+    "锚块总高": {{"value": 2039, "unit": "mm"}},
+    "锚块宽度": {{"value": 1200, "unit": "mm"}},
+    "承台长度": {{"value": 5680, "unit": "mm"}},
+    "承台宽度": {{"value": 1600, "unit": "mm"}},
+    "承台高度": {{"value": 400, "unit": "mm"}},
+    "底柱半径": {{"value": 170, "unit": "mm"}},
+    "底柱高度": {{"value": 1000, "unit": "mm"}}"""
+        detail_note = "只输出上述 8 个核心外轮廓参数，不要输出底柱排布细节等内部尺寸，这些由系统自动按默认值计算。"
+    else:
+        example_type = "引桥桥墩"
+        example_params = """    "盖梁总长": {{"value": 1930, "unit": "mm"}},
+    "盖梁总高": {{"value": 300, "unit": "mm"}},
+    "盖梁宽": {{"value": 300, "unit": "mm"}},
+    "墩柱直径": {{"value": 250, "unit": "mm"}},
+    "墩柱间距": {{"value": 1140, "unit": "mm"}},
+    "墩高": {{"value": 1200, "unit": "mm"}},
+    "系梁根数": {{"value": 2, "unit": "个"}}"""
+        detail_note = "只输出上述 7 个核心外轮廓参数，不要输出凸起、斜边、系梁细节等内部尺寸，这些由系统自动按默认值计算。"
+
     return f"""你是一位资深的桥梁工程图纸识别专家。我将提供一张 PDF/DWG 图纸截图，其中包含桥梁构件的三视图或二维表达。
 
 {hint_text}
@@ -143,7 +167,7 @@ def _build_prompt(component_hint: Optional[str]) -> str:
 
 请按以下 JSON 格式输出，不要输出任何额外文字：
 {{
-  "component_type": "引桥桥墩",
+  "component_type": "{example_type}",
   "confidence": 0.92,
   "views": {{
     "front": {{"description": "主视图描述"}},
@@ -151,23 +175,17 @@ def _build_prompt(component_hint: Optional[str]) -> str:
     "left": {{"description": "左视图描述"}}
   }},
   "parameters": {{
-    "盖梁总长": {{"value": 1930, "unit": "mm"}},
-    "盖梁总高": {{"value": 300, "unit": "mm"}},
-    "盖梁宽": {{"value": 300, "unit": "mm"}},
-    "墩柱直径": {{"value": 250, "unit": "mm"}},
-    "墩柱间距": {{"value": 1140, "unit": "mm"}},
-    "墩高": {{"value": 1200, "unit": "mm"}},
-    "系梁根数": {{"value": 2, "unit": "个"}}
+{example_params}
   }},
   "notes": "任何补充说明"
 }}
 
 说明：
-1. component_type 请从 [引桥桥墩] 中选择；无法判断时填最接近的。
+1. component_type 请从 [引桥桥墩, 索缆锚锭] 中选择；无法判断时填最接近的。
 2. 单位支持 mm/cm/m，输出时统一标注实际单位，系统会自动换算为 mm。
 3. 若图纸中某些尺寸缺失，可省略该字段，系统会使用默认值。
 4. confidence 为 0~1 的识别置信度。
-5. 当前使用精简参数版：只输出上述 7 个核心外轮廓参数，不要输出凸起、斜边、系梁细节等内部尺寸，这些由系统自动按默认值计算。
+5. 当前使用精简参数版：{detail_note}
 """
 
 

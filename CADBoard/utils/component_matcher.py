@@ -19,6 +19,18 @@ APPROACH_PIER_DEFAULTS = {
     '系梁根数': 2,
 }
 
+# 索缆锚锭默认参数（与 组件测试/索缆锚锭.py 保持一致）
+CABLE_ANCHOR_DEFAULTS = {
+    '锚块总长': 5450.0,
+    '锚块总高': 2039.0,
+    '锚块宽度': 1200.0,
+    '承台长度': 5680.0,
+    '承台宽度': 1600.0,
+    '承台高度': 400.0,
+    '底柱半径': 170.0,
+    '底柱高度': 1000.0,
+}
+
 
 COMPONENT_TEMPLATES = {
     '引桥桥墩': {
@@ -26,6 +38,12 @@ COMPONENT_TEMPLATES = {
         'default_params': dict(APPROACH_PIER_DEFAULTS),
         'required': ['盖梁总长', '盖梁总高', '盖梁宽', '墩高', '墩柱直径'],
         'optional': list(APPROACH_PIER_DEFAULTS.keys()),
+    },
+    '索缆锚锭': {
+        'display_name': '索缆锚锭',
+        'default_params': dict(CABLE_ANCHOR_DEFAULTS),
+        'required': ['锚块总长', '锚块总高', '锚块宽度', '承台长度', '承台宽度'],
+        'optional': list(CABLE_ANCHOR_DEFAULTS.keys()),
     },
 }
 
@@ -83,6 +101,8 @@ def match_recognized_result(recognized: Dict, component_hint: str = None) -> Tup
     # 名称归一化
     if '桥墩' in comp_type or comp_type.lower() in ('pier', 'approach pier'):
         comp_type = '引桥桥墩'
+    if '锚锭' in comp_type or '锚' in comp_type or comp_type.lower() in ('anchor', 'cable anchor'):
+        comp_type = '索缆锚锭'
 
     confidence = float(recognized.get('confidence', 0.0) or 0.0)
     notes = recognized.get('notes', '') or ''

@@ -318,6 +318,38 @@ def _pier_left_update(elem, old, params):
     return params
 
 
+# ========== 索缆锚锭面更新函数 ==========
+
+def _cable_anchor_top_update(elem, old, params):
+    """索缆锚锭俯视图: width→承台长度, height→承台宽度"""
+    b = elem.get_bounds()
+    params['承台长度'] = b[2] - b[0]
+    params['承台宽度'] = b[3] - b[1]
+    return params
+
+
+def _cable_anchor_front_update(elem, old, params):
+    """索缆锚锭主视图: width→锚块总长, height→总高"""
+    b = elem.get_bounds()
+    params['锚块总长'] = b[2] - b[0]
+    total_h = b[3] - b[1]
+    dh = float(params.get('底柱高度', 1000))
+    ch = float(params.get('承台高度', 400))
+    params['锚块总高'] = max(0, total_h - dh - ch)
+    return params
+
+
+def _cable_anchor_left_update(elem, old, params):
+    """索缆锚锭左视图: width→锚块宽度, height→总高"""
+    b = elem.get_bounds()
+    params['锚块宽度'] = b[2] - b[0]
+    total_h = b[3] - b[1]
+    dh = float(params.get('底柱高度', 1000))
+    ch = float(params.get('承台高度', 400))
+    params['锚块总高'] = max(0, total_h - dh - ch)
+    return params
+
+
 # ========== 动态面生成器 ==========
 
 def _polygon_dynamic_faces(params, component_id):
@@ -583,6 +615,38 @@ def _make_approach_pier_left(p):
         ])
 
     return PolylineElement(pts, closed=False)
+
+
+def _make_cable_anchor_top(p):
+    """索缆锚锭俯视图：承台矩形轮廓 + 锚块位置示意"""
+    from geometry.elements import RectangleElement
+    CL = float(p.get('承台长度', 5680))
+    CW = float(p.get('承台宽度', 1600))
+    return RectangleElement(-CL / 2, -CW / 2, CL, CW)
+
+
+def _make_cable_anchor_front(p):
+    """索缆锚锭主视图：锚块 + 承台 + 底柱外轮廓（简化矩形）"""
+    from geometry.elements import RectangleElement
+    L = float(p.get('锚块总长', 5450))
+    H = float(p.get('锚块总高', 2039))
+    CH = float(p.get('承台高度', 400))
+    DH = float(p.get('底柱高度', 1000))
+    z_bottom = float(p.get('z_bottom', 0))
+    total_h = H + CH + DH
+    return RectangleElement(-L / 2, z_bottom, L, total_h)
+
+
+def _make_cable_anchor_left(p):
+    """索缆锚锭左视图：锚块 + 承台 + 底柱外轮廓（简化矩形）"""
+    from geometry.elements import RectangleElement
+    W = float(p.get('锚块宽度', 1200))
+    H = float(p.get('锚块总高', 2039))
+    CH = float(p.get('承台高度', 400))
+    DH = float(p.get('底柱高度', 1000))
+    z_bottom = float(p.get('z_bottom', 0))
+    total_h = H + CH + DH
+    return RectangleElement(-W / 2, z_bottom, W, total_h)
 
 
 def _make_circle(cx, cy, r):
@@ -916,6 +980,30 @@ FACE_TEMPLATES = {
             'description': '左视图 (盖梁 + 墩柱 + 系梁)',
             'generator': _make_approach_pier_left,
             'update_params': _pier_left_update,
+            'snap_plane': 'yz',
+        },
+    },
+    '索缆锚锭': {
+        # 三视图：俯视图 + 主视图 + 左视图
+        'top': {
+            'plane': 'xy',
+            'description': '俯视图 (承台顶面)',
+            'generator': _make_cable_anchor_top,
+            'update_params': _cable_anchor_top_update,
+            'snap_plane': 'xy',
+        },
+        'front': {
+            'plane': 'xz',
+            'description': '主视图 (锚块长×总高)',
+            'generator': _make_cable_anchor_front,
+            'update_params': _cable_anchor_front_update,
+            'snap_plane': 'xz',
+        },
+        'left': {
+            'plane': 'yz',
+            'description': '左视图 (锚块宽×总高)',
+            'generator': _make_cable_anchor_left,
+            'update_params': _cable_anchor_left_update,
             'snap_plane': 'yz',
         },
     },

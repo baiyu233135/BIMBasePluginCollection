@@ -50,7 +50,7 @@ get_noumKV_from_instancekey = None
 try:
     from pyp3d import (
         Component, Attr, Line, Section,
-        Sweep, Cube, Sphere, Cone, Arc,
+        Sweep, Loft, Cube, Sphere, Cone, Arc,
         Vec2, Vec3, Point, place, place_to, scale, translate, rotation, rotate, Combine,
         isinside_global_variable, set_global_variable,
         create_geometry, entityid_isvaid,
@@ -1445,6 +1445,106 @@ class ApproachPierComponent(Component):
             self['引桥桥墩'] = Cube()
 
 
+class CableAnchorComponent(Component):
+    """索缆锚锭：锚块 + 承台 + 14 根底柱
+    几何逻辑与 组件测试/索缆锚锭.py 保持一致，但柱位随锚块总长参数化分布。"""
+
+    DEFAULT_PARAMS = {
+        '锚块总长': 5450.0,
+        '锚块总高': 2039.0,
+        '锚块宽度': 1200.0,
+        '承台长度': 5680.0,
+        '承台宽度': 1600.0,
+        '承台高度': 400.0,
+        '底柱半径': 170.0,
+        '底柱高度': 1000.0,
+    }
+
+    def __init__(self, **kwargs):
+        super().__init__()
+        for k, v in self.DEFAULT_PARAMS.items():
+            self[k] = Attr(float(v), show=True, obvious=True)
+        self['偏移X'] = Attr(0.0, show=False)
+        self['偏移Y'] = Attr(0.0, show=False)
+        self['偏移Z'] = Attr(0.0, show=False)
+        for k, v in kwargs.items():
+            if k in self.DEFAULT_PARAMS or k in ('偏移X', '偏移Y', '偏移Z'):
+                self[k] = Attr(float(v), show=(k in self.DEFAULT_PARAMS), obvious=(k in self.DEFAULT_PARAMS))
+        self['索缆锚锭'] = Attr(None, show=True, obvious=True)
+        self.replace()
+
+    @export
+    def replace(self):
+        try:
+            L = self['锚块总长']
+            H = self['锚块总高']
+            W = self['锚块宽度']
+            CL = self['承台长度']
+            CW = self['承台宽度']
+            CH = self['承台高度']
+            R = self['底柱半径']
+            DH = self['底柱高度']
+            ox = float(self['偏移X']) if '偏移X' in self else 0.0
+            oy = float(self['偏移Y']) if '偏移Y' in self else 0.0
+            oz = float(self['偏移Z']) if '偏移Z' in self else 0.0
+
+            N = 64
+            circle_pts = [Vec2(R * math.cos(2 * math.pi * i / N), R * math.sin(2 * math.pi * i / N))
+                          for i in range(N)]
+            sec = Section(*circle_pts)
+
+            # 7 对底柱，沿锚块长度方向参数化分布
+            col_count = 7
+            if col_count > 1:
+                x_start = max(R, L * 0.022)
+                x_end = max(x_start + 2 * R, L - max(R, L * 0.042))
+                spacing = (x_end - x_start) / (col_count - 1)
+            else:
+                x_start = L / 2.0
+                spacing = 0.0
+            y_offset = max(R + 50.0, W * 0.28)
+
+            columns = []
+            for i in range(col_count):
+                cx = x_start + i * spacing
+                for cy in (y_offset, -y_offset):
+                    col = translate(ox + cx, oy + cy, oz) * Loft(sec, translate(0, 0, DH) * sec)
+                    columns.append(col)
+            alld = Combine(*columns) if columns else None
+
+            # 承台
+            CT = translate(ox, oy - CW / 2, oz + DH) * scale(CL, CW, CH) * Cube()
+
+            # 锚块截面（按 L/H 比例缩放原始轮廓）
+            left_x = 50.0 * (L / 5450.0)
+            right_x = left_x + L
+            top_y = H
+            p4_x = 4863.0 * (L / 5450.0)
+            p5_x = 3863.0 * (L / 5450.0)
+            mid_y = 1250.0 * (H / 2039.0)
+            left_top_y = 1300.0 * (H / 2039.0)
+            MDP = Section(
+                Vec2(left_x, 0),
+                Vec2(right_x, 0),
+                Vec2(right_x, mid_y),
+                Vec2(p4_x, top_y),
+                Vec2(p5_x, top_y),
+                Vec2(left_x, left_top_y)
+            )
+            section = rotate(Vec3(1, 0, 0), 0.5 * math.pi) * MDP
+            line = Line(Vec3(0, 0, 0), Vec3(0, W, 0))
+            MD = translate(ox, oy - W / 2, oz + DH + CH) * Sweep(section, line)
+
+            parts = []
+            if alld is not None:
+                parts.append(alld)
+            parts.extend([CT, MD])
+            self['索缆锚锭'] = Combine(*parts)
+        except Exception as e:
+            _log(f"CableAnchorComponent replace failed: {e}")
+            raise
+
+
 class BIMBaseSync:
     def __init__(self, board):
         self.board = board
@@ -1550,6 +1650,8 @@ class BIMBaseSync:
             return '长方体'
         if '盖梁总长' in keys or '墩柱直径' in keys:
             return '引桥桥墩'
+        if '锚块总长' in keys or '底柱半径' in keys:
+            return '索缆锚锭'
         return ''
 
     def _place_component(self, comp):
@@ -1738,7 +1840,7 @@ class BIMBaseSync:
             if comp is None:
                 return False
             # 所有组件统一使用 create_geometry 优先的 place_component_at 自动放置
-            SOLID_TYPES = {'圆柱', '正方体', '长方体', '球体', '直角三棱柱', '圆锥', '引桥桥墩'}
+            SOLID_TYPES = {'圆柱', '正方体', '长方体', '球体', '直角三棱柱', '圆锥', '引桥桥墩', '索缆锚锭'}
             if comp_type in SOLID_TYPES:
                 # 优先使用用户通过弹窗输入的 PDF 放置锚点，防止 PolylineElement 等
                 # 没有 x/y/cx/cy 属性的元素丢失 X/Y 坐标
@@ -1886,6 +1988,15 @@ class BIMBaseSync:
                     params[k] = float(cp[k]) if k != '系梁根数' else int(cp[k])
             comp = ApproachPierComponent(**params)
             return comp, params, '引桥桥墩'
+
+        if comp_type == '索缆锚锭':
+            cp = dict(getattr(elem, 'component_params', {}))
+            params = dict(CableAnchorComponent.DEFAULT_PARAMS)
+            for k in params:
+                if k in cp:
+                    params[k] = float(cp[k])
+            comp = CableAnchorComponent(**params)
+            return comp, params, '索缆锚锭'
 
         if elem_type == 'line' or comp_type == 'Line3DComponent':
             x2 = getattr(elem, 'x2', x + 100)
@@ -2162,7 +2273,7 @@ class BIMBaseSync:
             'SweepBoxComponent', 'Circle3DComponent', 'Arc3DComponent',
             'Ellipse3DComponent', 'Line3DComponent', 'Point3DComponent',
             'Polygon3DComponent', 'Polyline3DComponent',
-            '直角三棱柱', '圆柱', '正方体', '长方体', '引桥桥墩',
+            '直角三棱柱', '圆柱', '正方体', '长方体', '引桥桥墩', '索缆锚锭',
         }
 
         # 辅助：定期刷新 UI
