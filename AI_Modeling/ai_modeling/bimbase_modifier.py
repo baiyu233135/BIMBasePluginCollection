@@ -537,7 +537,7 @@ def _read_params_from_entity(eid):
 
 
 def _extract_arc_params_from_params(params):
-    """从参数字典/Noumenon中提取圆弧参数（适配 组件测试/曲线.py 的命名）。"""
+    """从参数字典/Noumenon中提取圆弧参数（适配中文参数命名）。"""
     if params is None:
         return None
     try:
