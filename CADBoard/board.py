@@ -2553,11 +2553,13 @@ class CADBoardWindow(QMainWindow):
                 e.selected = False
             source.selected = True
 
-            if is_line_source:
+            if is_line_source and comp_type == '引桥桥墩':
+                # 引桥桥墩：保留原始 DWG/PDF 线条作为面元素
                 ok, msg = self._build_faces_from_imported_lines(file_path, source, comp_type, params)
                 if not ok:
                     raise ValueError(msg)
             else:
+                # 索缆锚锭 / 图片源：使用参数化面模板，保留原始导入线条可见
                 if self._face_group is None:
                     self._face_group = ComponentFaceGroup(self)
                 source.component_params['_face_mode'] = '三视图'

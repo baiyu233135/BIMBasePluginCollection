@@ -1760,6 +1760,9 @@ class BIMBaseSync:
                         elif comp_type == '引桥桥墩':
                             pier_h = float(new_params.get('墩高', 1200)) + float(new_params.get('盖梁总高', 300))
                             elem.z_end = elem.z_start + pier_h
+                        elif comp_type == '索缆锚锭':
+                            anchor_h = float(new_params.get('底柱高度', 1000)) + float(new_params.get('承台高度', 400)) + float(new_params.get('锚块总高', 2039))
+                            elem.z_end = elem.z_start + anchor_h
                         elif comp_type == '球体':
                             if '半径' in new_params:
                                 elem.z_end = elem.z_start + 2 * float(new_params['半径'])
@@ -1880,6 +1883,9 @@ class BIMBaseSync:
             elif comp_type == '引桥桥墩':
                 pier_h = float(params.get('墩高', 1200)) + float(params.get('盖梁总高', 300))
                 elem.z_end = elem.z_start + pier_h
+            elif comp_type == '索缆锚锭':
+                anchor_h = float(params.get('底柱高度', 1000)) + float(params.get('承台高度', 400)) + float(params.get('锚块总高', 2039))
+                elem.z_end = elem.z_start + anchor_h
             elif comp_type == '球体':
                 if '半径' in params:
                     elem.z_end = elem.z_start + 2 * float(params['半径'])

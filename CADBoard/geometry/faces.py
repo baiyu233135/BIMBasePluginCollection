@@ -618,35 +618,162 @@ def _make_approach_pier_left(p):
 
 
 def _make_cable_anchor_top(p):
-    """索缆锚锭俯视图：承台矩形轮廓 + 锚块位置示意"""
-    from geometry.elements import RectangleElement
+    """索缆锚锭俯视图：承台矩形轮廓 + 底柱位置示意（小八边形）"""
+    from geometry.elements import PolylineElement
+    import math
     CL = float(p.get('承台长度', 5680))
     CW = float(p.get('承台宽度', 1600))
-    return RectangleElement(-CL / 2, -CW / 2, CL, CW)
+    L = float(p.get('锚块总长', 5450))
+    W = float(p.get('锚块宽度', 1200))
+    R = float(p.get('底柱半径', 170))
+
+    pts = []
+    # 承台外轮廓
+    pts.extend([
+        (-CL / 2, -CW / 2), (CL / 2, -CW / 2),
+        (CL / 2, CW / 2), (-CL / 2, CW / 2),
+        (-CL / 2, -CW / 2)
+    ])
+
+    # 锚块位置示意（虚线矩形）
+    pts.append(None)
+    pts.extend([
+        (-L / 2, -W / 2), (L / 2, -W / 2),
+        (L / 2, W / 2), (-L / 2, W / 2),
+        (-L / 2, -W / 2)
+    ])
+
+    # 7 对底柱位置示意（八边形）
+    col_count = 7
+    if col_count > 1 and L > 2 * R:
+        x_start = max(R, L * 0.022)
+        x_end = max(x_start + 2 * R, L - max(R, L * 0.042))
+        spacing = (x_end - x_start) / (col_count - 1)
+    else:
+        x_start = L / 2.0
+        spacing = 0.0
+    y_offset = max(R + 50.0, W * 0.28)
+
+    for i in range(col_count):
+        cx = x_start + i * spacing
+        for cy in (y_offset, -y_offset):
+            pts.append(None)
+            octagon = []
+            for k in range(9):
+                ang = 2 * math.pi * k / 8
+                octagon.append((cx + R * math.cos(ang), cy + R * math.sin(ang)))
+            pts.extend(octagon)
+
+    return PolylineElement(pts, closed=False)
 
 
 def _make_cable_anchor_front(p):
-    """索缆锚锭主视图：锚块 + 承台 + 底柱外轮廓（简化矩形）"""
-    from geometry.elements import RectangleElement
+    """索缆锚锭主视图：承台 + 锚块轮廓 + 底柱"""
+    from geometry.elements import PolylineElement
     L = float(p.get('锚块总长', 5450))
     H = float(p.get('锚块总高', 2039))
+    CL = float(p.get('承台长度', 5680))
     CH = float(p.get('承台高度', 400))
     DH = float(p.get('底柱高度', 1000))
+    R = float(p.get('底柱半径', 170))
     z_bottom = float(p.get('z_bottom', 0))
-    total_h = H + CH + DH
-    return RectangleElement(-L / 2, z_bottom, L, total_h)
+
+    pts = []
+    # 承台外轮廓
+    pts.extend([
+        (-CL / 2, z_bottom + DH),
+        (CL / 2, z_bottom + DH),
+        (CL / 2, z_bottom + DH + CH),
+        (-CL / 2, z_bottom + DH + CH),
+        (-CL / 2, z_bottom + DH)
+    ])
+
+    # 锚块截面（按比例缩放原始轮廓）
+    left_x = 50.0 * (L / 5450.0)
+    right_x = left_x + L
+    top_y = z_bottom + DH + CH + H
+    p4_x = 4863.0 * (L / 5450.0)
+    p5_x = 3863.0 * (L / 5450.0)
+    mid_y = z_bottom + DH + CH + 1250.0 * (H / 2039.0)
+    left_top_y = z_bottom + DH + CH + 1300.0 * (H / 2039.0)
+    pts.append(None)
+    pts.extend([
+        (-CL / 2 + left_x, z_bottom + DH + CH),
+        (-CL / 2 + right_x, z_bottom + DH + CH),
+        (-CL / 2 + right_x, mid_y),
+        (-CL / 2 + p4_x, top_y),
+        (-CL / 2 + p5_x, top_y),
+        (-CL / 2 + left_x, left_top_y),
+        (-CL / 2 + left_x, z_bottom + DH + CH)
+    ])
+
+    # 底柱（7 根，正视图为矩形）
+    col_count = 7
+    if col_count > 1 and L > 2 * R:
+        x_start = max(R, L * 0.022)
+        x_end = max(x_start + 2 * R, L - max(R, L * 0.042))
+        spacing = (x_end - x_start) / (col_count - 1)
+    else:
+        x_start = L / 2.0
+        spacing = 0.0
+    for i in range(col_count):
+        cx = -CL / 2 + x_start + i * spacing
+        pts.append(None)
+        pts.extend([
+            (cx - R, z_bottom),
+            (cx + R, z_bottom),
+            (cx + R, z_bottom + DH),
+            (cx - R, z_bottom + DH),
+            (cx - R, z_bottom)
+        ])
+
+    return PolylineElement(pts, closed=False)
 
 
 def _make_cable_anchor_left(p):
-    """索缆锚锭左视图：锚块 + 承台 + 底柱外轮廓（简化矩形）"""
-    from geometry.elements import RectangleElement
+    """索缆锚锭左视图：承台 + 锚块 + 底柱"""
+    from geometry.elements import PolylineElement
     W = float(p.get('锚块宽度', 1200))
     H = float(p.get('锚块总高', 2039))
+    CW = float(p.get('承台宽度', 1600))
     CH = float(p.get('承台高度', 400))
     DH = float(p.get('底柱高度', 1000))
+    R = float(p.get('底柱半径', 170))
     z_bottom = float(p.get('z_bottom', 0))
-    total_h = H + CH + DH
-    return RectangleElement(-W / 2, z_bottom, W, total_h)
+
+    pts = []
+    # 承台外轮廓
+    pts.extend([
+        (-CW / 2, z_bottom + DH),
+        (CW / 2, z_bottom + DH),
+        (CW / 2, z_bottom + DH + CH),
+        (-CW / 2, z_bottom + DH + CH),
+        (-CW / 2, z_bottom + DH)
+    ])
+
+    # 锚块侧视轮廓
+    pts.append(None)
+    pts.extend([
+        (-W / 2, z_bottom + DH + CH),
+        (W / 2, z_bottom + DH + CH),
+        (W / 2, z_bottom + DH + CH + H),
+        (-W / 2, z_bottom + DH + CH + H),
+        (-W / 2, z_bottom + DH + CH)
+    ])
+
+    # 底柱（两排，侧视图为两个矩形）
+    y_offset = max(R + 50.0, W * 0.28)
+    for cy in (y_offset, -y_offset):
+        pts.append(None)
+        pts.extend([
+            (cy - R, z_bottom),
+            (cy + R, z_bottom),
+            (cy + R, z_bottom + DH),
+            (cy - R, z_bottom + DH),
+            (cy - R, z_bottom)
+        ])
+
+    return PolylineElement(pts, closed=False)
 
 
 def _make_circle(cx, cy, r):
