@@ -216,6 +216,12 @@ class {class_name}(Component):
         self['墩柱间距'] = Attr({p['墩柱间距']:.6f}, obvious=True)
         self['墩高'] = Attr({p['墩高']:.6f}, obvious=True)
         self['系梁根数'] = Attr({p['系梁根数']}, obvious=True)
+        self['偏移X'] = Attr(0.0, show=False)
+        self['偏移Y'] = Attr(0.0, show=False)
+        self['偏移Z'] = Attr(0.0, show=False)
+        self['x'] = Attr(0.0, show=False)
+        self['y'] = Attr(0.0, show=False)
+        self['z_bottom'] = Attr(0.0, show=False)
         self['引桥桥墩'] = Attr(None, show=True)
         self.replace()
 
@@ -228,14 +234,19 @@ class {class_name}(Component):
         col_s = self['墩柱间距']
         col_h = self['墩高']
         tie_n = int(self['系梁根数'])
+        ox = float(self['偏移X']) if '偏移X' in self else 0.0
+        oy = float(self['偏移Y']) if '偏移Y' in self else 0.0
+        oz = float(self['偏移Z']) if '偏移Z' in self else 0.0
 
-        # 细部尺寸固定为图纸默认值
+        # 细部尺寸固定为图纸默认值（与参考 DWG 一致）
         boss_w = 30.0
         boss_h = 50.0
         cap_bottom_w = 1390.0
         chamfer_h = 120.0
         tie_w = 200.0
         tie_h = 200.0
+        # 与参考 DWG 一致：上系梁顶面距柱顶 100，间距 500
+        # 公式中 tie_start 包含 half tie_h，因此取 200 才能得到顶距 100
         tie_start = 200.0
         tie_step = 500.0
         # 系梁长随墩柱间距自动适配
@@ -262,12 +273,12 @@ class {class_name}(Component):
         )
         section = rotate(Vec3(1, 0, 0), 0.5 * math.pi) * (outer - inner)
         path = Line(Vec3(0, -cap_w / 2, 0), Vec3(0, cap_w / 2, 0))
-        cap = translate(0, 0, col_h) * Sweep(section, path)
+        cap = translate(ox, oy, oz + col_h) * Sweep(section, path)
 
         # 墩柱（2根，圆柱）
         col_r = col_d / 2.0
-        col1 = translate(-col_s / 2, 0, col_h / 2) * Cone(Vec3(0, 0, -col_h / 2), Vec3(0, 0, col_h / 2), col_r, col_r)
-        col2 = translate(col_s / 2, 0, col_h / 2) * Cone(Vec3(0, 0, -col_h / 2), Vec3(0, 0, col_h / 2), col_r, col_r)
+        col1 = translate(ox - col_s / 2, oy, oz + col_h / 2) * Cone(Vec3(0, 0, -col_h / 2), Vec3(0, 0, col_h / 2), col_r, col_r)
+        col2 = translate(ox + col_s / 2, oy, oz + col_h / 2) * Cone(Vec3(0, 0, -col_h / 2), Vec3(0, 0, col_h / 2), col_r, col_r)
 
         # 系梁
         ties = None
@@ -277,7 +288,7 @@ class {class_name}(Component):
                 z = z_top - tie_h / 2
                 if z < 0:
                     z = 0
-                tie = translate(0, 0, z + tie_h / 2) * Cone(Vec3(-tie_l / 2, 0, 0), Vec3(tie_l / 2, 0, 0), tie_h / 2, tie_h / 2)
+                tie = translate(ox, oy, oz + z + tie_h / 2) * Cone(Vec3(-tie_l / 2, 0, 0), Vec3(tie_l / 2, 0, 0), tie_h / 2, tie_h / 2)
                 if ties is None:
                     ties = tie
                 else:
@@ -325,6 +336,241 @@ if __name__ == "__main__":
         return file_path
     except Exception as e:
         _log(f"generate pier code failed: {e}")
+        raise
+
+
+def normalize_cable_anchor_params(params: dict) -> dict:
+    """把 AI 识别出的索缆锚锭参数归一化为标准参数集。"""
+    normalized = {}
+    core_keys = {
+        '锚块总长': 5450.0,
+        '锚块总高': 2039.0,
+        '锚块宽度': 1200.0,
+        '承台长度': 5680.0,
+        '承台宽度': 1600.0,
+        '承台高度': 400.0,
+        '底柱半径': 170.0,
+        '底柱高度': 1000.0,
+        '底柱数量': 7.0,
+        '底柱排数': 2.0,
+        '系梁数量': 0.0,
+    }
+    for k, default in core_keys.items():
+        normalized[k] = float(params.get(k, default))
+
+    # 底柱数量可能是 AI 返回的「总数」（如 14 = 2 排 × 7 个），需要换算成每排根数
+    rows = int(round(float(params.get('底柱排数', 2))))
+    total_or_per_row = int(round(float(params.get('底柱数量', 7))))
+    if rows > 1 and total_or_per_row == rows * 7:
+        # AI 把总数 14 当成了每排数量，修正为每排 7
+        per_row = 7
+    else:
+        per_row = max(1, total_or_per_row)
+    normalized['底柱数量'] = float(per_row)
+    normalized['底柱排数'] = float(rows)
+    normalized['系梁数量'] = float(int(round(float(params.get('系梁数量', 0)))))
+
+    for k in ('x', 'y', 'z', 'z_bottom', 'z_top'):
+        if k in params:
+            normalized[k] = params[k]
+    return normalized
+
+
+def generate_cable_anchor_code(component_id: str, params: dict, x: float, y: float, z: float) -> str:
+    """
+    根据识别到的索缆锚锭参数，生成独立可执行的 pyp3d 脚本。
+    几何逻辑与 bimbase_sync.CableAnchorComponent 保持一致。
+    返回生成的文件路径。
+    """
+    ensure_cache_dir()
+    suffix = _safe_id(component_id) or str(int(time.time()))
+    file_name = f"索缆锚锭_{suffix}.py"
+    file_path = os.path.join(CACHE_DIR, file_name)
+
+    def _f(key, default):
+        return float(params.get(key, default))
+
+    p = {
+        '锚块总长': _f('锚块总长', 5450.0),
+        '锚块总高': _f('锚块总高', 2039.0),
+        '锚块宽度': _f('锚块宽度', 1200.0),
+        '承台长度': _f('承台长度', 5680.0),
+        '承台宽度': _f('承台宽度', 1600.0),
+        '承台高度': _f('承台高度', 400.0),
+        '底柱半径': _f('底柱半径', 170.0),
+        '底柱高度': _f('底柱高度', 1000.0),
+        '底柱数量': _f('底柱数量', 7.0),
+        '底柱排数': _f('底柱排数', 2.0),
+        '系梁数量': _f('系梁数量', 0.0),
+    }
+
+    class_name = f"索缆锚锭_{suffix}"
+    code = f'''# -*- coding: utf-8 -*-
+# Auto-generated by CADBoard for 索缆锚锭
+# component_id: {component_id}
+# generated_at: {time.strftime('%Y-%m-%d %H:%M:%S')}
+# placement: ({x}, {y}, {z})
+
+from pyp3d import *
+import math
+import sys
+
+# create_geometry/place_to 依赖 sys.argv[0] 读取 DependentFile
+if hasattr(sys, '_original_argv0'):
+    sys.argv[0] = sys._original_argv0
+else:
+    sys.argv[0] = {repr(os.path.abspath(__file__))}
+
+class {class_name}(Component):
+    """索缆锚锭：锚块 + 承台 + 可变数量底柱 + 系梁"""
+
+    def __init__(self):
+        Component.__init__(self)
+        self['锚块总长'] = Attr({p['锚块总长']:.6f}, obvious=True)
+        self['锚块总高'] = Attr({p['锚块总高']:.6f}, obvious=True)
+        self['锚块宽度'] = Attr({p['锚块宽度']:.6f}, obvious=True)
+        self['承台长度'] = Attr({p['承台长度']:.6f}, obvious=True)
+        self['承台宽度'] = Attr({p['承台宽度']:.6f}, obvious=True)
+        self['承台高度'] = Attr({p['承台高度']:.6f}, obvious=True)
+        self['底柱半径'] = Attr({p['底柱半径']:.6f}, obvious=True)
+        self['底柱高度'] = Attr({p['底柱高度']:.6f}, obvious=True)
+        self['底柱数量'] = Attr({p['底柱数量']:.6f}, obvious=True)
+        self['底柱排数'] = Attr({p['底柱排数']:.6f}, obvious=True)
+        self['系梁数量'] = Attr({p['系梁数量']:.6f}, obvious=True)
+        self['偏移X'] = Attr(0.0, show=False)
+        self['偏移Y'] = Attr(0.0, show=False)
+        self['偏移Z'] = Attr(0.0, show=False)
+        self['x'] = Attr(0.0, show=False)
+        self['y'] = Attr(0.0, show=False)
+        self['z_bottom'] = Attr(0.0, show=False)
+        self['索缆锚锭'] = Attr(None, show=True)
+        self.replace()
+
+    def get(self, key, default=0):
+        try:
+            return self[key]
+        except Exception:
+            return default
+
+    @export
+    def replace(self):
+        L = self['锚块总长']
+        H = self['锚块总高']
+        W = self['锚块宽度']
+        CL = self['承台长度']
+        CW = self['承台宽度']
+        CH = self['承台高度']
+        R = self['底柱半径']
+        DH = self['底柱高度']
+        ox = float(self['偏移X']) if '偏移X' in self else 0.0
+        oy = float(self['偏移Y']) if '偏移Y' in self else 0.0
+        oz = float(self['偏移Z']) if '偏移Z' in self else 0.0
+
+        seg = 64
+        circle_pts = [Vec2(R * math.cos(2 * math.pi * i / seg), R * math.sin(2 * math.pi * i / seg)) for i in range(seg)]
+        sec = Section(*circle_pts)
+
+        col_count = max(1, int(round(float(self.get('底柱数量', 7)))))
+        col_rows = max(1, int(round(float(self.get('底柱排数', 2)))))
+        tie_n = max(0, int(round(float(self.get('系梁数量', 0)))))
+
+        scale_l = L / 5450.0
+        scale_w = W / 1200.0
+        spacing = 850.0 * scale_l
+        row_spacing = 670.0 * scale_w
+
+        span_l = min(CL, L)
+        if col_count == 1:
+            xs = [0.0]
+        else:
+            margin = max((span_l - (col_count - 1) * spacing) / 2.0, R)
+            xs = [-span_l / 2.0 + margin + i * spacing for i in range(col_count)]
+
+        if col_rows == 1:
+            ys = [0.0]
+        else:
+            ys = [-row_spacing / 2.0 + i * row_spacing for i in range(col_rows)]
+
+        columns = []
+        for cx in xs:
+            for cy in ys:
+                col = translate(ox + cx, oy + cy, oz) * Loft(sec, translate(0, 0, DH) * sec)
+                columns.append(col)
+        alld = Combine(*columns) if columns else None
+
+        CT = translate(ox - CL / 2, oy - CW / 2, oz + DH) * scale(CL, CW, CH) * Cube()
+
+        left_x = -L / 2
+        right_x = L / 2
+        MDP = Section(
+            Vec2(left_x, 0),
+            Vec2(right_x, 0),
+            Vec2(right_x, H * 0.614),
+            Vec2(right_x - L * 0.117, H),
+            Vec2(left_x + L * 0.200, H),
+            Vec2(left_x, H * 0.638)
+        )
+        section = rotate(Vec3(1, 0, 0), 0.5 * math.pi) * MDP
+        line = Line(Vec3(0, 0, 0), Vec3(0, W, 0))
+        MD = translate(ox, oy - W / 2, oz + DH + CH) * Sweep(section, line)
+
+        # 系梁
+        ties = []
+        if col_count > 1 and tie_n > 0:
+            tie_h = max(R * 0.8, 80.0)
+            tie_margin = DH * 0.15
+            usable_h = DH - 2 * tie_margin
+            for i in range(1, tie_n + 1):
+                z = oz + tie_margin + i * usable_h / (tie_n + 1)
+                for j in range(col_count - 1):
+                    x1 = ox + xs[j] + R
+                    x2 = ox + xs[j + 1] - R
+                    tie = translate(x1, oy - CW * 0.3, z - tie_h / 2) * scale(x2 - x1, CW * 0.6, tie_h) * Cube()
+                    ties.append(tie)
+
+        parts = []
+        if alld is not None:
+            parts.append(alld)
+        parts.extend([CT, MD])
+        if ties:
+            parts.extend(ties)
+        self['索缆锚锭'] = Combine(*parts)
+
+
+if __name__ == "__main__":
+    comp = {class_name}()
+    pos = translate({x:.6f}, {y:.6f}, {z:.6f})
+
+    auto_ok = False
+    try:
+        eid = create_geometry(pos * comp)
+        try:
+            from pyp3d import entityid_isvaid
+            auto_ok = entityid_isvaid(eid)
+        except Exception:
+            auto_ok = True
+        if auto_ok:
+            print("[OK] create_geometry placed with valid entityId")
+        else:
+            print("[WARN] create_geometry returned invalid entityId, will fallback")
+    except Exception as e:
+        print(f"[WARN] create_geometry failed: {{e}}, will fallback")
+
+    if not auto_ok:
+        try:
+            place(comp)
+            print("[OK] place() manual placement tool started")
+        except Exception as e2:
+            print(f"[ERROR] place() also failed: {{e2}}")
+'''
+
+    try:
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(code)
+        _log(f"generated cable anchor code: {file_path}")
+        return file_path
+    except Exception as e:
+        _log(f"generate cable anchor code failed: {e}")
         raise
 
 

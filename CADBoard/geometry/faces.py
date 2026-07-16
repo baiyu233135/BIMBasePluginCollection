@@ -329,9 +329,8 @@ def _cable_anchor_top_update(elem, old, params):
 
 
 def _cable_anchor_front_update(elem, old, params):
-    """索缆锚锭主视图: width→锚块总长, height→总高"""
+    """索缆锚锭主视图: 总高→锚块总高；宽度由 overview 对话框精确控制。"""
     b = elem.get_bounds()
-    params['锚块总长'] = b[2] - b[0]
     total_h = b[3] - b[1]
     dh = float(params.get('底柱高度', 1000))
     ch = float(params.get('承台高度', 400))
@@ -340,9 +339,8 @@ def _cable_anchor_front_update(elem, old, params):
 
 
 def _cable_anchor_left_update(elem, old, params):
-    """索缆锚锭左视图: width→锚块宽度, height→总高"""
+    """索缆锚锭左视图: 总高→锚块总高；宽度由 overview 对话框精确控制。"""
     b = elem.get_bounds()
-    params['锚块宽度'] = b[2] - b[0]
     total_h = b[3] - b[1]
     dh = float(params.get('底柱高度', 1000))
     ch = float(params.get('承台高度', 400))
@@ -486,28 +484,43 @@ def _make_prism_top(p):
 
 
 def _make_approach_pier_top(p):
-    """引桥桥墩俯视图：盖梁顶面矩形 + 双墩柱位置示意"""
-    from geometry.elements import RectangleElement, PolylineElement
+    """引桥桥墩俯视图：盖梁顶面矩形 + 双墩柱位置 + 系梁平面矩形（与参考 DWG 一致）。"""
+    from geometry.elements import PolylineElement
+    import math
     L = float(p.get('盖梁总长', 1930))
     W = float(p.get('盖梁宽', 300))
     col_s = float(p.get('墩柱间距', 1140))
-    col_d = float(p.get('墩柱直径', 270))
+    col_d = float(p.get('墩柱直径', 250))
+    H_cap = float(p.get('盖梁总高', 300))
+    scale_h = H_cap / 300.0
+    tie_l = max(col_s - col_d, 100.0)
+    tie_w = 200.0 * scale_h
+
     # 主轮廓：盖梁矩形
     pts = [(-L / 2, -W / 2), (L / 2, -W / 2), (L / 2, W / 2), (-L / 2, W / 2), (-L / 2, -W / 2)]
-    # 双墩柱位置（小矩形）
-    half = col_d / 2
+
+    # 双墩柱位置（32段多边形近似圆）
+    segments = 32
+    r = col_d / 2.0
     for cx in (-col_s / 2, col_s / 2):
         pts.append(None)
-        pts.extend([
-            (cx - half, -half), (cx + half, -half),
-            (cx + half, half), (cx - half, half),
-            (cx - half, -half)
-        ])
+        for k in range(segments + 1):
+            ang = 2 * math.pi * k / segments
+            pts.append((cx + r * math.cos(ang), r * math.sin(ang)))
+
+    # 系梁平面矩形
+    pts.append(None)
+    pts.extend([
+        (-tie_l / 2, -tie_w / 2), (tie_l / 2, -tie_w / 2),
+        (tie_l / 2, tie_w / 2), (-tie_l / 2, tie_w / 2),
+        (-tie_l / 2, -tie_w / 2)
+    ])
+
     return PolylineElement(pts, closed=False)
 
 
 def _make_approach_pier_front(p):
-    """引桥桥墩主视图：盖梁梯形轮廓 + 双墩柱 + 系梁（精简参数版）"""
+    """引桥桥墩主视图：盖梁、双墩柱、系梁分别画成独立闭合轮廓（与参考 DWG 一致）。"""
     from geometry.elements import PolylineElement
     L = float(p.get('盖梁总长', 1930))
     H_cap = float(p.get('盖梁总高', 300))
@@ -516,38 +529,53 @@ def _make_approach_pier_front(p):
     col_h = float(p.get('墩高', 1200))
     tie_n = int(p.get('系梁根数', p.get('系梁数量', 2)))
 
-    # 细部尺寸固定为图纸默认值（与 组件测试/引桥桥墩.py 一致）
-    L_bottom = 1390.0
-    chamfer_h = 120.0
-    boss_h = 50.0
-    tie_h = 200.0
-    tie_start = 200.0
-    tie_step = 500.0
-    # 系梁长随墩柱间距自动适配
+    scale_l = L / 1930.0
+    scale_h = H_cap / 300.0
+    L_bottom = 1390.0 * scale_l
+    chamfer_h = 120.0 * scale_h
+    boss_h = 50.0 * scale_h
+    boss_w = 30.0 * scale_l
+    tie_h = 200.0 * scale_h
+    # 参考 DWG：上系梁顶面距柱顶 100，两道系梁间距 500
+    # 公式中 tie_start 包含 half tie_h，因此取 200 才能得到顶距 100
+    tie_start = 200.0 * scale_h
+    tie_step = 500.0 * scale_h
     tie_l = max(col_s - col_d, 100.0)
 
     z_bottom = float(p.get('z_bottom', 0))
     z_col_top = z_bottom + col_h
     z_cap_top = z_col_top + H_cap
-    z_slant_top = z_cap_top - boss_h
-    z_slant_bottom = z_slant_top - chamfer_h
+    z_boss_bottom = z_cap_top - boss_h
+    z_chamfer_top = z_col_top + chamfer_h
 
-    # 外轮廓：盖梁 + 双墩柱
-    pts = [
+    pts = []
+
+    # 盖梁（独立闭合轮廓）
+    pts.extend([
         (-L / 2, z_cap_top),
+        (-L / 2 + boss_w, z_cap_top),
+        (-L / 2 + boss_w, z_boss_bottom),
+        (L / 2 - boss_w, z_boss_bottom),
+        (L / 2 - boss_w, z_cap_top),
         (L / 2, z_cap_top),
-        (L / 2, z_slant_top),
-        (L_bottom / 2, z_slant_bottom),
+        (L / 2, z_chamfer_top),
         (L_bottom / 2, z_col_top),
-        (col_s / 2 + col_d / 2, z_col_top),
-        (col_s / 2 + col_d / 2, z_bottom),
-        (-col_s / 2 - col_d / 2, z_bottom),
-        (-col_s / 2 - col_d / 2, z_col_top),
         (-L_bottom / 2, z_col_top),
-        (-L_bottom / 2, z_slant_bottom),
-        (-L / 2, z_slant_top),
+        (-L / 2, z_chamfer_top),
         (-L / 2, z_cap_top),
-    ]
+    ])
+
+    # 双墩柱（独立矩形）
+    col_half_w = col_d / 2.0
+    for cx in (-col_s / 2, col_s / 2):
+        pts.append(None)
+        pts.extend([
+            (cx - col_half_w, z_bottom),
+            (cx + col_half_w, z_bottom),
+            (cx + col_half_w, z_col_top),
+            (cx - col_half_w, z_col_top),
+            (cx - col_half_w, z_bottom),
+        ])
 
     # 系梁（双墩柱之间的小矩形）
     for i in range(tie_n):
@@ -568,7 +596,7 @@ def _make_approach_pier_front(p):
 
 
 def _make_approach_pier_left(p):
-    """引桥桥墩左视图：盖梁侧面 + 墩柱 + 系梁（精简参数版）"""
+    """引桥桥墩左视图：盖梁、墩柱、系梁分别画成独立闭合轮廓（与参考 DWG 一致）。"""
     from geometry.elements import PolylineElement
     W = float(p.get('盖梁宽', 300))
     H_cap = float(p.get('盖梁总高', 300))
@@ -576,28 +604,38 @@ def _make_approach_pier_left(p):
     col_h = float(p.get('墩高', 1200))
     tie_n = int(p.get('系梁根数', p.get('系梁数量', 2)))
 
-    # 细部尺寸固定为图纸默认值（与 组件测试/引桥桥墩.py 一致）
-    tie_w = 200.0
-    tie_h = 200.0
-    tie_start = 200.0
-    tie_step = 500.0
+    scale_h = H_cap / 300.0
+    tie_w = 200.0 * scale_h
+    tie_h = 200.0 * scale_h
+    # 与主视图保持一致：顶距柱顶 100（tie_start 含 half tie_h）
+    tie_start = 200.0 * scale_h
+    tie_step = 500.0 * scale_h
 
     z_bottom = float(p.get('z_bottom', 0))
     z_col_top = z_bottom + col_h
     z_cap_top = z_col_top + H_cap
 
-    # 外轮廓：盖梁矩形 + 墩柱矩形
-    pts = [
-        (-W / 2, z_cap_top),
-        (W / 2, z_cap_top),
-        (W / 2, z_col_top),
-        (col_d / 2, z_col_top),
-        (col_d / 2, z_bottom),
-        (-col_d / 2, z_bottom),
-        (-col_d / 2, z_col_top),
+    pts = []
+
+    # 盖梁侧面（独立矩形）
+    pts.extend([
         (-W / 2, z_col_top),
+        (W / 2, z_col_top),
+        (W / 2, z_cap_top),
         (-W / 2, z_cap_top),
-    ]
+        (-W / 2, z_col_top),
+    ])
+
+    # 墩柱（独立矩形）
+    col_half_w = col_d / 2.0
+    pts.append(None)
+    pts.extend([
+        (-col_half_w, z_bottom),
+        (col_half_w, z_bottom),
+        (col_half_w, z_col_top),
+        (-col_half_w, z_col_top),
+        (-col_half_w, z_bottom),
+    ])
 
     # 系梁
     for i in range(tie_n):
@@ -618,7 +656,8 @@ def _make_approach_pier_left(p):
 
 
 def _make_cable_anchor_top(p):
-    """索缆锚锭俯视图：承台矩形轮廓 + 底柱位置示意（小八边形）"""
+    """索缆锚锭俯视图：承台矩形 + 锚块示意 + 底柱位置（圆）。
+    默认 7 柱 × 2 排，与参考 DWG 一致。"""
     from geometry.elements import PolylineElement
     import math
     CL = float(p.get('承台长度', 5680))
@@ -626,6 +665,8 @@ def _make_cable_anchor_top(p):
     L = float(p.get('锚块总长', 5450))
     W = float(p.get('锚块宽度', 1200))
     R = float(p.get('底柱半径', 170))
+    N = int(p.get('底柱数量', 7))
+    rows = int(p.get('底柱排数', 2))
 
     pts = []
     # 承台外轮廓
@@ -635,40 +676,53 @@ def _make_cable_anchor_top(p):
         (-CL / 2, -CW / 2)
     ])
 
-    # 锚块位置示意（虚线矩形）
+    # 锚块位置示意（虚线矩形），锚块在承台上方居中
+    left_x = max(-CL / 2, -L / 2)
+    right_x = min(CL / 2, L / 2)
     pts.append(None)
     pts.extend([
-        (-L / 2, -W / 2), (L / 2, -W / 2),
-        (L / 2, W / 2), (-L / 2, W / 2),
-        (-L / 2, -W / 2)
+        (left_x, -W / 2), (right_x, -W / 2),
+        (right_x, W / 2), (left_x, W / 2),
+        (left_x, -W / 2)
     ])
 
-    # 7 对底柱位置示意（八边形）
-    col_count = 7
-    if col_count > 1 and L > 2 * R:
-        x_start = max(R, L * 0.022)
-        x_end = max(x_start + 2 * R, L - max(R, L * 0.042))
-        spacing = (x_end - x_start) / (col_count - 1)
-    else:
-        x_start = L / 2.0
-        spacing = 0.0
-    y_offset = max(R + 50.0, W * 0.28)
+    if N < 1:
+        N = 1
+    if rows < 1:
+        rows = 1
 
-    for i in range(col_count):
-        cx = x_start + i * spacing
-        for cy in (y_offset, -y_offset):
+    scale_l = L / 5450.0
+    scale_w = W / 1200.0
+    spacing = 850.0 * scale_l
+    # 让 N 根底柱在锚块长度范围内均匀分布，与 DWG 一致
+    if N == 1:
+        xs = [0.0]
+    else:
+        span = min(CL, L)
+        margin = max((span - (N - 1) * spacing) / 2.0, R)
+        xs = [-span / 2.0 + margin + i * spacing for i in range(N)]
+
+    row_spacing = 670.0 * scale_w
+    if rows == 1:
+        ys = [0.0]
+    else:
+        ys = [-row_spacing / 2.0 + i * row_spacing for i in range(rows)]
+
+    circle_segments = 32
+    for cx in xs:
+        for cy in ys:
             pts.append(None)
-            octagon = []
-            for k in range(9):
-                ang = 2 * math.pi * k / 8
-                octagon.append((cx + R * math.cos(ang), cy + R * math.sin(ang)))
-            pts.extend(octagon)
+            poly = []
+            for k in range(circle_segments + 1):
+                ang = 2 * math.pi * k / circle_segments
+                poly.append((cx + R * math.cos(ang), cy + R * math.sin(ang)))
+            pts.extend(poly)
 
     return PolylineElement(pts, closed=False)
 
 
 def _make_cable_anchor_front(p):
-    """索缆锚锭主视图：承台 + 锚块轮廓 + 底柱"""
+    """索缆锚锭主视图：承台 + 锚块轮廓 + N 根底柱（默认无系梁，与参考 DWG 一致）。"""
     from geometry.elements import PolylineElement
     L = float(p.get('锚块总长', 5450))
     H = float(p.get('锚块总高', 2039))
@@ -676,6 +730,8 @@ def _make_cable_anchor_front(p):
     CH = float(p.get('承台高度', 400))
     DH = float(p.get('底柱高度', 1000))
     R = float(p.get('底柱半径', 170))
+    N = int(p.get('底柱数量', 7))
+    tie_n = int(p.get('系梁数量', 0))
     z_bottom = float(p.get('z_bottom', 0))
 
     pts = []
@@ -688,36 +744,40 @@ def _make_cable_anchor_front(p):
         (-CL / 2, z_bottom + DH)
     ])
 
-    # 锚块截面（按比例缩放原始轮廓）
-    left_x = 50.0 * (L / 5450.0)
-    right_x = left_x + L
-    top_y = z_bottom + DH + CH + H
-    p4_x = 4863.0 * (L / 5450.0)
-    p5_x = 3863.0 * (L / 5450.0)
-    mid_y = z_bottom + DH + CH + 1250.0 * (H / 2039.0)
-    left_top_y = z_bottom + DH + CH + 1300.0 * (H / 2039.0)
+    # 锚块截面：与参考 DWG 完全一致（含顶部水平段、右侧与左侧斜切）
+    left_x = -L / 2
+    right_x = L / 2
+    base_y = z_bottom + DH + CH
+    top_y = base_y + H
+    # 参考 DWG 比例（数据参考源/索缆锚锭/索缆锚锭.dwg）
+    right_lower_y = base_y + H * 0.614
+    right_chamfer_x = right_x - L * 0.117
+    top_left_x = left_x + L * 0.200
+    left_chamfer_y = base_y + H * 0.638
     pts.append(None)
     pts.extend([
-        (-CL / 2 + left_x, z_bottom + DH + CH),
-        (-CL / 2 + right_x, z_bottom + DH + CH),
-        (-CL / 2 + right_x, mid_y),
-        (-CL / 2 + p4_x, top_y),
-        (-CL / 2 + p5_x, top_y),
-        (-CL / 2 + left_x, left_top_y),
-        (-CL / 2 + left_x, z_bottom + DH + CH)
+        (left_x, base_y),
+        (right_x, base_y),
+        (right_x, right_lower_y),
+        (right_chamfer_x, top_y),
+        (top_left_x, top_y),
+        (left_x, left_chamfer_y),
+        (left_x, base_y)
     ])
 
-    # 底柱（7 根，正视图为矩形）
-    col_count = 7
-    if col_count > 1 and L > 2 * R:
-        x_start = max(R, L * 0.022)
-        x_end = max(x_start + 2 * R, L - max(R, L * 0.042))
-        spacing = (x_end - x_start) / (col_count - 1)
+    # 底柱：N 根沿 x 均匀分布
+    scale_l = L / 5450.0
+    spacing = 850.0 * scale_l
+    if N < 1:
+        N = 1
+    if N == 1:
+        xs = [0.0]
     else:
-        x_start = L / 2.0
-        spacing = 0.0
-    for i in range(col_count):
-        cx = -CL / 2 + x_start + i * spacing
+        span = min(CL, L)
+        margin = max((span - (N - 1) * spacing) / 2.0, R)
+        xs = [-span / 2.0 + margin + i * spacing for i in range(N)]
+
+    for cx in xs:
         pts.append(None)
         pts.extend([
             (cx - R, z_bottom),
@@ -727,11 +787,30 @@ def _make_cable_anchor_front(p):
             (cx - R, z_bottom)
         ])
 
+    # 系梁：默认不绘；若参数大于 0 才绘制
+    if N > 1 and tie_n > 0:
+        tie_h = max(R * 0.8, 80.0)
+        tie_margin = DH * 0.15
+        usable_h = DH - 2 * tie_margin
+        for i in range(1, tie_n + 1):
+            z = z_bottom + tie_margin + i * usable_h / (tie_n + 1)
+            for j in range(N - 1):
+                x1 = xs[j] + R
+                x2 = xs[j + 1] - R
+                pts.append(None)
+                pts.extend([
+                    (x1, z - tie_h / 2),
+                    (x2, z - tie_h / 2),
+                    (x2, z + tie_h / 2),
+                    (x1, z + tie_h / 2),
+                    (x1, z - tie_h / 2)
+                ])
+
     return PolylineElement(pts, closed=False)
 
 
 def _make_cable_anchor_left(p):
-    """索缆锚锭左视图：承台 + 锚块 + 底柱"""
+    """索缆锚锭左视图：承台 + 锚块 + 底柱（默认 2 排，与参考 DWG 一致）。"""
     from geometry.elements import PolylineElement
     W = float(p.get('锚块宽度', 1200))
     H = float(p.get('锚块总高', 2039))
@@ -739,6 +818,7 @@ def _make_cable_anchor_left(p):
     CH = float(p.get('承台高度', 400))
     DH = float(p.get('底柱高度', 1000))
     R = float(p.get('底柱半径', 170))
+    rows = int(p.get('底柱排数', 2))
     z_bottom = float(p.get('z_bottom', 0))
 
     pts = []
@@ -761,9 +841,17 @@ def _make_cable_anchor_left(p):
         (-W / 2, z_bottom + DH + CH)
     ])
 
-    # 底柱（两排，侧视图为两个矩形）
-    y_offset = max(R + 50.0, W * 0.28)
-    for cy in (y_offset, -y_offset):
+    # 底柱：侧视图按排数显示矩形
+    if rows < 1:
+        rows = 1
+    scale_w = W / 1200.0
+    row_spacing = 670.0 * scale_w
+    if rows == 1:
+        ys = [0.0]
+    else:
+        ys = [-row_spacing / 2.0 + i * row_spacing for i in range(rows)]
+
+    for cy in ys:
         pts.append(None)
         pts.extend([
             (cy - R, z_bottom),

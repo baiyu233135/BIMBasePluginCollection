@@ -147,8 +147,11 @@ def _build_prompt(component_hint: Optional[str]) -> str:
     "承台宽度": {{"value": 1600, "unit": "mm"}},
     "承台高度": {{"value": 400, "unit": "mm"}},
     "底柱半径": {{"value": 170, "unit": "mm"}},
-    "底柱高度": {{"value": 1000, "unit": "mm"}}"""
-        detail_note = "只输出上述 8 个核心外轮廓参数，不要输出底柱排布细节等内部尺寸，这些由系统自动按默认值计算。"
+    "底柱高度": {{"value": 1000, "unit": "mm"}},
+    "底柱数量": {{"value": 7, "unit": "个/排"}},
+    "底柱排数": {{"value": 2, "unit": "排"}},
+    "系梁数量": {{"value": 0, "unit": "根"}}"""
+        detail_note = "输出上述核心外轮廓参数，并统计底柱数量、排数以及系梁数量；其中「底柱数量」指每排底柱的根数，不是总数。若图纸未体现，可省略这些字段，系统会使用默认值（7 柱 × 2 排，无系梁）。"
     else:
         example_type = "引桥桥墩"
         example_params = """    "盖梁总长": {{"value": 1930, "unit": "mm"}},
@@ -158,7 +161,7 @@ def _build_prompt(component_hint: Optional[str]) -> str:
     "墩柱间距": {{"value": 1140, "unit": "mm"}},
     "墩高": {{"value": 1200, "unit": "mm"}},
     "系梁根数": {{"value": 2, "unit": "个"}}"""
-        detail_note = "只输出上述 7 个核心外轮廓参数，不要输出凸起、斜边、系梁细节等内部尺寸，这些由系统自动按默认值计算。"
+        detail_note = "输出上述核心外轮廓参数；内部凸起、斜边、系梁尺寸由系统按默认值计算。"
 
     return f"""你是一位资深的桥梁工程图纸识别专家。我将提供一张 PDF/DWG 图纸截图，其中包含桥梁构件的三视图或二维表达。
 
@@ -364,11 +367,15 @@ def dwg_to_image(dwg_path: str, output_dir: Optional[str] = None, dpi: int = 150
         msp = doc.modelspace()
 
         fig = plt.figure(figsize=(12, 9))
+        fig.patch.set_facecolor('black')
         ax = fig.add_axes([0, 0, 1, 1])
         ax.set_aspect('equal')
         ax.axis('off')
+        ax.set_facecolor('black')
 
         ctx = RenderContext(doc)
+        # 强制把 BYLAYER/BYBLOCK 颜色映射为白色，避免白线白底看不见
+        ctx.set_current_layout(msp)
         out = MatplotlibBackend(ax)
         Frontend(ctx, out).draw_layout(msp)
 
@@ -384,7 +391,7 @@ def dwg_to_image(dwg_path: str, output_dir: Optional[str] = None, dpi: int = 150
             pass
 
         out_path = os.path.join(output_dir, os.path.splitext(os.path.basename(dwg_path))[0] + ".png")
-        fig.savefig(out_path, dpi=dpi, pad_inches=0)
+        fig.savefig(out_path, dpi=dpi, pad_inches=0, facecolor='black')
         plt.close(fig)
         return out_path
     except Exception as e:

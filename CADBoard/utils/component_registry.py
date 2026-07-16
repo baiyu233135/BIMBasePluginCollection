@@ -452,7 +452,7 @@ def apply_component_params_to_element(elem, params, component_type):
             elem.z_end = z_bottom + H
         applied += 1
 
-    # 引桥桥墩 特殊处理：盖梁总长/盖梁宽/墩高/盖梁总高
+    # 引桥桥墩 特殊处理：盖梁总长/盖梁宽/墩高/盖梁总高 + 位置
     if component_type == '引桥桥墩':
         L = float(params.get('盖梁总长', 1930))
         W = float(params.get('盖梁宽', 300))
@@ -467,6 +467,32 @@ def apply_component_params_to_element(elem, params, component_type):
             elem.z_start = z_bottom
         if hasattr(elem, 'z_end'):
             elem.z_end = z_bottom + col_h + cap_h
+        if hasattr(elem, 'x'):
+            elem.x = float(params.get('x', elem.x))
+        if hasattr(elem, 'y'):
+            elem.y = float(params.get('y', elem.y))
+        applied += 1
+
+    # 索缆锚锭 特殊处理：承台长度/承台宽度/底柱高度/承台高度/锚块总高 + 位置
+    if component_type == '索缆锚锭':
+        CL = float(params.get('承台长度', 5680))
+        CW = float(params.get('承台宽度', 1600))
+        dh = float(params.get('底柱高度', 1000))
+        ch = float(params.get('承台高度', 400))
+        ah = float(params.get('锚块总高', 2039))
+        if hasattr(elem, 'width'):
+            elem.width = CL
+        if hasattr(elem, 'height'):
+            elem.height = CW
+        z_bottom = float(params.get('z_bottom', 0))
+        if hasattr(elem, 'z_start'):
+            elem.z_start = z_bottom
+        if hasattr(elem, 'z_end'):
+            elem.z_end = z_bottom + dh + ch + ah
+        if hasattr(elem, 'x'):
+            elem.x = float(params.get('x', elem.x))
+        if hasattr(elem, 'y'):
+            elem.y = float(params.get('y', elem.y))
         applied += 1
 
     # 统一更新 3D 高度（非矩形元素）
@@ -642,8 +668,21 @@ def create_element_from_params(params, component_type):
             return elem
 
         elif component_type == '引桥桥墩':
+            # 用主视图轮廓作为源元素，避免只显示一个占位矩形
+            from geometry.faces import FaceManager
+            elem = FaceManager.generate_face_element('引桥桥墩', 'front', params)
+            if elem:
+                elem.face_info = {}  # 源元素本身不是面
+                elem.component_type = '引桥桥墩'
+                elem.component_params = dict(params)
+                elem.style.color = (255, 255, 255)
+                elem.style.line_type = 'solid'
+                elem.is_3d = True
+                elem.z_start = float(params.get('z_bottom', 0))
+                elem.z_end = elem.z_start + float(params.get('墩高', 1200)) + float(params.get('盖梁总高', 300))
+                return elem
+            # fallback
             from geometry.elements import RectangleElement
-            # x,y 按几何中心处理
             cx = float(params.get('x', 0))
             cy = float(params.get('y', 0))
             L = float(params.get('盖梁总长', 1930))
@@ -654,6 +693,20 @@ def create_element_from_params(params, component_type):
             return elem
 
         elif component_type == '索缆锚锭':
+            # 用主视图轮廓作为源元素，避免只显示一个占位矩形
+            from geometry.faces import FaceManager
+            elem = FaceManager.generate_face_element('索缆锚锭', 'front', params)
+            if elem:
+                elem.face_info = {}
+                elem.component_type = '索缆锚锭'
+                elem.component_params = dict(params)
+                elem.style.color = (255, 255, 255)
+                elem.style.line_type = 'solid'
+                elem.is_3d = True
+                elem.z_start = float(params.get('z_bottom', 0))
+                elem.z_end = elem.z_start + float(params.get('底柱高度', 1000)) + float(params.get('承台高度', 400)) + float(params.get('锚块总高', 2039))
+                return elem
+            # fallback
             from geometry.elements import RectangleElement
             cx = float(params.get('x', 0))
             cy = float(params.get('y', 0))

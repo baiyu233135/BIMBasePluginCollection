@@ -112,7 +112,7 @@ class SnapSystem:
             if et == '直线':
                 pts.extend([(elem.x1, elem.y1), (elem.x2, elem.y2)])
             elif et in ('多段线', '多边形'):
-                pts.extend(elem.points)
+                pts.extend([p for p in elem.points if p is not None])
             elif et == '矩形':
                 pts.extend(elem.get_corners())
             elif et == '圆':
@@ -196,9 +196,10 @@ class SnapSystem:
                 pts.append((elem.cx, elem.cy))
             elif et == '多边形':
                 # 多边形重心
-                if elem.points:
-                    xs = [p[0] for p in elem.points]
-                    ys = [p[1] for p in elem.points]
+                valid = [p for p in elem.points if p is not None]
+                if valid:
+                    xs = [p[0] for p in valid]
+                    ys = [p[1] for p in valid]
                     pts.append((sum(xs) / len(xs), sum(ys) / len(ys)))
         return pts
 

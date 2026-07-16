@@ -19,7 +19,7 @@ APPROACH_PIER_DEFAULTS = {
     '系梁根数': 2,
 }
 
-# 索缆锚锭默认参数（与 组件测试/索缆锚锭.py 保持一致）
+# 索缆锚锭默认参数（与 bimbase_sync.CableAnchorComponent.DEFAULT_PARAMS 保持一致）
 CABLE_ANCHOR_DEFAULTS = {
     '锚块总长': 5450.0,
     '锚块总高': 2039.0,
@@ -29,6 +29,9 @@ CABLE_ANCHOR_DEFAULTS = {
     '承台高度': 400.0,
     '底柱半径': 170.0,
     '底柱高度': 1000.0,
+    '底柱数量': 7.0,
+    '底柱排数': 2.0,
+    '系梁数量': 0.0,
 }
 
 
