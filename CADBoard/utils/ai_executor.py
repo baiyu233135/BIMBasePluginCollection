@@ -71,8 +71,9 @@ class AICommandExecutor:
         """修改元素参数，支持面元素自动反推"""
         target = cmd.get('target', {})
         changes = cmd.get('changes', {})
-        if not changes:
-            return False, "modify指令缺少changes参数"
+        position = cmd.get('position')
+        if not changes and not position:
+            return False, "modify指令缺少changes或position参数"
 
         elems = self._resolve_target(target)
         if not elems:
@@ -98,17 +99,11 @@ class AICommandExecutor:
                     source_elems_for_agent.append(elem)
 
         # 调试日志
-        import os
-        try:
-            log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'ai_debug.log')
-            with open(log_path, 'a', encoding='utf-8') as f:
-                f.write(f"[AGENT_CHECK] elems={len(elems)} source_for_agent={len(source_elems_for_agent)}\n")
-                for e in elems:
-                    f.write(f"  elem={e.__class__.__name__} id={e.id[:8]} comp={getattr(e,'component_type','')} face={bool(getattr(e,'face_info',{}))}\n")
-                for s in source_elems_for_agent:
-                    f.write(f"  source={s.__class__.__name__} id={s.id[:8]} comp={s.component_type}\n")
-        except Exception:
-            pass
+        bimbase_sync._log(f"[_do_modify] elems={len(elems)} source_for_agent={len(source_elems_for_agent)}")
+        for e in elems:
+            bimbase_sync._log(f"  elem={e.__class__.__name__} id={e.id[:8]} comp={getattr(e,'component_type','')} face={bool(getattr(e,'face_info',{}))}")
+        for s in source_elems_for_agent:
+            bimbase_sync._log(f"  source={s.__class__.__name__} id={s.id[:8]} comp={s.component_type}")
 
         if source_elems_for_agent:
             # 尝试将通用属性名映射为组件参数名
@@ -119,13 +114,8 @@ class AICommandExecutor:
                     mk = self._map_param_key(comp_type, key)
                     if mk:
                         mapped_changes[mk] = float(val) if isinstance(val, (int, float, str)) else val
-            try:
-                log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'ai_debug.log')
-                with open(log_path, 'a', encoding='utf-8') as f:
-                    f.write(f"[AGENT_CHECK] mapped_changes={mapped_changes}\n")
-            except Exception:
-                pass
-            if mapped_changes:
+            bimbase_sync._log(f"[_do_modify] mapped_changes={mapped_changes}")
+            if mapped_changes or position:
                 # 走 Agent 的 modify_component 路径（自动 sync + 双路径决策）
                 agent_target = {}
                 if 'component_type' in target:
@@ -136,11 +126,14 @@ class AICommandExecutor:
                     agent_target['index'] = 'selected'
                 else:
                     agent_target['index'] = 'selected'
-                return self.agent.execute_tool('modify_component', {
+                agent_params = {
                     'target': agent_target,
                     'changes': mapped_changes,
                     'path': 'auto'
-                })
+                }
+                if position:
+                    agent_params['position'] = position
+                return self.agent.execute_tool('modify_component', agent_params)
 
         self.board._save_undo_state()
         self._last_touched = list(elems)  # 记录到命令链回退列表
@@ -337,7 +330,7 @@ class AICommandExecutor:
         return (255, 0, 0)
 
     def _map_param_key(self, comp_type, key):
-        """将通用属性名映射为组件专用参数名。可映射时返回映射后的名，否则返回 None"""
+        """将通用属性名/中文别名映射为组件专用参数名。可映射时返回映射后的名，否则返回 None"""
         key = key.lower()
         mapping = {
             '直角三棱柱': {
@@ -358,9 +351,27 @@ class AICommandExecutor:
                 'height': '高度', 'h': '高度',
             },
             '引桥桥墩': {
+                # 几何别名
                 'height': '墩高', 'h': '墩高',
                 'width': '盖梁总长', 'length': '盖梁总长', 'l': '盖梁总长',
                 'depth': '盖梁宽', 'w': '盖梁宽',
+                # 中文参数名（自身映射）
+                '墩高': '墩高',
+                '盖梁总长': '盖梁总长', '盖梁总高': '盖梁总高', '盖梁宽': '盖梁宽',
+                '墩柱直径': '墩柱直径', '墩柱间距': '墩柱间距',
+                '系梁根数': '系梁根数', '系梁数量': '系梁根数',
+            },
+            '索缆锚锭': {
+                # 几何别名
+                'length': '锚块总长', 'l': '锚块总长',
+                'width': '锚块宽度', 'w': '锚块宽度',
+                'height': '锚块总高', 'h': '锚块总高',
+                # 中文参数名（自身映射）
+                '锚块总长': '锚块总长', '锚块总高': '锚块总高', '锚块宽度': '锚块宽度',
+                '承台长度': '承台长度', '承台宽度': '承台宽度', '承台高度': '承台高度',
+                '底柱半径': '底柱半径', '底柱高度': '底柱高度',
+                '底柱数量': '底柱数量', '底柱排数': '底柱排数',
+                '系梁数量': '系梁数量',
             },
         }
         return mapping.get(comp_type, {}).get(key)
@@ -498,10 +509,29 @@ class AICommandExecutor:
             elem = create_element_from_params(comp_params, '引桥桥墩')
             if elem is None:
                 return None
+        elif elem_type == '索缆锚锭':
+            from utils.component_registry import create_element_from_params
+            comp_params = {
+                'x': float(x), 'y': float(y), 'z_bottom': float(z),
+                '锚块总长': float(params.get('锚块总长', 5450)),
+                '锚块总高': float(params.get('锚块总高', 2039)),
+                '锚块宽度': float(params.get('锚块宽度', 1200)),
+                '承台长度': float(params.get('承台长度', 5680)),
+                '承台宽度': float(params.get('承台宽度', 1600)),
+                '承台高度': float(params.get('承台高度', 400)),
+                '底柱半径': float(params.get('底柱半径', 170)),
+                '底柱高度': float(params.get('底柱高度', 1000)),
+                '底柱数量': int(params.get('底柱数量', 7)),
+                '底柱排数': int(params.get('底柱排数', 2)),
+                '系梁数量': int(params.get('系梁数量', 0)),
+            }
+            elem = create_element_from_params(comp_params, '索缆锚锭')
+            if elem is None:
+                return None
         if elem is None:
             return None
-        # 引桥桥墩已在 create_element_from_params 中按 x,y 中心定位，不再覆盖
-        if elem_type != '引桥桥墩':
+        # 复杂构件已在 create_element_from_params 中按 x,y 中心定位，不再覆盖
+        if elem_type not in ('引桥桥墩', '索缆锚锭'):
             elem.x = x
             elem.y = y
         elem.component_type = elem_type
@@ -615,7 +645,7 @@ class AICommandExecutor:
             EllipseElement, PointElement
         )
 
-        SOLID_TYPES = {'圆柱', '正方体', '长方体', '球体', '直角三棱柱', '引桥桥墩'}
+        SOLID_TYPES = {'圆柱', '正方体', '长方体', '球体', '直角三棱柱', '引桥桥墩', '索缆锚锭'}
 
         # 沿轴批量布置（兼容 AI 返回的 direction 字段）
         # 某些 AI 会把 axis/count/spacing/position 放在 params 里

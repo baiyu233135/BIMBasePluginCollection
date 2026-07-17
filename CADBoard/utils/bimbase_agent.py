@@ -11,6 +11,19 @@
 
 import os
 
+try:
+    from bimbase_sync import _log
+except Exception:
+    def _log(msg):
+        try:
+            log_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'bimbase_sync_debug.log')
+            with open(log_path, 'a', encoding='utf-8') as f:
+                from datetime import datetime
+                f.write(f"[{datetime.now().strftime('%H:%M:%S')}] [BIMBaseAgent] {msg}\n")
+                f.flush()
+        except Exception:
+            pass
+
 
 class BIMBaseAgent:
     """轻量级 BIMBase Agent - 工具注册表"""
@@ -127,9 +140,9 @@ class BIMBaseAgent:
 
         return True, "\n".join(lines)
 
-    def _scan_bimbase_for_type(self, comp_type, max_scan=100):
+    def _scan_bimbase_for_type(self, comp_type, max_scan=20):
         """轻量扫描 BIMBase，检查是否存在指定类型的参数化组件。
-        返回 True/False。"""
+        返回 True/False。对异常 key 直接跳过，避免扫描过程破坏 SDK 状态。"""
         try:
             from bimbase_sync import BIMBaseSync, get_all_instancekey
             if get_all_instancekey is None:
@@ -143,72 +156,96 @@ class BIMBaseAgent:
                 if count >= max_scan:
                     break
                 count += 1
-                p = sync._get_params_from_datakey(ik)
-                if p and p.get('_type') == comp_type:
-                    return True
+                try:
+                    p = sync._get_params_from_datakey(ik)
+                    if p and p.get('_type') == comp_type:
+                        return True
+                except Exception:
+                    # 某些实例 key 可能无法读取，跳过即可
+                    pass
             return False
         except Exception:
             return False
 
     def _tool_modify_component(self, params):
         """
-        修改组件参数，自动选择路径 A 或路径 B。
+        修改组件参数，自动选择路径 A 或路径 B；支持指定新放置坐标。
         params:
           - target: {'component_type': '圆柱'} 或 {'index': 0}
           - changes: {'半径': 80}
           - path: 'auto'|'board'|'bimbase'  (默认 auto)
+          - position: {'x': 100, 'y': 200, 'z': 0} 或 [100, 200, 0]（可选）
         """
         target = params.get('target', {})
         changes = params.get('changes', {})
         path_hint = params.get('path', 'auto')
+        position = params.get('position')
 
-        if not changes:
-            return False, "modify_component 缺少 changes 参数"
+        if not changes and not position:
+            return False, "modify_component 缺少 changes 或 position 参数"
+        _log(f"modify_component called target={target} changes={changes} position={position} path={path_hint}")
 
         # 解析目标元素
         elems = self._resolve_target(target)
         if not elems:
             return False, f"未找到目标组件: {target}"
 
-        results = []
+        # 收集有效元素，并先应用坐标变更
+        elems_info = []
         for elem in elems:
             comp_type = getattr(elem, 'component_type', '')
             if not comp_type:
                 continue
+            if position:
+                _log(f"[_tool_modify_component] applying position {position} to elem {elem.id[:8]} ({comp_type})")
+                self._apply_position_to_element(elem, position)
+                _log(f"[_tool_modify_component] position applied, pdf_anchor=({getattr(elem,'pdf_anchor_x',None)},{getattr(elem,'pdf_anchor_y',None)},{getattr(elem,'pdf_anchor_z',None)})")
+            elems_info.append((elem, comp_type))
 
-            # 确定操作路径（注意：绝不对 _bimbase_datakey 调用 bool()，
-            # 因为 P3DInstanceKey.__bool__ 会触发 '_data' AttributeError）
-            dk = getattr(elem, '_bimbase_datakey', None)
-            is_bimbase_origin = dk is not None
-            if path_hint == 'auto':
-                # 歧义检测：如果画板中有该类型组件，且 BIMBase 中也存在同类型实体，
-                # 提示用户明确来源（因为 _resolve_target 只能看到画板元素，
-                # 真正的"同时存在"是画板元素 + BIMBase 独立实体）。
-                bimbase_has_same_type = self._scan_bimbase_for_type(comp_type)
-                if bimbase_has_same_type:
-                    return False, (
-                        f"检测到 '{comp_type}' 同时存在于画板和 BIMBase 中，"
-                        f"请明确指定来源后再操作。例如：\n"
-                        f"  • '修改画板中的{comp_type}高度为100'\n"
-                        f"  • '修改 BIMBase 中的{comp_type}高度为100'"
-                    )
-                if is_bimbase_origin:
-                    path = 'bimbase'
+        if not elems_info:
+            return False, f"未找到有效的参数化组件: {target}"
+
+        results = []
+
+        if path_hint == 'auto':
+            # 歧义检测：每种类型的组件只扫描一次 BIMBase。
+            # 若用户已明确给出放置坐标，说明操作对象是画板元素，跳过扫描避免误拦/异常。
+            if position is None:
+                scanned_types = set()
+                for _, comp_type in elems_info:
+                    if comp_type in scanned_types:
+                        continue
+                    scanned_types.add(comp_type)
+                    try:
+                        bimbase_has_same_type = self._scan_bimbase_for_type(comp_type)
+                    except Exception:
+                        bimbase_has_same_type = False
+                    if bimbase_has_same_type:
+                        return False, (
+                            f"检测到 '{comp_type}' 同时存在于画板和 BIMBase 中，"
+                            f"请明确指定来源后再操作。例如：\n"
+                            f"  • '修改画板中的{comp_type}高度为100'\n"
+                            f"  • '修改 BIMBase 中的{comp_type}高度为100'"
+                        )
+
+            # 为每个元素确定具体路径：auto 模式统一走 board 路径，
+            # 由 _sync_element 根据元素来源决定是原地更新还是重新 place。
+            for elem, comp_type in elems_info:
+                path = 'board'
+                _log(f"[_tool_modify_component] will use board path for elem {elem.id[:8]} ({comp_type}), changes={changes}")
+                ok, msg = self._modify_board_then_sync(elem, changes, position=position)
+                _log(f"[_tool_modify_component] board path result for elem {elem.id[:8]}: ok={ok}, msg={msg}")
+                results.append(f"{comp_type}({path}): {msg}")
+        else:
+            path = path_hint
+            for elem, comp_type in elems_info:
+                if path == 'board':
+                    ok, msg = self._modify_board_then_sync(elem, changes, position=position)
+                elif path == 'bimbase':
+                    ok, msg = self._replace_in_bimbase(elem, changes)
                 else:
-                    path = 'board'
-            else:
-                path = path_hint
-
-            if path == 'board':
-                # 路径 A: 修改 board → sync
-                ok, msg = self._modify_board_then_sync(elem, changes)
-                results.append(f"{comp_type}(board): {msg}")
-            elif path == 'bimbase':
-                # 路径 B: 直接 re-place in BIMBase
-                ok, msg = self._replace_in_bimbase(elem, changes)
-                results.append(f"{comp_type}(bimbase): {msg}")
-            else:
-                results.append(f"{comp_type}: 未知路径 {path}")
+                    ok, msg = False, f"未知路径 {path}"
+                results.append(f"{comp_type}({path}): {msg}")
 
         return True, "\n".join(results)
 
@@ -307,6 +344,77 @@ class BIMBaseAgent:
 
     # ========== 内部辅助方法 ==========
 
+    @staticmethod
+    def _apply_position_to_element(elem, position):
+        """将 position（dict/list）应用到元素的几何属性上，保持高度不变。
+        对 PolylineElement 等无 x/y 属性的元素会调用 translate 移动点集，并更新 pdf_anchor。"""
+        if position is None:
+            return
+        if isinstance(position, dict):
+            px = float(position.get('x', position.get('cx', 0)))
+            py = float(position.get('y', position.get('cy', 0)))
+            pz = float(position.get('z', position.get('z_bottom', 0)))
+        elif isinstance(position, (list, tuple)) and len(position) >= 2:
+            px = float(position[0])
+            py = float(position[1])
+            pz = float(position[2]) if len(position) >= 3 else 0.0
+        else:
+            return
+
+        # 以 pdf_anchor 为优先参考点，没有则取 x/cx/x1
+        old_x = float(getattr(elem, 'pdf_anchor_x',
+                              getattr(elem, 'x',
+                                      getattr(elem, 'cx',
+                                              getattr(elem, 'x1', 0.0)))))
+        old_y = float(getattr(elem, 'pdf_anchor_y',
+                              getattr(elem, 'y',
+                                      getattr(elem, 'cy',
+                                              getattr(elem, 'y1', 0.0)))))
+        old_z = float(getattr(elem, 'pdf_anchor_z', getattr(elem, 'z_start', 0.0)))
+        dx = px - old_x
+        dy = py - old_y
+        dz = pz - old_z
+        _log(f"[_apply_position_to_element] elem={elem.id[:8]} old=({old_x},{old_y},{old_z}) new=({px},{py},{pz}) delta=({dx},{dy},{dz})")
+
+        # 优先使用 translate 移动 2D 几何（支持 PolylineElement / RectangleElement / CircleElement 等）
+        if hasattr(elem, 'translate') and callable(elem.translate):
+            try:
+                elem.translate(dx, dy)
+            except Exception:
+                pass
+        else:
+            # 兜底：直接设置 x/cx/y/cy
+            if hasattr(elem, 'x'):
+                elem.x = px
+            elif hasattr(elem, 'cx'):
+                elem.cx = px
+            if hasattr(elem, 'y'):
+                elem.y = py
+            elif hasattr(elem, 'cy'):
+                elem.cy = py
+
+        # 保持高度差，更新 z
+        z_start = getattr(elem, 'z_start', old_z)
+        z_end = getattr(elem, 'z_end', z_start)
+        if hasattr(elem, 'z_start'):
+            elem.z_start = pz
+        if hasattr(elem, 'z_end'):
+            elem.z_end = z_end + dz
+
+        # 同步 PDF 锚点属性，供 BIMBase 同步使用
+        for attr, val in (('pdf_anchor_x', px), ('pdf_anchor_y', py), ('pdf_anchor_z', pz)):
+            if hasattr(elem, attr):
+                setattr(elem, attr, val)
+
+        # 同步到 component_params，确保 _make_component / 生成脚本能读取到新坐标
+        if hasattr(elem, 'component_params') and elem.component_params is not None:
+            try:
+                elem.component_params['x'] = px
+                elem.component_params['y'] = py
+                elem.component_params['z_bottom'] = pz
+            except Exception:
+                pass
+
     def _resolve_target(self, target):
         """解析目标，返回元素列表"""
         if not target:
@@ -337,8 +445,10 @@ class BIMBaseAgent:
 
         return result
 
-    def _modify_board_then_sync(self, elem, changes):
-        """路径 A: 修改 board 元素参数，然后 sync 到 BIMBase"""
+    def _modify_board_then_sync(self, elem, changes, position=None):
+        """路径 A: 修改 board 元素参数，然后 sync 到 BIMBase。
+        指定了 position 时，会强制重新放置（而不是原地更新已有实例），确保坐标生效。"""
+        _log(f"[_modify_board_then_sync] start elem={elem.id[:8]} comp_type={elem.component_type} changes={changes} position={position}")
         self.board._save_undo_state()
         comp_type = elem.component_type
         params = dict(elem.component_params) if elem.component_params else {}
@@ -351,6 +461,15 @@ class BIMBaseAgent:
         # 同时更新元素的几何属性（确保画板显示正确）
         from utils.component_registry import apply_component_params_to_element
         apply_component_params_to_element(elem, params, comp_type)
+
+        # 复杂构件：重新生成源元素主视图，确保 2D 轮廓与参数一致
+        if comp_type in ('引桥桥墩', '索缆锚锭') and hasattr(self.board, '_regenerate_source_front_view'):
+            try:
+                _log(f"[_modify_board_then_sync] regenerating front view for {comp_type}")
+                self.board._regenerate_source_front_view(elem, comp_type, params)
+                _log(f"[_modify_board_then_sync] front view regenerated")
+            except Exception:
+                pass
 
         # 如果处于面编辑模式，重新生成面
         face_cid = getattr(self.board, '_face_component_id', None)
@@ -367,12 +486,24 @@ class BIMBaseAgent:
         # 同步到 BIMBase
         try:
             from bimbase_sync import BIMBaseSync
+            _log(f"[_modify_board_then_sync] starting BIMBase sync for elem {elem.id[:8]}")
             sync = BIMBaseSync(self.board)
-            if sync._sync_element(elem):
+            # 若指定了新坐标，清除已有 instance 引用，避免 _sync_element 走原地 replace 而不移动
+            if position is not None:
+                info = sync.registry.get(elem.id)
+                if info:
+                    info['instance'] = None
+                    _log(f"[_modify_board_then_sync] cleared existing instance registry for elem {elem.id[:8]}")
+            _log(f"[_modify_board_then_sync] calling _sync_element for elem {elem.id[:8]}")
+            sync_result = sync._sync_element(elem)
+            _log(f"[_modify_board_then_sync] _sync_element returned {sync_result}")
+            if sync_result:
                 return True, "参数已更新并同步到 BIMBase"
             else:
                 return True, "参数已更新，但同步到 BIMBase 失败（可能是首次同步）"
         except Exception as e:
+            import traceback
+            _log(f"[_modify_board_then_sync] sync exception: {e}\n{traceback.format_exc()}")
             return True, f"参数已更新，同步时出错: {e}"
 
     def _replace_in_bimbase(self, elem, changes):
@@ -392,14 +523,22 @@ class BIMBaseAgent:
 
         self.board.viewport.update()
 
-        # 重新 place 到 BIMBase
+        # 重新 place 到 BIMBase（使用自动放置，按元素当前坐标）
         try:
-            from bimbase_sync import BIMBaseSync
+            from bimbase_sync import BIMBaseSync, place_component_at
             sync = BIMBaseSync(self.board)
             comp, new_params, new_type = sync._make_component(elem)
             if comp is None:
                 return False, "无法构建组件"
-            sync._place_component(comp)
+            x = float(getattr(elem, 'pdf_anchor_x',
+                              getattr(elem, 'x', getattr(elem, 'cx', 0))))
+            y = float(getattr(elem, 'pdf_anchor_y',
+                              getattr(elem, 'y', getattr(elem, 'cy', 0))))
+            z = float(getattr(elem, 'pdf_anchor_z', getattr(elem, 'z_start', 0)))
+            _log(f"replace_in_bimbase placing {comp_type} at ({x},{y},{z}) pdf_anchor=({getattr(elem,'pdf_anchor_x',None)},{getattr(elem,'pdf_anchor_y',None)},{getattr(elem,'pdf_anchor_z',None)})")
+            ok, pmsg = place_component_at(comp, x, y, z)
+            if not ok:
+                return False, f"自动放置失败: {pmsg}"
             sync.registry.register(elem.id, comp, new_params, new_type)
             elem.bimbase_component_id = id(comp)
             # 更新高度信息

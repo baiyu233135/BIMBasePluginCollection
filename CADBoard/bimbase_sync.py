@@ -32,6 +32,7 @@ def _log(msg):
     try:
         with open(_log_path, 'a', encoding='utf-8') as f:
             f.write(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}\n")
+            f.flush()
     except Exception:
         pass
 
@@ -329,12 +330,23 @@ def _place_via_ai_modeling_direct(comp, x, y, z):
             mod = sys.modules.get(comp_module)
             if mod and getattr(mod, '__file__', None):
                 dep_file = mod.__file__
+        _log(f"_place_via_ai_modeling_direct: comp_module={comp_module}, dep_file={dep_file}")
+
+        # 同时把 DependentFile 关键字写进组件，辅助 pyp3d 定位类定义
+        try:
+            from pyp3d import PARACMPT_KEYWORD_DEPENDENT_FILE
+            comp[PARACMPT_KEYWORD_DEPENDENT_FILE] = dep_file
+            _log(f"_place_via_ai_modeling_direct: set DependentFile key on component")
+        except Exception as e:
+            _log(f"_place_via_ai_modeling_direct: set DependentFile key failed: {e}")
 
         original_argv = sys.argv[0]
         sys.argv[0] = dep_file
         try:
             from pyp3d import translate as _translate, get_place_to_entityId, entityid_isvaid
+            _log(f"_place_via_ai_modeling_direct: calling _PlaceToDirect({x},{y},{z})")
             ai_factory._PlaceToDirect(comp, _translate(float(x), float(y), float(z)))
+            _log("_place_via_ai_modeling_direct: _PlaceToDirect returned")
             # AI_Modeling 经验：只要 _PlaceToDirect 不抛异常即视为放置成功，
             # 某些版本 get_place_to_entityId 返回的 id 可能无效但实体已生成。
             try:
@@ -1086,6 +1098,32 @@ class SphereComponent(Component):
         except Exception as e:
             _log(f"  SphereComponent.replace() error: {e}")
             self['球体'] = scale(50, 50, 50) * Sphere()
+
+
+class ConeComponent(Component):
+    """圆锥：由底面半径和高度定义"""
+    def __init__(self, 底面半径=50, 高度=100):
+        super().__init__()
+        self['底面半径'] = Attr(float(底面半径), show=True, obvious=True)
+        self['高度'] = Attr(float(高度), show=True, obvious=True)
+        self['偏移X'] = Attr(0.0, show=False)
+        self['偏移Y'] = Attr(0.0, show=False)
+        self['偏移Z'] = Attr(0.0, show=False)
+        self['圆锥'] = Attr(None, show=True, obvious=True)
+        self.replace()
+
+    @export
+    def replace(self):
+        try:
+            r = self['底面半径']
+            h = self['高度']
+            ox = float(self['偏移X']) if '偏移X' in self else 0.0
+            oy = float(self['偏移Y']) if '偏移Y' in self else 0.0
+            oz = float(self['偏移Z']) if '偏移Z' in self else 0.0
+            self['圆锥'] = translate(ox, oy, oz) * scale(r, r, h) * Cone()
+        except Exception as e:
+            _log(f"  ConeComponent.replace() error: {e}")
+            self['圆锥'] = scale(50, 50, 100) * Cone()
 
 
 class Polyline3DComponent(Component):
@@ -2039,6 +2077,7 @@ class BIMBaseSync:
         """为引桥桥墩生成独立 pyp3d 脚本并执行/导入，返回 (ok, msg, is_manual)。
         优先使用 AI_Modeling 已被验证的 _PlaceToDirect 坐标自动放置，
         失败时回退到执行生成脚本（create_geometry / place()），不再使用 SendInput。"""
+        _log(f"[_sync_pier_via_generated_code] start elem={elem.id[:8]} comp_type={getattr(elem,'component_type','')}")
         params = dict(getattr(elem, 'component_params', {}))
         try:
             from utils.generated_component_cache import normalize_pier_params
@@ -2050,7 +2089,9 @@ class BIMBaseSync:
         y = float(getattr(elem, 'pdf_anchor_y',
                           getattr(elem, 'y', getattr(elem, 'cy', 0))))
         z = float(getattr(elem, 'pdf_anchor_z', getattr(elem, 'z_start', 0)))
+        _log(f"[_sync_pier_via_generated_code] placement=({x},{y},{z}) params={params}")
         file_path = generate_pier_code(elem.id, params, x, y, z)
+        _log(f"[_sync_pier_via_generated_code] generated script: {file_path}")
 
         # 1) 尝试以模块方式导入生成脚本，拿到组件类
         try:
@@ -2084,8 +2125,9 @@ class BIMBaseSync:
             for k, v in [('x', x), ('y', y), ('z_bottom', z)]:
                 if k in comp:
                     comp[k] = float(v)
-            _log(f"  pier element {elem.id}: trying AI_Modeling auto placement at ({x}, {y}, {z})")
+            _log(f"[_sync_pier_via_generated_code] elem={elem.id[:8]}: trying AI_Modeling auto placement at ({x}, {y}, {z})")
             ai_ok, ai_msg = _place_via_ai_modeling_direct(comp, x, y, z)
+            _log(f"[_sync_pier_via_generated_code] AI_Modeling placement result ok={ai_ok}, msg={ai_msg}")
             if not ai_ok:
                 raise RuntimeError(f"AI_Modeling 自动放置失败: {ai_msg}")
             self.registry.register(
@@ -2102,7 +2144,9 @@ class BIMBaseSync:
             _log(f"  generated code auto placement failed: {e}")
 
         # 兜底：直接执行生成脚本（create_geometry / place()，不含 SendInput）
+        _log(f"[_sync_pier_via_generated_code] falling back to execute_generated_code: {file_path}")
         ok, msg, is_manual = execute_generated_code(file_path)
+        _log(f"[_sync_pier_via_generated_code] execute_generated_code result ok={ok}, is_manual={is_manual}, msg={msg}")
         if ok:
             if is_manual:
                 self.manual_placed.append(elem)
@@ -2122,6 +2166,7 @@ class BIMBaseSync:
         """为索缆锚锭生成独立 pyp3d 脚本并执行/导入，返回 (ok, msg, is_manual)。
         优先使用 AI_Modeling 已被验证的 _PlaceToDirect 坐标自动放置，
         失败时回退到执行生成脚本（create_geometry / place()），不再使用 SendInput。"""
+        _log(f"[_sync_cable_anchor_via_generated_code] start elem={elem.id[:8]}")
         params = dict(getattr(elem, 'component_params', {}))
         try:
             from utils.generated_component_cache import normalize_cable_anchor_params
@@ -2133,9 +2178,11 @@ class BIMBaseSync:
         y = float(getattr(elem, 'pdf_anchor_y',
                           getattr(elem, 'y', getattr(elem, 'cy', 0))))
         z = float(getattr(elem, 'pdf_anchor_z', getattr(elem, 'z_start', 0)))
+        _log(f"[_sync_cable_anchor_via_generated_code] placement=({x},{y},{z})")
         try:
             from utils.generated_component_cache import generate_cable_anchor_code
             file_path = generate_cable_anchor_code(elem.id, params, x, y, z)
+            _log(f"[_sync_cable_anchor_via_generated_code] generated script: {file_path}")
         except Exception as e:
             _log(f"  generated cable anchor code failed: {e}")
             return False, f"生成脚本失败: {e}", False
@@ -2172,8 +2219,9 @@ class BIMBaseSync:
             for k, v in [('x', x), ('y', y), ('z_bottom', z)]:
                 if k in comp:
                     comp[k] = float(v)
-            _log(f"  cable anchor element {elem.id}: trying AI_Modeling auto placement at ({x}, {y}, {z})")
+            _log(f"[_sync_cable_anchor_via_generated_code] elem={elem.id[:8]}: trying AI_Modeling auto placement at ({x}, {y}, {z})")
             ai_ok, ai_msg = _place_via_ai_modeling_direct(comp, x, y, z)
+            _log(f"[_sync_cable_anchor_via_generated_code] AI_Modeling placement result ok={ai_ok}, msg={ai_msg}")
             if not ai_ok:
                 raise RuntimeError(f"AI_Modeling 自动放置失败: {ai_msg}")
             self.registry.register(
@@ -2190,8 +2238,10 @@ class BIMBaseSync:
             _log(f"  generated anchor code auto placement failed: {e}")
 
         # 兜底：直接执行生成脚本（create_geometry / place()，不含 SendInput）
+        _log(f"[_sync_cable_anchor_via_generated_code] falling back to execute_generated_code: {file_path}")
         from utils.generated_component_cache import execute_generated_code
         ok, msg, is_manual = execute_generated_code(file_path)
+        _log(f"[_sync_cable_anchor_via_generated_code] execute_generated_code result ok={ok}, is_manual={is_manual}, msg={msg}")
         if ok:
             if is_manual:
                 self.manual_placed.append(elem)

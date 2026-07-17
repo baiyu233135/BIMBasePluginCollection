@@ -598,9 +598,10 @@ def execute_generated_code(file_path: str):
     except Exception as e:
         _log(f"inject pyp3d namespace failed: {e}")
 
-    # 保存并恢复 sys.argv[0]
+    # 保存并恢复 sys.argv[0]；执行期间让 sys.argv[0] 指向生成脚本本身，
+    # 这样 create_geometry / place 读取 DependentFile 时才能正确定位组件类。
     original_argv0 = sys.argv[0]
-    sys._original_argv0 = original_argv0
+    sys.argv[0] = file_path
 
     # 捕获脚本的标准输出，用于判断是自动放置还是手动放置
     import io
@@ -627,5 +628,3 @@ def execute_generated_code(file_path: str):
     finally:
         sys.stdout = old_stdout
         sys.argv[0] = original_argv0
-        if hasattr(sys, '_original_argv0'):
-            del sys._original_argv0

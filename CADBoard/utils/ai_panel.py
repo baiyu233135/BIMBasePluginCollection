@@ -21,6 +21,7 @@ from datetime import datetime
 
 from utils.ai_executor import AICommandExecutor, AIResponseParser
 from utils.voice_input import VoiceRecorder, BaiduSpeechRecognizer
+import bimbase_sync
 
 try:
     from PyQt5.QtWidgets import (
@@ -64,27 +65,28 @@ class LocalCommandParser:
         '球体': '球体', 'sphere': '球体', '球': '球体',
         '直角三棱柱': '直角三棱柱', '三棱柱': '直角三棱柱',
         '引桥桥墩': '引桥桥墩', '桥墩': '引桥桥墩',
+        '索缆锚锭': '索缆锚锭', '锚锭': '索缆锚锭',
     }
 
     # 操作映射
     ACTION_MAP = {
         '画': 'draw', '绘制': 'draw', '创建': 'draw', '画一个': 'draw',
-        '删除': 'delete', '移除': 'delete', 'del': 'delete', 'e': 'delete', 'erase': 'delete',
+        '删除': 'delete', '移除': 'delete', 'del': 'delete', 'erase': 'delete',
         '复制': 'copy', '拷贝': 'copy', 'co': 'copy',
-        '移动': 'move', 'm': 'move',
+        '移动': 'move',
         '旋转': 'rotate', 'ro': 'rotate',
         '缩放': 'scale', 'sc': 'scale',
         '镜像': 'mirror', 'mi': 'mirror',
-        '偏移': 'offset', 'o': 'offset',
-        '拉伸': 'stretch', 's': 'stretch',
+        '偏移': 'offset',
+        '拉伸': 'stretch',
         '修剪': 'trim', 'tr': 'trim',
         '延伸': 'extend', 'ex': 'extend',
-        '圆角': 'fillet', 'f': 'fillet',
+        '圆角': 'fillet',
         '倒角': 'chamfer', '倒斜角': 'chamfer', 'cha': 'chamfer',
         '阵列': 'array', 'ar': 'array',
         '打断': 'break', 'br': 'break',
-        '合并': 'join', 'j': 'join',
-        '分解': 'explode', 'x': 'explode',
+        '合并': 'join',
+        '分解': 'explode',
     }
 
     # 面名称映射（用于三视图修改指令）
@@ -103,7 +105,7 @@ class LocalCommandParser:
     }
 
     # 支持的3D实体类型
-    SOLID_TYPES = {'圆柱', '正方体', '长方体', '球体', '直角三棱柱', '引桥桥墩'}
+    SOLID_TYPES = {'圆柱', '正方体', '长方体', '球体', '直角三棱柱', '引桥桥墩', '索缆锚锭'}
 
     @classmethod
     def parse(cls, text: str):
@@ -205,6 +207,9 @@ class LocalCommandParser:
         """解析修改类指令，如:\"把第一个矩形加长50\"\"所有元素高度改成200\""""
         import re
 
+        # 统一提取命令中的放置坐标（可选）
+        position = cls._extract_position(text)
+
         # 0. 颜色修改模式（优先，避免与尺寸修改混淆）
         color_map = {
             '红': (255, 0, 0), '红色': (255, 0, 0),
@@ -250,8 +255,16 @@ class LocalCommandParser:
             return {'action': 'modify', 'target': target, 'changes': {prop: val}}
 
         # 模式: 所有/全部 + 元素类型 + 属性 + 改成
-        all_pattern = r'(?:所有|全部)\s*(.+?)\s*(?:的)?\s*(.+?)\s*(?:改成|变成|设为)\s*([+-]?\d+\.?\d*)'
-        m = re.search(all_pattern, text)
+        # 优先匹配带 "的" 的明确格式，避免非贪婪把类型只匹配到一个字
+        all_patterns = [
+            r'(?:所有|全部)\s*(.+?)\s*的\s*(.+?)\s*(?:改成|变成|设为)\s*([+-]?\d+\.?\d*)',
+            r'(?:所有|全部)\s*(.+?)\s*(.+?)\s*(?:改成|变成|设为)\s*([+-]?\d+\.?\d*)',
+        ]
+        m = None
+        for pat in all_patterns:
+            m = re.search(pat, text)
+            if m:
+                break
         if m:
             elem_type_text = m.group(1).strip()
             prop_text = m.group(2).strip()
@@ -264,11 +277,14 @@ class LocalCommandParser:
             prop = cls._parse_property_text(prop_text)
             target = {'element_type': elem_type} if elem_type else {'index': 'all'}
             changes = {prop: float(val_str)}
-            if elem_type and elem_type in ('圆柱', '正方体', '长方体', '直角三棱柱'):
+            if elem_type and elem_type in ('圆柱', '正方体', '长方体', '直角三棱柱', '引桥桥墩', '索缆锚锭'):
+                agent_params = {'target': {'component_type': elem_type}, 'changes': changes, 'path': 'auto'}
+                if position:
+                    agent_params['position'] = position
                 return {
                     'action': 'agent',
                     'tool': 'modify_component',
-                    'params': {'target': target, 'changes': changes, 'path': 'auto'}
+                    'params': agent_params
                 }
             return {'action': 'modify', 'target': target, 'changes': changes}
 
@@ -327,20 +343,26 @@ class LocalCommandParser:
 
         # 如果是组件级参数修改，交给 Agent 处理（支持双路径+自动同步）
         if 'component_type' in target:
+            agent_params = {'target': target, 'changes': changes, 'path': 'auto'}
+            if position:
+                agent_params['position'] = position
             return {
                 'action': 'agent',
                 'tool': 'modify_component',
-                'params': {'target': target, 'changes': changes, 'path': 'auto'}
+                'params': agent_params
             }
 
         # 几何参数（宽/高/半径等）即使 target 未识别为组件，也提升为 Agent 路径，
         # 让 Agent 根据当前选中元素判断是否为参数化组件并处理歧义。
         GEOM_PARAMS = {'width', 'height', 'radius', 'depth', 'size', 'length', 'thickness', 'a', 'b', 'h'}
         if prop in GEOM_PARAMS:
+            agent_params = {'target': target, 'changes': changes, 'path': 'auto'}
+            if position:
+                agent_params['position'] = position
             return {
                 'action': 'agent',
                 'tool': 'modify_component',
-                'params': {'target': target, 'changes': changes, 'path': 'auto'}
+                'params': agent_params
             }
 
         return {'action': 'modify', 'target': target, 'changes': changes}
@@ -362,7 +384,7 @@ class LocalCommandParser:
                     break
             if elem_type:
                 # 如果是参数化组件，用 component_type 定位以便走 Agent 路径
-                if elem_type in ('圆柱', '正方体', '长方体', '直角三棱柱'):
+                if elem_type in ('圆柱', '正方体', '长方体', '直角三棱柱', '引桥桥墩', '索缆锚锭'):
                     return {'component_type': elem_type, 'index': idx}
                 return {'element_type': elem_type, 'index': idx}
             return {'index': idx}
@@ -384,6 +406,8 @@ class LocalCommandParser:
             '椭圆': 'Ellipse3DComponent',
             '引桥桥墩': '引桥桥墩',
             '桥墩': '引桥桥墩',
+            '索缆锚锭': '索缆锚锭',
+            '锚锭': '索缆锚锭',
         }
         for cn, ct in component_type_map.items():
             if cn in text:
@@ -406,9 +430,18 @@ class LocalCommandParser:
 
     @classmethod
     def _parse_property_text(cls, text: str):
-        """解析属性名"""
+        """解析属性名（支持复杂构件中文参数名透传）"""
         prop_map = {
-            # 几何尺寸
+            # 复杂构件中文参数名（优先精确匹配）
+            '墩高': '墩高',
+            '盖梁总长': '盖梁总长', '盖梁总高': '盖梁总高', '盖梁宽': '盖梁宽',
+            '墩柱直径': '墩柱直径', '墩柱间距': '墩柱间距',
+            '系梁根数': '系梁根数', '系梁数量': '系梁根数',
+            '锚块总长': '锚块总长', '锚块总高': '锚块总高', '锚块宽度': '锚块宽度',
+            '承台长度': '承台长度', '承台宽度': '承台宽度', '承台高度': '承台高度',
+            '底柱半径': '底柱半径', '底柱高度': '底柱高度',
+            '底柱数量': '底柱数量', '底柱排数': '底柱排数',
+            # 几何尺寸别名
             '长': 'width', '长度': 'width', 'length': 'width',
             '宽': 'width', '宽度': 'width', 'width': 'width',
             '高': 'height', '高度': 'height', 'height': 'height',
@@ -420,12 +453,13 @@ class LocalCommandParser:
             # 样式
             '颜色': 'color', 'color': 'color',
             '线宽': 'line_width', '线型': 'line_type',
-            # 组件参数（直接透传）
+            # 通用组件参数（直接透传）
             'a': 'a', 'b': 'b', 'h': 'h',
         }
-        for cn, en in prop_map.items():
+        # 优先匹配最长关键词，避免"墩高"被"高"覆盖
+        for cn in sorted(prop_map.keys(), key=len, reverse=True):
             if cn in text:
-                return en
+                return prop_map[cn]
         return text  # 直接返回原文本作为属性名
 
     @classmethod
@@ -507,6 +541,29 @@ class LocalCommandParser:
             if m:
                 params['angle'] = float(m.group(1))
                 break
+
+        return params
+
+    @classmethod
+    def _extract_position(cls, text: str):
+        """从文本中提取放置坐标，返回 {'x':..., 'y':..., 'z':...} 或 None。
+        兼容“放在bimbase(500,0,0)”“放在(500,0,0)”等写法。"""
+        import re
+        # 允许在坐标前出现可选的 bimbase 前缀（不区分大小写，已在外部 lower）
+        patterns = [
+            r'(?:放在|在|坐标|位置)\s*(?:bimbase\s*)?\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)',
+            r'(?:放在|在|坐标|位置)\s*(?:bimbase\s*)?\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)',
+            r'(?:放在|在|坐标|位置)\s*(?:bimbase\s*)?(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)',
+            r'(?:放在|在|坐标|位置)\s*(?:bimbase\s*)?(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)',
+        ]
+        for pat in patterns:
+            m = re.search(pat, text)
+            if m:
+                pos = {'x': float(m.group(1)), 'y': float(m.group(2))}
+                if m.lastindex >= 3:
+                    pos['z'] = float(m.group(3))
+                return pos
+        return None
 
         # 距离提取(偏移/间距等): 距离20 / 间距20 / 每隔20
         # 注意：要避免把“半径2mm/高5mm”这类参数后面的 mm 误解析为 distance。
@@ -1115,11 +1172,27 @@ class AIPanel(QWidget):
         text = self.input_box.text().strip()
         if not text:
             return
-        self.input_box.clear()
-        self._append_message('user', text)
+        bimbase_sync._log(f"[AI_PANEL] _send_message received: {text!r}")
+        try:
+            self.input_box.clear()
+            bimbase_sync._log("[AI_PANEL] _send_message: input_box cleared")
+        except Exception as e:
+            bimbase_sync._log(f"[AI_PANEL] input_box.clear exception: {e}")
+        try:
+            self._append_message('user', text)
+            bimbase_sync._log("[AI_PANEL] _send_message: user message appended")
+        except Exception as e:
+            bimbase_sync._log(f"[AI_PANEL] _append_message exception: {e}")
 
         # v1.5 P3: 自动路由判断
-        use_local = self._should_use_local(text)
+        try:
+            use_local = self._should_use_local(text)
+            bimbase_sync._log(f"[AI_PANEL] _should_use_local={use_local} for: {text!r}")
+        except Exception as e:
+            bimbase_sync._log(f"[AI_PANEL] _should_use_local exception: {e}")
+            import traceback
+            bimbase_sync._log(traceback.format_exc())
+            use_local = False
 
         if use_local:
             # 本地执行路径
@@ -1158,15 +1231,28 @@ class AIPanel(QWidget):
         简单指令 → True（本地执行，快）
         复杂/模糊指令 → False（走API）
         """
+        bimbase_sync._log(f"[AI_PANEL] _should_use_local start: {text!r}")
         # 0. 沿轴批量布置指令强制走本地解析，避免被AI覆盖
         if '沿' in text:
-            parsed = LocalCommandParser.parse(text)
+            try:
+                parsed = LocalCommandParser.parse(text)
+            except Exception as e:
+                bimbase_sync._log(f"[AI_PANEL] parse axis failed: {e}")
+                parsed = None
             if parsed and parsed.get('axis'):
                 return True
 
         # 1. 先尝试解析，解析失败直接走API
-        parsed = LocalCommandParser.parse(text)
+        try:
+            parsed = LocalCommandParser.parse(text)
+            bimbase_sync._log(f"[AI_PANEL] _should_use_local parsed={parsed}")
+        except Exception as e:
+            bimbase_sync._log(f"[AI_PANEL] _should_use_local parse exception: {e}")
+            import traceback
+            bimbase_sync._log(traceback.format_exc())
+            return False
         if not parsed:
+            bimbase_sync._log("[AI_PANEL] _should_use_local: parsed is None, use API")
             return False
 
         # 2. 包含复杂/模糊关键词 → 走API
@@ -1198,8 +1284,16 @@ class AIPanel(QWidget):
 
     def _execute_local_command(self, parsed, original_text):
         """Phase 4: 使用AICommandExecutor执行本地解析的指令"""
+        bimbase_sync._log(f"[AI_PANEL] _execute_local_command: text={original_text!r} parsed={parsed}")
         self._append_message('system', f"正在执行: {original_text}")
-        success, msg = self._executor.execute(parsed)
+        try:
+            success, msg = self._executor.execute(parsed)
+        except Exception as e:
+            bimbase_sync._log(f"[AI_PANEL] executor.execute exception: {e}")
+            import traceback
+            bimbase_sync._log(traceback.format_exc())
+            success, msg = False, f"执行异常: {e}"
+        bimbase_sync._log(f"[AI_PANEL] executor result: success={success}, msg={msg}")
         if success:
             self._append_message('system', f"✅ {msg}")
         else:
@@ -1284,16 +1378,20 @@ class AIPanel(QWidget):
             "你是CAD画板AI助手，将用户指令转为JSON操作。只输出JSON，不要解释。\n\n"
             "输出格式:{\"commands\":[...],\"summary\":\"描述\"}\n"
             "commands每项含action+参数:\n"
-            "create:element类型(circle/rectangle/line/arc/point/polyline/polygon/ellipse/圆柱/正方体/长方体/直角三棱柱)+params坐标尺寸\n"
+            "create:element类型(circle/rectangle/line/arc/point/polyline/polygon/ellipse/圆柱/正方体/长方体/直角三棱柱/引桥桥墩/索缆锚锭)+params坐标尺寸\n"
             "modify:target必须是字典{\"index\":\"selected\"}或{\"index\":N}或{\"element_type\":\"circle\"}+changes属性键值(支持+50/*2)\n"
+            "agent:tool(modify_component/sync_to_bimbase/query_state/regenerate_faces)+params; modify_component支持target/changes/path以及可选position{x,y,z}\n"
             "transform:transform_type(translate/rotate/scale/mirror)+target字典+params\n"
             "delete:target字典\n"
             "set_property:target字典+properties(z_start/z_end/height/is_3d/thickness)\n"
-            "agent:tool(modify_component/sync_to_bimbase/query_state/regenerate_faces)+params\n"
             "face_edit:sub_action(generate/apply)\n"
             "sync:无参\n"
             "信息不足返回{\"action\":\"ask\",\"question\":\"...\"}\n"
             "闲聊返回{\"action\":\"chat\",\"message\":\"...\"}\n\n"
+            "可改参的组件及参数名:\n"
+            "引桥桥墩: 盖梁总长、盖梁总高、盖梁宽、墩柱直径、墩柱间距、墩高、系梁根数\n"
+            "索缆锚锭: 锚块总长、锚块总高、锚块宽度、承台长度、承台宽度、承台高度、底柱半径、底柱高度、底柱数量、底柱排数\n"
+            "示例: {\"commands\":[{\"action\":\"agent\",\"tool\":\"modify_component\",\"params\":{\"target\":{\"component_type\":\"引桥桥墩\",\"index\":0},\"changes\":{\"墩高\":1000},\"position\":{\"x\":500,\"y\":0,\"z\":0}}}] }\n\n"
             "歧义规则:未明确来源且画板+BIMBase都有同类型→追问;仅一方有→直接执行该方。\n\n"
             "画板状态:\n" + context + "\n\n"
             "BIMBase状态:\n" + bimbase_state + "\n"
