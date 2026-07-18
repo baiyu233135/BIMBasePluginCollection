@@ -304,28 +304,29 @@ class LocalCommandParser:
                 val_str = m.group(2).strip()
                 target_text, prop_text = cls._split_target_prop(combined_text)
             else:
-                # 3. 回退到旧模式（兼容其他格式）
-                modify_patterns = [
-                    r'(?:把|将|让)\s*(.+?)\s*(?:的)?\s*(.+?)\s*(?:改成|变成|设为|改为)\s*([+-]?\d+\.?\d*)',
-                    r'(?:把|将|让)\s*(.+?)\s*(?:的)?\s*(.+?)\s*(?:增加|加长|加宽|加高|加大)\s*([+-]?\d+\.?\d*)',
-                    r'(?:把|将|让)\s*(.+?)\s*(?:的)?\s*(.+?)\s*(?:减少|缩短|减小)\s*([+-]?\d+\.?\d*)',
-                    r'(.+?)\s*(?:的)?\s*(.+?)\s*(?:改成|变成|设为|改为)\s*([+-]?\d+\.?\d*)',
-                ]
-                for pat in modify_patterns:
-                    m = re.search(pat, text)
-                    if m:
-                        target_text = m.group(1).strip()
-                        prop_text = m.group(2).strip()
-                        val_str = m.group(3).strip()
-                        break
+                # 3. 纯属性修改（无主语）："高度改成100"、"盖梁宽改成500"
+                # 优先匹配，避免被下面的通用 fallback 拆错（如把"盖梁宽"拆成 target="盖梁" prop="宽"）
+                prop_only_pat = r'(高度|宽度|半径|长度|大小|深度|厚度|边长|直角边1|直角边2|h|a|b|r|墩高|盖梁总长|盖梁总高|盖梁宽|墩柱直径|墩柱间距|系梁根数|系梁数量|锚块总长|锚块总高|锚块宽度|承台长度|承台宽度|承台高度|底柱半径|底柱高度|底柱数量|底柱排数)\s*(?:改成|变成|设为|改为|增加|加长|加宽|加高|加大|减少|缩短|减小)\s*([+-]?\d+\.?\d*)'
+                m = re.search(prop_only_pat, text)
+                if m:
+                    target_text = ''
+                    prop_text = m.group(1).strip()
+                    val_str = m.group(2).strip()
                 else:
-                    # 4. 纯属性修改（无主语）："高度改成100"、"半径增加20"
-                    prop_only_pat = r'(高度|宽度|半径|长度|大小|深度|厚度|边长|直角边1|直角边2|h|a|b|r)\s*(?:改成|变成|设为|改为|增加|加长|加宽|加高|加大|减少|缩短|减小)\s*([+-]?\d+\.?\d*)'
-                    m = re.search(prop_only_pat, text)
-                    if m:
-                        target_text = ''
-                        prop_text = m.group(1).strip()
-                        val_str = m.group(2).strip()
+                    # 4. 回退到旧模式（兼容其他格式）
+                    modify_patterns = [
+                        r'(?:把|将|让)\s*(.+?)\s*(?:的)?\s*(.+?)\s*(?:改成|变成|设为|改为)\s*([+-]?\d+\.?\d*)',
+                        r'(?:把|将|让)\s*(.+?)\s*(?:的)?\s*(.+?)\s*(?:增加|加长|加宽|加高|加大)\s*([+-]?\d+\.?\d*)',
+                        r'(?:把|将|让)\s*(.+?)\s*(?:的)?\s*(.+?)\s*(?:减少|缩短|减小)\s*([+-]?\d+\.?\d*)',
+                        r'(.+?)\s*(?:的)?\s*(.+?)\s*(?:改成|变成|设为|改为)\s*([+-]?\d+\.?\d*)',
+                    ]
+                    for pat in modify_patterns:
+                        m = re.search(pat, text)
+                        if m:
+                            target_text = m.group(1).strip()
+                            prop_text = m.group(2).strip()
+                            val_str = m.group(3).strip()
+                            break
                     else:
                         return None
 
@@ -342,8 +343,24 @@ class LocalCommandParser:
             changes[prop] = '-' + val_str
 
         # 如果是组件级参数修改，交给 Agent 处理（支持双路径+自动同步）
-        if 'component_type' in target:
+        if 'component_type' in target or 'component' in target:
             agent_params = {'target': target, 'changes': changes, 'path': 'auto'}
+            if position:
+                agent_params['position'] = position
+            return {
+                'action': 'agent',
+                'tool': 'modify_component',
+                'params': agent_params
+            }
+
+        # 复杂构件专用参数（无显式目标时，默认操作当前选中的组件）
+        COMPLEX_PARAMS = {
+            '墩高', '盖梁总长', '盖梁总高', '盖梁宽', '墩柱直径', '墩柱间距', '系梁根数',
+            '锚块总长', '锚块总高', '锚块宽度', '承台长度', '承台宽度', '承台高度',
+            '底柱半径', '底柱高度', '底柱数量', '底柱排数', '系梁数量',
+        }
+        if prop in COMPLEX_PARAMS:
+            agent_params = {'target': {'component': True}, 'changes': changes, 'path': 'auto'}
             if position:
                 agent_params['position'] = position
             return {
@@ -431,8 +448,8 @@ class LocalCommandParser:
     @classmethod
     def _parse_property_text(cls, text: str):
         """解析属性名（支持复杂构件中文参数名透传）"""
-        prop_map = {
-            # 复杂构件中文参数名（优先精确匹配）
+        # 1) 优先精确匹配复杂构件专用中文参数名，避免被英文/通用别名覆盖
+        complex_params = {
             '墩高': '墩高',
             '盖梁总长': '盖梁总长', '盖梁总高': '盖梁总高', '盖梁宽': '盖梁宽',
             '墩柱直径': '墩柱直径', '墩柱间距': '墩柱间距',
@@ -441,6 +458,12 @@ class LocalCommandParser:
             '承台长度': '承台长度', '承台宽度': '承台宽度', '承台高度': '承台高度',
             '底柱半径': '底柱半径', '底柱高度': '底柱高度',
             '底柱数量': '底柱数量', '底柱排数': '底柱排数',
+        }
+        for cn in sorted(complex_params.keys(), key=len, reverse=True):
+            if cn in text:
+                return complex_params[cn]
+
+        prop_map = {
             # 几何尺寸别名
             '长': 'width', '长度': 'width', 'length': 'width',
             '宽': 'width', '宽度': 'width', 'width': 'width',
@@ -456,7 +479,7 @@ class LocalCommandParser:
             # 通用组件参数（直接透传）
             'a': 'a', 'b': 'b', 'h': 'h',
         }
-        # 优先匹配最长关键词，避免"墩高"被"高"覆盖
+        # 优先匹配最长关键词，避免"高度"被"高"覆盖
         for cn in sorted(prop_map.keys(), key=len, reverse=True):
             if cn in text:
                 return prop_map[cn]

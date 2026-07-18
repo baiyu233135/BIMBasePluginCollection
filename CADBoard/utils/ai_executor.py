@@ -944,6 +944,37 @@ class AICommandExecutor:
             return [e for e in self.board.elements
                     if getattr(e, 'face_info', {}).get('face_name') == face_name]
 
+        # 参数化组件类型
+        if 'component_type' in target:
+            ct = target['component_type']
+            matched = [e for e in self.board.elements
+                       if getattr(e, 'component_type', '') == ct
+                       and not getattr(e, 'face_info', {})]
+            idx = target.get('index')
+            if isinstance(idx, int) and 0 <= idx < len(matched):
+                return [matched[idx]]
+            return matched
+
+        # 通用"组件"关键词：当前选中/面编辑源组件/任意参数化组件
+        if target.get('component'):
+            face_cid = getattr(self.board, '_face_component_id', None)
+            if face_cid:
+                source = next((e for e in self.board.elements
+                               if e.id == face_cid and not getattr(e, 'face_info', {})), None)
+                if source:
+                    return [source]
+            selected = [e for e in self.board.elements
+                        if getattr(e, 'selected', False)
+                        and getattr(e, 'component_type', '')
+                        and not getattr(e, 'face_info', {})]
+            if selected:
+                return selected
+            comps = [e for e in self.board.elements
+                     if getattr(e, 'component_type', '') and not getattr(e, 'face_info', {})]
+            if comps:
+                return [comps[0]]
+            return []
+
         return []
 
     def _parse_relative(self, old_val, expr):

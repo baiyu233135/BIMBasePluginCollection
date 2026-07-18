@@ -205,6 +205,56 @@ class BIMBaseAgent:
         if not elems_info:
             return False, f"未找到有效的参数化组件: {target}"
 
+        # 规范化 changes：把通用别名映射为组件专用参数名，并处理相对值
+        def _normalize_changes(comp_type, params, changes):
+            mapping = {
+                '引桥桥墩': {
+                    'height': '墩高', 'h': '墩高',
+                    'width': '盖梁总长', 'length': '盖梁总长', 'l': '盖梁总长',
+                    'depth': '盖梁宽', 'w': '盖梁宽',
+                    '墩高': '墩高', '盖梁总长': '盖梁总长', '盖梁总高': '盖梁总高',
+                    '盖梁宽': '盖梁宽', '墩柱直径': '墩柱直径', '墩柱间距': '墩柱间距',
+                    '系梁根数': '系梁根数', '系梁数量': '系梁根数',
+                },
+                '索缆锚锭': {
+                    'length': '锚块总长', 'l': '锚块总长',
+                    'width': '锚块宽度', 'w': '锚块宽度',
+                    'height': '锚块总高', 'h': '锚块总高',
+                    '锚块总长': '锚块总长', '锚块总高': '锚块总高', '锚块宽度': '锚块宽度',
+                    '承台长度': '承台长度', '承台宽度': '承台宽度', '承台高度': '承台高度',
+                    '底柱半径': '底柱半径', '底柱高度': '底柱高度',
+                    '底柱数量': '底柱数量', '底柱排数': '底柱排数',
+                    '系梁数量': '系梁数量',
+                },
+            }.get(comp_type, {})
+            normalized = {}
+            for key, val in changes.items():
+                mk = mapping.get(key, key)
+                # 相对值表达式
+                if isinstance(val, str):
+                    val = val.strip()
+                    if val.startswith(('+', '-', '*', '/')):
+                        old = float(params.get(mk, 0))
+                        op = val[0]
+                        num = float(val[1:])
+                        if op == '+':
+                            val = old + num
+                        elif op == '-':
+                            val = old - num
+                        elif op == '*':
+                            val = old * num
+                        elif op == '/':
+                            val = old / num if num != 0 else old
+                    else:
+                        val = float(val)
+                # 计数类参数保持 int
+                if mk in ('系梁根数', '系梁数量', '底柱数量', '底柱排数'):
+                    val = int(round(float(val)))
+                else:
+                    val = float(val)
+                normalized[mk] = val
+            return normalized
+
         results = []
 
         if path_hint == 'auto':
@@ -232,17 +282,19 @@ class BIMBaseAgent:
             # 由 _sync_element 根据元素来源决定是原地更新还是重新 place。
             for elem, comp_type in elems_info:
                 path = 'board'
-                _log(f"[_tool_modify_component] will use board path for elem {elem.id[:8]} ({comp_type}), changes={changes}")
-                ok, msg = self._modify_board_then_sync(elem, changes, position=position)
+                norm_changes = _normalize_changes(comp_type, elem.component_params or {}, changes)
+                _log(f"[_tool_modify_component] will use board path for elem {elem.id[:8]} ({comp_type}), changes={norm_changes}")
+                ok, msg = self._modify_board_then_sync(elem, norm_changes, position=position)
                 _log(f"[_tool_modify_component] board path result for elem {elem.id[:8]}: ok={ok}, msg={msg}")
                 results.append(f"{comp_type}({path}): {msg}")
         else:
             path = path_hint
             for elem, comp_type in elems_info:
+                norm_changes = _normalize_changes(comp_type, elem.component_params or {}, changes)
                 if path == 'board':
-                    ok, msg = self._modify_board_then_sync(elem, changes, position=position)
+                    ok, msg = self._modify_board_then_sync(elem, norm_changes, position=position)
                 elif path == 'bimbase':
-                    ok, msg = self._replace_in_bimbase(elem, changes)
+                    ok, msg = self._replace_in_bimbase(elem, norm_changes)
                 else:
                     ok, msg = False, f"未知路径 {path}"
                 results.append(f"{comp_type}({path}): {msg}")
@@ -423,6 +475,29 @@ class BIMBaseAgent:
 
         elems = getattr(self.board, 'elements', [])
         result = list(elems)
+
+        # 通用"组件"关键词：优先处理当前面编辑的源组件，再取选中/最近操作的组件
+        if target.get('component'):
+            # 1) 面编辑模式下的源组件
+            face_cid = getattr(self.board, '_face_component_id', None)
+            if face_cid:
+                source = next((e for e in elems
+                               if e.id == face_cid and not getattr(e, 'face_info', {})), None)
+                if source:
+                    return [source]
+            # 2) 当前选中的参数化组件（排除面元素）
+            selected = [e for e in elems
+                        if getattr(e, 'selected', False)
+                        and getattr(e, 'component_type', '')
+                        and not getattr(e, 'face_info', {})]
+            if selected:
+                return selected
+            # 3) 任意参数化组件
+            comps = [e for e in elems
+                     if getattr(e, 'component_type', '') and not getattr(e, 'face_info', {})]
+            if comps:
+                return [comps[0]]
+            return []
 
         # 先按 component_type 过滤
         if 'component_type' in target:
