@@ -225,6 +225,9 @@ class BIMBaseAgent:
                     '底柱半径': '底柱半径', '底柱高度': '底柱高度',
                     '底柱数量': '底柱数量', '底柱排数': '底柱排数',
                     '系梁数量': '系梁数量',
+                    # 常见错别字
+                    '低柱半径': '底柱半径', '低柱高度': '底柱高度',
+                    '低柱数量': '底柱数量', '低柱排数': '底柱排数',
                 },
             }.get(comp_type, {})
             normalized = {}
@@ -557,6 +560,20 @@ class BIMBaseAgent:
                     elem.visible = False
 
         self.board.viewport.update()
+
+        # 若元素仍是 PDF 识别来源，把它当前的几何坐标写入 pdf_anchor，
+        # 并清除 pdf_recognized 标记，避免 _sync_element 弹窗要求手动输入坐标。
+        if getattr(elem, 'pdf_recognized', False):
+            x = float(getattr(elem, 'pdf_anchor_x',
+                              getattr(elem, 'x', getattr(elem, 'cx', 0.0))))
+            y = float(getattr(elem, 'pdf_anchor_y',
+                              getattr(elem, 'y', getattr(elem, 'cy', 0.0))))
+            z = float(getattr(elem, 'pdf_anchor_z', getattr(elem, 'z_start', 0.0)))
+            elem.pdf_anchor_x = x
+            elem.pdf_anchor_y = y
+            elem.pdf_anchor_z = z
+            elem.pdf_recognized = False
+            _log(f"[_modify_board_then_sync] cleared pdf_recognized for elem {elem.id[:8]}, anchor=({x},{y},{z})")
 
         # 同步到 BIMBase
         try:
