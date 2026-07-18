@@ -108,6 +108,20 @@ class LocalCommandParser:
     # 支持的3D实体类型
     SOLID_TYPES = {'圆柱', '正方体', '长方体', '球体', '直角三棱柱', '引桥桥墩', '索缆锚锭'}
 
+    # 中文数字映射（支持"改为一"、"改为二"等）
+    _CN_NUMBERS = {
+        '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5,
+        '六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
+    }
+
+    @classmethod
+    def _parse_value_str(cls, val_str: str):
+        """把数值字符串转成 int/float，支持中文数字"""
+        val_str = str(val_str).strip()
+        if val_str in cls._CN_NUMBERS:
+            return float(cls._CN_NUMBERS[val_str])
+        return float(val_str)
+
     @classmethod
     def parse(cls, text: str):
         """
@@ -151,8 +165,13 @@ class LocalCommandParser:
         if '同步' in text or 'sync' in text:
             # 优先识别"把...改为...，同步到..."这类复合指令，按修改+坐标处理
             modify_cmd = cls._parse_modify(text)
-            if modify_cmd and (modify_cmd.get('changes') or modify_cmd.get('position')):
-                return modify_cmd
+            if modify_cmd:
+                # _parse_modify 对组件参数返回 action='agent'，changes/position 在 params 中
+                params = modify_cmd.get('params', {})
+                if params.get('changes') or params.get('position'):
+                    return modify_cmd
+                if modify_cmd.get('changes') or modify_cmd.get('position'):
+                    return modify_cmd
             result = {'action': 'sync'}
             position = cls._extract_position(text)
             if position:
@@ -190,7 +209,14 @@ class LocalCommandParser:
         if not combined_text:
             return '', ''
         # 也匹配中文属性名（支持结尾或开头）
-        cn_props = ['高度', '长度', '宽度', '深度', '半径', '厚度', '颜色', '线宽', '线型', '边长']
+        cn_props = [
+            '高度', '长度', '宽度', '深度', '半径', '厚度', '颜色', '线宽', '线型', '边长',
+            # 复杂构件专用参数，避免"把低柱排数改为1"被拆错导致无法识别
+            '墩高', '盖梁总长', '盖梁总高', '盖梁宽', '墩柱直径', '墩柱间距', '系梁根数', '系梁数量',
+            '锚块总长', '锚块总高', '锚块宽度', '承台长度', '承台宽度', '承台高度',
+            '底柱半径', '底柱高度', '底柱数量', '底柱排数', '低柱半径', '低柱高度', '低柱数量', '低柱排数',
+            '底柱',
+        ]
         for prop in sorted(cn_props, key=len, reverse=True):
             if combined_text.endswith(prop):
                 target = combined_text[:-len(prop)].strip()
@@ -264,9 +290,10 @@ class LocalCommandParser:
 
         # 模式: 所有/全部 + 元素类型 + 属性 + 改成
         # 优先匹配带 "的" 的明确格式，避免非贪婪把类型只匹配到一个字
+        _VAL = r'([+-]?(?:\d+\.?\d*|[一二两三四五六七八九十]+))'
         all_patterns = [
-            r'(?:所有|全部)\s*(.+?)\s*的\s*(.+?)\s*(?:改成|变成|设为)\s*([+-]?\d+\.?\d*)',
-            r'(?:所有|全部)\s*(.+?)\s*(.+?)\s*(?:改成|变成|设为)\s*([+-]?\d+\.?\d*)',
+            rf'(?:所有|全部)\s*(.+?)\s*的\s*(.+?)\s*(?:改成|变成|设为)\s*{_VAL}',
+            rf'(?:所有|全部)\s*(.+?)\s*(.+?)\s*(?:改成|变成|设为)\s*{_VAL}',
         ]
         m = None
         for pat in all_patterns:
@@ -294,10 +321,14 @@ class LocalCommandParser:
                     'tool': 'modify_component',
                     'params': agent_params
                 }
-            return {'action': 'modify', 'target': target, 'changes': changes}
+            result = {'action': 'modify', 'target': target, 'changes': changes}
+            if position:
+                result['position'] = position
+            return result
 
+        _VAL = r'([+-]?(?:\d+\.?\d*|[一二两三四五六七八九十]+))'
         # 1. 先尝试匹配带 "的" 的模式（最准确）
-        pat_with_de = r'(?:把|将|让)\s*(.+?)\s*的\s*(\S+?)\s*(?:改成|变成|设为|改为|增加|加长|加宽|加高|加大|减少|缩短|减小)\s*([+-]?\d+\.?\d*)'
+        pat_with_de = rf'(?:把|将|让)\s*(.+?)\s*的\s*(\S+?)\s*(?:改成|变成|设为|改为|增加|加长|加宽|加高|加大|减少|缩短|减小)\s*{_VAL}'
         m = re.search(pat_with_de, text)
         if m:
             target_text = m.group(1).strip()
@@ -305,16 +336,16 @@ class LocalCommandParser:
             val_str = m.group(3).strip()
         else:
             # 2. 再尝试匹配不带 "的" 的模式
-            pat_without_de = r'(?:把|将|让)\s*(.*?)\s*(?:改成|变成|设为|改为|增加|加长|加宽|加高|加大|减少|缩短|减小)\s*([+-]?\d+\.?\d*)'
+            pat_without_de = rf'(?:把|将|让)\s*(.*?)\s*(?:改成|变成|设为|改为|增加|加长|加宽|加高|加大|减少|缩短|减小)\s*{_VAL}'
             m = re.search(pat_without_de, text)
             if m:
                 combined_text = m.group(1).strip()
                 val_str = m.group(2).strip()
                 target_text, prop_text = cls._split_target_prop(combined_text)
             else:
-                # 3. 纯属性修改（无主语）："高度改成100"、"盖梁宽改成500"
+                # 3. 纯属性修改（无主语）："高度改成100"、"盖梁宽改成500"、"底柱排数改为一"
                 # 优先匹配，避免被下面的通用 fallback 拆错（如把"盖梁宽"拆成 target="盖梁" prop="宽"）
-                prop_only_pat = r'(高度|宽度|半径|长度|大小|深度|厚度|边长|直角边1|直角边2|h|a|b|r|墩高|盖梁总长|盖梁总高|盖梁宽|墩柱直径|墩柱间距|系梁根数|系梁数量|锚块总长|锚块总高|锚块宽度|承台长度|承台宽度|承台高度|底柱半径|底柱高度|底柱数量|底柱排数)\s*(?:改成|变成|设为|改为|增加|加长|加宽|加高|加大|减少|缩短|减小)\s*([+-]?\d+\.?\d*)'
+                prop_only_pat = rf'(高度|宽度|半径|长度|大小|深度|厚度|边长|直角边1|直角边2|h|a|b|r|墩高|盖梁总长|盖梁总高|盖梁宽|墩柱直径|墩柱间距|系梁根数|系梁数量|锚块总长|锚块总高|锚块宽度|承台长度|承台宽度|承台高度|底柱半径|底柱高度|底柱数量|底柱排数|底柱|低柱半径|低柱高度|低柱数量|低柱排数)\s*(?:改成|变成|设为|改为|增加|加长|加宽|加高|加大|减少|缩短|减小)\s*{_VAL}'
                 m = re.search(prop_only_pat, text)
                 if m:
                     target_text = ''
@@ -323,10 +354,10 @@ class LocalCommandParser:
                 else:
                     # 4. 回退到旧模式（兼容其他格式）
                     modify_patterns = [
-                        r'(?:把|将|让)\s*(.+?)\s*(?:的)?\s*(.+?)\s*(?:改成|变成|设为|改为)\s*([+-]?\d+\.?\d*)',
-                        r'(?:把|将|让)\s*(.+?)\s*(?:的)?\s*(.+?)\s*(?:增加|加长|加宽|加高|加大)\s*([+-]?\d+\.?\d*)',
-                        r'(?:把|将|让)\s*(.+?)\s*(?:的)?\s*(.+?)\s*(?:减少|缩短|减小)\s*([+-]?\d+\.?\d*)',
-                        r'(.+?)\s*(?:的)?\s*(.+?)\s*(?:改成|变成|设为|改为)\s*([+-]?\d+\.?\d*)',
+                        rf'(?:把|将|让)\s*(.+?)\s*(?:的)?\s*(.+?)\s*(?:改成|变成|设为|改为)\s*{_VAL}',
+                        rf'(?:把|将|让)\s*(.+?)\s*(?:的)?\s*(.+?)\s*(?:增加|加长|加宽|加高|加大)\s*{_VAL}',
+                        rf'(?:把|将|让)\s*(.+?)\s*(?:的)?\s*(.+?)\s*(?:减少|缩短|减小)\s*{_VAL}',
+                        rf'(.+?)\s*(?:的)?\s*(.+?)\s*(?:改成|变成|设为|改为)\s*{_VAL}',
                     ]
                     for pat in modify_patterns:
                         m = re.search(pat, text)
@@ -342,7 +373,7 @@ class LocalCommandParser:
         prop = cls._parse_property_text(prop_text)
         if not prop:
             return None
-        changes = {prop: float(val_str)}
+        changes = {prop: cls._parse_value_str(val_str)}
 
         # 处理增加/减少（相对值）
         if '增加' in text or '加长' in text or '加宽' in text or '加大' in text:
@@ -390,7 +421,10 @@ class LocalCommandParser:
                 'params': agent_params
             }
 
-        return {'action': 'modify', 'target': target, 'changes': changes}
+        result = {'action': 'modify', 'target': target, 'changes': changes}
+        if position:
+            result['position'] = position
+        return result
 
     @classmethod
     def _parse_target_text(cls, text: str):
@@ -469,6 +503,8 @@ class LocalCommandParser:
             # 常见语音/输入错别字
             '低柱半径': '底柱半径', '低柱高度': '底柱高度',
             '低柱数量': '底柱数量', '低柱排数': '底柱排数',
+            # "底柱"单独出现时，通常指"底柱排数"
+            '底柱': '底柱排数',
         }
         for cn in sorted(complex_params.keys(), key=len, reverse=True):
             if cn in text:
