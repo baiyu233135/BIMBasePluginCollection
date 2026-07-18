@@ -149,6 +149,10 @@ class LocalCommandParser:
 
         # 3. 同步操作
         if '同步' in text or 'sync' in text:
+            # 优先识别"把...改为...，同步到..."这类复合指令，按修改+坐标处理
+            modify_cmd = cls._parse_modify(text)
+            if modify_cmd and (modify_cmd.get('changes') or modify_cmd.get('position')):
+                return modify_cmd
             result = {'action': 'sync'}
             position = cls._extract_position(text)
             if position:

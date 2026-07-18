@@ -70,6 +70,7 @@ def clear_all_caches():
         'pycache_dirs': 0,
         'log_files': 0,
         'temp_dirs': 0,
+        'registry': False,
         'errors': [],
     }
 
@@ -78,6 +79,14 @@ def clear_all_caches():
         detail['component_scripts'] = clear_cache_dir()
     except Exception as e:
         detail['errors'].append(f"cad组件缓存: {e}")
+
+    # 1.5) 组件注册表（内存 + 持久化 JSON）
+    try:
+        from utils.component_registry import ComponentRegistry
+        ComponentRegistry().clear()
+        detail['registry'] = True
+    except Exception as e:
+        detail['errors'].append(f"component_registry: {e}")
 
     # 2) CADBoard 内 __pycache__
     if os.path.isdir(CADBOARD_DIR):

@@ -561,14 +561,28 @@ class BIMBaseAgent:
 
         self.board.viewport.update()
 
-        # 若元素仍是 PDF 识别来源，把它当前的几何坐标写入 pdf_anchor，
-        # 并清除 pdf_recognized 标记，避免 _sync_element 弹窗要求手动输入坐标。
-        if getattr(elem, 'pdf_recognized', False):
-            x = float(getattr(elem, 'pdf_anchor_x',
-                              getattr(elem, 'x', getattr(elem, 'cx', 0.0))))
-            y = float(getattr(elem, 'pdf_anchor_y',
-                              getattr(elem, 'y', getattr(elem, 'cy', 0.0))))
-            z = float(getattr(elem, 'pdf_anchor_z', getattr(elem, 'z_start', 0.0)))
+        # 检查是否已有已放置到 BIMBase 的实例
+        from utils.component_registry import ComponentRegistry
+        registry = ComponentRegistry()
+        info = registry.get(elem.id)
+        has_instance = info is not None and info.get('instance') is not None
+        _log(f"[_modify_board_then_sync] elem={elem.id[:8]} has_instance={has_instance} position={position}")
+
+        # 分离"改参数"和"同步位置"：
+        # - 只改参数、没有已放置实例、也没有指定新坐标 -> 只更新画板，不同步/不弹窗
+        # - 有已放置实例 -> 原地更新
+        # - 指定了新坐标 -> 强制重新放置
+        if position is None and not has_instance:
+            _log(f"[_modify_board_then_sync] elem={elem.id[:8]}: only board update, no sync")
+            return True, "参数已更新（尚未同步到 BIMBase）"
+
+        # 若指定了新坐标且元素仍是 PDF 识别来源，把坐标写入 pdf_anchor 并清除标记，避免弹窗
+        if position is not None and getattr(elem, 'pdf_recognized', False):
+            x = float(position.get('x', getattr(elem, 'pdf_anchor_x',
+                              getattr(elem, 'x', getattr(elem, 'cx', 0.0)))))
+            y = float(position.get('y', getattr(elem, 'pdf_anchor_y',
+                              getattr(elem, 'y', getattr(elem, 'cy', 0.0)))))
+            z = float(position.get('z', getattr(elem, 'pdf_anchor_z', getattr(elem, 'z_start', 0.0))))
             elem.pdf_anchor_x = x
             elem.pdf_anchor_y = y
             elem.pdf_anchor_z = z
