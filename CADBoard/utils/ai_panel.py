@@ -87,6 +87,7 @@ class LocalCommandParser:
         '打断': 'break', 'br': 'break',
         '合并': 'join',
         '分解': 'explode',
+        '同步': 'sync',
     }
 
     # 面名称映射（用于三视图修改指令）
@@ -148,8 +149,11 @@ class LocalCommandParser:
 
         # 3. 同步操作
         if '同步' in text or 'sync' in text:
-            # 如果明确提到 Agent 同步（带目标），否则走旧 sync
-            return {'action': 'agent', 'tool': 'sync_to_bimbase', 'params': {}}
+            result = {'action': 'sync'}
+            position = cls._extract_position(text)
+            if position:
+                result['position'] = position
+            return result
 
         # 4. 检测元素类型
         elem_type = None
@@ -574,10 +578,13 @@ class LocalCommandParser:
         import re
         # 允许在坐标前出现可选的 bimbase 前缀（不区分大小写，已在外部 lower）
         patterns = [
-            r'(?:放在|在|坐标|位置)\s*(?:bimbase\s*)?\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)',
-            r'(?:放在|在|坐标|位置)\s*(?:bimbase\s*)?\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)',
-            r'(?:放在|在|坐标|位置)\s*(?:bimbase\s*)?(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)',
-            r'(?:放在|在|坐标|位置)\s*(?:bimbase\s*)?(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)',
+            r'(?:放在|在|坐标|位置|同步到|到)\s*(?:bimbase\s*)?\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)',
+            r'(?:放在|在|坐标|位置|同步到|到)\s*(?:bimbase\s*)?\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)',
+            r'(?:放在|在|坐标|位置|同步到|到)\s*(?:bimbase\s*)?(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)',
+            r'(?:放在|在|坐标|位置|同步到|到)\s*(?:bimbase\s*)?(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)',
+            # 兜底：裸三维/二维坐标，如 "(500,0,0)"
+            r'\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)',
+            r'\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)',
         ]
         for pat in patterns:
             m = re.search(pat, text)
@@ -1300,7 +1307,7 @@ class AIPanel(QWidget):
 
         # 6. 是明确的绘制/删除/修改操作 → 本地执行
         action = parsed.get('action', '')
-        if action in ('create', 'delete', 'modify', 'agent'):
+        if action in ('create', 'delete', 'modify', 'agent', 'sync'):
             return True
 
         return False

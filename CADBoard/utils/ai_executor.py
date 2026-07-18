@@ -824,9 +824,32 @@ class AICommandExecutor:
         return True, f"已{transform_type} {len(elems)} 个元素"
 
     def _do_sync(self, cmd):
-        """同步到BIMBase"""
+        """同步到BIMBase。支持指定坐标，避免 PDF 识别来源元素弹窗。"""
+        position = cmd.get('position')
+        target = cmd.get('target', {})
+        elems = []
+        if target:
+            elems = self._resolve_target(target)
+        if not elems:
+            # 默认同步当前选中的元素；没有选中则同步全部
+            elems = [e for e in self.board.elements if getattr(e, 'selected', False)]
+        if not elems:
+            elems = list(self.board.elements)
+
+        if position:
+            for elem in elems:
+                try:
+                    BIMBaseAgent._apply_position_to_element(elem, position)
+                    # 用户已明确给出坐标，视为已放置，避免 _sync_element 弹窗
+                    if hasattr(elem, 'pdf_recognized'):
+                        elem.pdf_recognized = False
+                except Exception as e:
+                    bimbase_sync._log(f"[_do_sync] apply position failed for {elem.id[:8]}: {e}")
+            self.board.viewport.update()
+
         self.board._sync_to_bimbase()
-        return True, "已触发同步到BIMBase"
+        pos_msg = f" 坐标={position}" if position else ""
+        return True, f"已触发同步到 BIMBase{pos_msg}"
 
     def _do_face_edit(self, cmd):
         """面编辑操作"""
