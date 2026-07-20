@@ -13,6 +13,8 @@ class ModelingCommandParser:
         '正方体': 'cube', '立方体': 'cube', '正方形': 'cube',
         '球体': 'sphere', '球': 'sphere', '圆球': 'sphere',
         '圆锥': 'cone', '圆锥体': 'cone', '锥体': 'cone',
+        '引桥桥墩': 'pier', '桥墩': 'pier', '墩': 'pier',
+        '索缆锚锭': 'anchor', '索塔锚块': 'anchor', '锚锭': 'anchor', '锚块': 'anchor',
     }
 
     # 操作映射
@@ -21,6 +23,7 @@ class ModelingCommandParser:
         '布置': 'create', '放置': 'create', '摆': 'create',
         '修改': 'modify', '改': 'modify', '调整': 'modify', '更新': 'modify',
         '删除': 'delete', '移除': 'delete',
+        '复制': 'copy', '拷贝': 'copy',
     }
 
     # 方向映射（相对坐标）
@@ -66,6 +69,7 @@ class ModelingCommandParser:
             'route': None,
             'path': None,
             'target': None,
+            'preserve_position': False,
         }
 
         # 1. 检测操作
@@ -89,10 +93,7 @@ class ModelingCommandParser:
             if child_type:
                 result['component_type'] = child_type
         if not result['component_type']:
-            for cn, en in cls.COMPONENT_MAP.items():
-                if cn.lower() in text:
-                    result['component_type'] = en
-                    break
+            result['component_type'] = cls._extract_main_component_type(text)
 
         # 4. 修改/删除操作的目标检测
         if result['action'] in ('modify', 'delete'):
@@ -102,6 +103,13 @@ class ModelingCommandParser:
                 # 尝试从目标推断
                 pass
             result['params'] = cls._extract_params(text)
+            result['preserve_position'] = cls._detect_preserve_position(text)
+            return result
+
+        # 4b. 复制操作
+        if result['action'] == 'copy':
+            result['target'] = cls._parse_target(text)
+            result['position'] = cls._extract_position(text)
             return result
 
         # 4. 创建操作必须有组件类型
@@ -167,6 +175,33 @@ class ModelingCommandParser:
         }
 
     @classmethod
+    def _extract_main_component_type(cls, text):
+        """
+        提取主组件类型。
+        若文本包含'选中...位置生成...'这类结构，优先取动作/位置之后的组件作为目标类型。
+        """
+        # 策略1：拆分“位置”前后，后面的是目标组件
+        if '位置' in text and '选中' in text:
+            parts = text.split('位置', 1)
+            if len(parts) == 2:
+                for cn, en in cls.COMPONENT_MAP.items():
+                    if cn.lower() in parts[1]:
+                        return en
+        # 策略2：查找“生成/放置/放/复制/拷贝”之后的组件类型
+        action_match = re.search(r'(生成|放置|放|复制|拷贝)\s*(?:一个|一种|些|若干)?\s*', text)
+        if action_match:
+            start = action_match.end()
+            sub = text[start:]
+            for cn, en in cls.COMPONENT_MAP.items():
+                if cn.lower() in sub:
+                    return en
+        # 策略3：fallback 到第一个匹配
+        for cn, en in cls.COMPONENT_MAP.items():
+            if cn.lower() in text:
+                return en
+        return None
+
+    @classmethod
     def _extract_child_component_type(cls, text, path_info):
         """在沿组件路径语句中，提取被放置的小构件类型"""
         # 从路径描述之后开始查找第一个组件类型
@@ -179,26 +214,44 @@ class ModelingCommandParser:
                 return en
         return None
 
+    # 复杂组件参数名（用于通用参数提取）
+    COMPLEX_PARAM_NAMES = [
+        '盖梁总长', '盖梁总高', '盖梁宽', '墩柱直径', '墩柱间距', '墩高', '系梁根数',
+        '锚块总长', '锚块总高', '锚块宽度', '承台长度', '承台宽度', '承台高度', '底柱半径', '底柱高度',
+    ]
+
+    @classmethod
+    def _extract_number_after_keyword(cls, text, keyword):
+        """从文本中提取 keyword 后面紧跟的数字，支持'改成/改为/设置为'等连接词"""
+        patterns = [
+            re.escape(keyword) + r'\s*(?:改成|改为|设置为|设为|调整为|调成|为|是)?\s*(\d+\.?\d*)',
+            re.escape(keyword) + r'\s*(\d+\.?\d*)',
+        ]
+        for pat in patterns:
+            m = re.search(pat, text)
+            if m:
+                return float(m.group(1))
+        return None
+
     @classmethod
     def _extract_params(cls, text):
         """提取几何参数"""
         params = {}
 
         # 半径 / r
-        r_patterns = [
-            r'半径\s*(\d+\.?\d*)',
-            r'[rR]\s*(\d+\.?\d*)',
-            r'(\d+\.?\d*)\s*的?半径',
-        ]
-        for pat in r_patterns:
-            m = re.search(pat, text)
+        val = cls._extract_number_after_keyword(text, '半径')
+        if val is not None:
+            params['radius'] = val
+        else:
+            m = re.search(r'[rR]\s*(\d+\.?\d*)', text)
             if m:
                 params['radius'] = float(m.group(1))
-                break
 
         # 长度 / 长（负向环视，避免把“边长”误识别为 length）
         len_patterns = [
+            r'(?<!边)长\s*(?:改成|改为|设置为|设为|调整为|调成|为|是)?\s*(\d+\.?\d*)',
             r'(?<!边)长\s*(\d+\.?\d*)',
+            r'长度\s*(?:改成|改为|设置为|设为|调整为|调成|为|是)?\s*(\d+\.?\d*)',
             r'长度\s*(\d+\.?\d*)',
         ]
         for pat in len_patterns:
@@ -209,7 +262,9 @@ class ModelingCommandParser:
 
         # 宽度 / 宽
         wid_patterns = [
+            r'宽\s*(?:改成|改为|设置为|设为|调整为|调成|为|是)?\s*(\d+\.?\d*)',
             r'宽\s*(\d+\.?\d*)',
+            r'宽度\s*(?:改成|改为|设置为|设为|调整为|调成|为|是)?\s*(\d+\.?\d*)',
             r'宽度\s*(\d+\.?\d*)',
         ]
         for pat in wid_patterns:
@@ -220,7 +275,9 @@ class ModelingCommandParser:
 
         # 高度 / 高
         h_patterns = [
+            r'高\s*(?:改成|改为|设置为|设为|调整为|调成|为|是)?\s*(\d+\.?\d*)',
             r'高\s*(\d+\.?\d*)',
+            r'高度\s*(?:改成|改为|设置为|设为|调整为|调成|为|是)?\s*(\d+\.?\d*)',
             r'高度\s*(\d+\.?\d*)',
         ]
         for pat in h_patterns:
@@ -230,14 +287,15 @@ class ModelingCommandParser:
                 break
 
         # 边长（正方体）
-        a_patterns = [
-            r'边长\s*(\d+\.?\d*)',
-        ]
-        for pat in a_patterns:
-            m = re.search(pat, text)
-            if m:
-                params['size'] = float(m.group(1))
-                break
+        val = cls._extract_number_after_keyword(text, '边长')
+        if val is not None:
+            params['size'] = val
+
+        # 复杂组件通用参数提取
+        for param_name in cls.COMPLEX_PARAM_NAMES:
+            val = cls._extract_number_after_keyword(text, param_name)
+            if val is not None:
+                params[param_name] = val
 
         return params
 
@@ -493,8 +551,20 @@ class ModelingCommandParser:
         return val
 
     @classmethod
+    def _detect_preserve_position(cls, text):
+        """检测修改指令是否要求保留位置"""
+        keywords = [
+            '位置不变', '不要移动', '保留位置', '原位', '不移动',
+            '保持位置', '坐标不变', '不动',
+        ]
+        for kw in keywords:
+            if kw in text:
+                return True
+        return False
+
+    @classmethod
     def _parse_target(cls, text):
-        """解析修改/删除的目标"""
+        """解析修改/删除/复制的目标"""
         if '选中' in text or '当前' in text:
             return {'mode': 'selected'}
         # 检测 "第N个"

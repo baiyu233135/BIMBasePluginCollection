@@ -1,0 +1,125 @@
+ai智能识别 - 对话技术记录 00
+================================
+记录时间：2026-07-18
+项目路径：C:\ProgramData\PKPM\BIMBase\Plugins\Pro\V1.6\pythonplugin
+模块：AI_Modeling（AI 建模助手）
+
+
+一、用户需求
+------------
+增强 AI_Modeling 模块，使其支持"读取 BIMBase 中已选中组件的位置，并基于该位置放置新组件"。
+
+具体场景包括：
+1. 相对位置模式：在选中组件的某个轴向（x/y/z）偏移一定距离后生成新组件。
+2. 选中位置模式：直接在选中组件所在位置生成新组件（不偏移）。
+3. 复制模式：复制当前选中的 AI 组件到新位置。
+4. 修改模式：修改选中组件参数时，若用户要求保留位置，则在修改后恢复原始位置。
+
+核心难点：BIMBase 中对参数化组件的选中对象往往是 proxy 实体，直接读取其参数会失败，甚至导致 pyp3d _Core 损坏，必须设计稳定、非破坏性的读取回退链。
+
+
+二、当前已完成的工作
+--------------------
+1. UI 调整
+   - 移除了冗余标题标签。
+   - 按钮宽度调整为 250px，对话框宽度 860px。
+
+2. AI_Modeling/ai_modeling/bimbase_modifier.py
+   - 新增 get_selected_component_position()：获取当前选中组件的世界坐标。
+   - 新增 get_selected_entity_ids()：非阻塞读取 BIMBase 当前选中的 entity id。
+   - 新增 get_selected_instance_keys()：将 entity id 转换为 datakey/instance key。
+   - 新增基于 get_allbinding_entity_from_data() 的绑定扫描回退。
+   - 新增从 \a_transformation 提取世界坐标，覆盖 noumenon/noumKV/datakey 三条路径。
+   - 移除了会阻塞的 get_element_from_boxselect() 回退。
+   - 修正了 get_noumenon_from_instancekey 不存在的引用错误，统一使用 get_noumenon_from_datakey。
+
+3. AI_Modeling/ai_modeling/component_registry.py
+   - 实现 ComponentRegistry 单例，支持 JSON 持久化。
+   - 记录每个 AI 生成组件的 instance_key、component_type、params、placement、entity_id。
+   - 支持通过 entity_id 查询历史记录作为位置回退。
+   - _key_str 同时保留 ModelId 与 ElementId（含 _PClassId/_P3DInstanceId），避免键冲突。
+
+4. AI_Modeling/ai_modeling/component_factory.py
+   - 每次成功放置组件后自动调用 _record_placement() 写入注册表。
+
+5. AI_Modeling/ai_modeling/command_parser.py
+   - 支持 copy / relative / selected / preserve_position 等命令解析。
+
+6. AI_Modeling/ai_modeling/ai_window.py
+   - 集成 selected/relative/selected position 模式。
+   - 修改时支持 preserve_position 选项。
+   - 新增清除缓存按钮（清空注册表与日志）。
+
+7. 单元测试
+   - test_component_registry.py 中 10 个测试用例全部通过。
+
+
+三、技术栈与关键实现
+--------------------
+运行环境：
+  - BIMBase 2025
+  - Python 3.7.9 嵌入式解释器（BIMBase 自带）
+  - pyp3d SDK 版本：v18446497937724801024（Release 2024.10）
+  - SDK 路径：D:\BIMBASE\BIMBase建模软件 2025\PythonScript\python-3.7.9-embed-amd64\Lib\site-packages\pyp3d
+
+关键 API：
+  - get_entityid_from_boxselection()：读取当前框选/点选的 entity id 列表（空选抛 ValueError，需捕获）。
+  - get_current_entityId()：读取当前单选 entity id。
+  - get_noumenon_on_entityid(entityid)：安全只读，获取实体对应的 Noumenon。
+  - get_noumenon_from_datakey(instancekey)：通过 instance key 读取 Noumenon。
+  - get_datakey_from_entity(entityid)：entity id → instance key 的反向查找。
+  - get_allbinding_entity_from_data(instancekey)：获取某个参数化组件实例绑定的所有子实体 ID。
+  - get_matrixs_position(transform)：从 GeTransform 中提取平移向量 (x, y, z)。
+
+世界坐标读取链（按优先级）：
+  1. get_entity_bounds()：当前版本不存在，自动跳过。
+  2. get_noumenon_on_entityid(eid) → 提取 \a_transformation。
+  3. get_datakey_from_entity(eid) → get_noumenon_from_datakey → 提取 \a_transformation。
+  4. 扫描所有 instance key：用 get_allbinding_entity_from_data 匹配选中实体 → 读该实例的变换/Placement。
+  5. 按 ID 扫描所有 instance key。
+  6. get_selected_instance_keys() → 读 datakey 参数。
+  7. 注册表 / 最近一次生成位置回退。
+
+关键注意事项：
+  - pyp3d _Core 很脆弱：把 entity id 传给期望 instance key 的 API（如 get_noumKV_from_instancekey）会损坏通讯端口，导致后续所有 UnifiedFunction 调用失败。代码中已严格区分 entity id 与 instance key 的处理路径。
+  - get_element_from_boxselect() 是阻塞交互工具（启动 PyMarqueeTool 并 while True 等待），不能作为后台自动读取，已移除。
+  - GeTransform._mat 是 3×4 行主序矩阵，平移分量位于 _mat[i][3]。
+
+
+四、本地版本管理
+----------------
+- 项目已纳入 git 管理。
+- 当前有若干修改尚未提交：
+  - AI_Modeling/ai_modeling/ai_window.py
+  - AI_Modeling/ai_modeling/bimbase_modifier.py
+  - AI_Modeling/ai_modeling/command_parser.py
+  - AI_Modeling/ai_modeling/component_factory.py
+  - AI_Modeling/docs/*.md
+  - docs/99_常见问题与调试.md
+  - 新增文件：AI_Modeling/ai_modeling/component_registry.py、AI_Modeling/test_component_registry.py、AI_Modeling/component_registry.json 等。
+- CADBoard/component_registry.json 当前内容正常（约 90KB，未损坏）。
+- 未执行 git commit / push，如需提交请确认。
+
+
+五、待验证与下一步
+------------------
+- 在 BIMBase 中实际选中一个 AI 生成的组件，验证 get_selected_component_position() 能否正确返回世界坐标。
+- 测试典型指令：
+  - "在选中圆柱旁边沿 X 方向偏移 2000 复制一个圆柱"
+  - "在选中位置上方 1000 处生成一个立方体"
+  - "把选中梁的高度改为 500，保持位置不变"
+- 观察 ai_modeling_debug.log，确认没有 _Core 损坏或 NoneType send 错误。
+
+
+六、沟通约定
+------------
+1. 用户已明确要求："你有任何问题都可以问我，确保明白了再执行"。
+2. 因此后续复杂/多文件修改前，先确认需求与方案再动手。
+3. 每次较大改动后整理技术记录到 docs/对话记录/ai智能识别xx.txt，避免单条对话过长产生幻觉。
+
+
+七、相关问题（可随时向用户确认）
+--------------------------------
+- 是否需要把当前改动提交一次 git commit？
+- 是否需要为 get_selected_component_position() 编写一个可在 BIMBase 内运行的最小测试脚本？
+- 是否需要把相对/选中/复制/保留位置等模式补充到 AI_Modeling 的使用文档中？

@@ -23,7 +23,6 @@ def _log(msg):
 _pyp3d_ok = False
 get_all_instancekey = None
 get_noumKV_from_instancekey = None
-get_noumenon_from_instancekey = None
 get_noumenon_on_entityid = None
 get_noumenon_from_datakey = None
 get_datakey_from_entity = None
@@ -33,6 +32,7 @@ entityid_isvaid = None
 entityid_isvalid = None
 get_selections = None
 get_element_from_boxselect = None
+get_allbinding_entity_from_data = None
 replace_noumenon = None
 get_entity_property = None
 get_entity_bounds = None
@@ -44,7 +44,6 @@ try:
     _api_names = [
         'get_all_instancekey',
         'get_noumKV_from_instancekey',
-        'get_noumenon_from_instancekey',
         'get_noumenon_on_entityid',
         'get_noumenon_from_datakey',
         'get_datakey_from_entity',
@@ -54,9 +53,11 @@ try:
         'entityid_isvalid',
         'get_selections',
         'get_element_from_boxselect',
+        'get_allbinding_entity_from_data',
         'replace_noumenon',
         'get_entity_property',
         'get_entity_bounds',
+        'get_matrixs_position',
     ]
     for _name in _api_names:
         try:
@@ -196,10 +197,10 @@ def modify_instance_by_key(instance_key, changes):
             _log(f"replace_noumenon error: {e}")
             # 回退到方式2
 
-    # 方式2：get_noumenon_from_instancekey + 修改 + replace()
-    if get_noumenon_from_instancekey is not None:
+    # 方式2：get_noumenon_from_datakey + 修改 + replace()
+    if get_noumenon_from_datakey is not None:
         try:
-            noum = get_noumenon_from_instancekey(instance_key)
+            noum = get_noumenon_from_datakey(instance_key)
             if noum is None:
                 return False, "无法获取组件本体"
 
@@ -263,14 +264,255 @@ def get_selected_component_info():
     return infos
 
 
+def get_selected_entity_ids():
+    """
+    获取 BIMBase 当前选中的 entity id 列表
+    返回: list of entity_id 或 []
+    """
+    entity_ids = []
+    if not _pyp3d_ok:
+        return entity_ids
+
+    if get_selections is not None:
+        try:
+            sel = get_selections()
+            if sel:
+                entity_ids = list(sel) if not isinstance(sel, (list, tuple)) else list(sel)
+        except Exception as e:
+            _log(f"get_selected_entity_ids get_selections error: {e}")
+
+    if not entity_ids and get_entityid_from_boxselection is not None:
+        try:
+            entity_ids = get_entityid_from_boxselection() or []
+        except Exception as e:
+            _log(f"get_selected_entity_ids boxselection error: {e}")
+
+    if not entity_ids and get_current_entityId is not None:
+        try:
+            cur_id = get_current_entityId()
+            if cur_id and _is_entity_valid(cur_id):
+                entity_ids = [cur_id]
+        except Exception as e:
+            _log(f"get_selected_entity_ids current_entityId error: {e}")
+
+    return [eid for eid in entity_ids if _is_entity_valid(eid)]
+
+
+def _bounds_center(bounds):
+    """从 bounding box 计算中心点，支持多种返回格式"""
+    if bounds is None:
+        return None
+    try:
+        _log(f"_bounds_center: raw bounds type={type(bounds).__name__}, value={bounds}")
+        # 格式1: (xmin, ymin, zmin, xmax, ymax, zmax)
+        if hasattr(bounds, '__len__') and len(bounds) == 6:
+            return (
+                (float(bounds[0]) + float(bounds[3])) / 2.0,
+                (float(bounds[1]) + float(bounds[4])) / 2.0,
+                (float(bounds[2]) + float(bounds[5])) / 2.0,
+            )
+        # 格式2: ((xmin,ymin,zmin), (xmax,ymax,zmax))
+        if hasattr(bounds, '__len__') and len(bounds) == 2:
+            mn = bounds[0]
+            mx = bounds[1]
+            return (
+                (float(mn[0]) + float(mx[0])) / 2.0,
+                (float(mn[1]) + float(mx[1])) / 2.0,
+                (float(mn[2]) + float(mx[2])) / 2.0,
+            )
+        # 格式3: [Vec3(min), Vec3(max)]
+        if hasattr(bounds, 'min') and hasattr(bounds, 'max'):
+            mn = bounds.min
+            mx = bounds.max
+            return (
+                (float(mn[0]) + float(mx[0])) / 2.0,
+                (float(mn[1]) + float(mx[1])) / 2.0,
+                (float(mn[2]) + float(mx[2])) / 2.0,
+            )
+        # 格式4: 本身就是包含 min/max 属性的对象
+        if hasattr(bounds, 'xmin') and hasattr(bounds, 'xmax'):
+            return (
+                (float(bounds.xmin) + float(bounds.xmax)) / 2.0,
+                (float(bounds.ymin) + float(bounds.ymax)) / 2.0,
+                (float(bounds.zmin) + float(bounds.zmax)) / 2.0,
+            )
+    except Exception as e:
+        _log(f"_bounds_center error: {e}, bounds={bounds}")
+    return None
+
+
+def _position_from_params(params):
+    """从组件参数字典推断位置，用于 bounds 不可用时的回退"""
+    if not params:
+        return None
+    try:
+        # 优先读取显式位置字段（z 优先从 Placement 写入的 z/z_bottom）
+        x = params.get('cx', params.get('x', params.get('x1', params.get('偏移X', 0))))
+        y = params.get('cy', params.get('y', params.get('y1', params.get('偏移Y', 0))))
+        z = params.get('z_bottom', params.get('z', params.get('z_top', params.get('z_start', params.get('偏移Z', 0)))))
+        return (float(_parse_number(x)), float(_parse_number(y)), float(_parse_number(z)))
+    except Exception as e:
+        _log(f"_position_from_params error: {e}")
+    return None
+
+
+def get_selected_component_position(prefer_bounds=True):
+    """
+    获取当前选中组件的世界坐标位置
+    优先使用 bounding box 中心；不可用时回退到参数字典推断
+    返回: (x, y, z) 或 None
+    """
+    if not _pyp3d_ok:
+        _log("get_selected_component_position: pyp3d not ok")
+        return None
+
+    entity_ids = get_selected_entity_ids()
+    _log(f"get_selected_component_position: entity_ids count={len(entity_ids)}")
+    if not entity_ids:
+        # 没有 entity id 时，尝试从 instance key 读参数推断
+        infos = get_selected_component_info()
+        _log(f"get_selected_component_position: no entity id, infos count={len(infos)}")
+        if infos:
+            pos = _position_from_params(infos[0].get('params'))
+            if pos:
+                _log(f"get_selected_component_position: fallback from params (no entity id): {pos}")
+            return pos
+        return None
+
+    eid = entity_ids[0]
+    _log(f"get_selected_component_position: using first entity id, type={type(eid).__name__}")
+
+    # 优先读取 bounding box
+    if prefer_bounds and get_entity_bounds is not None:
+        _log("get_selected_component_position: trying get_entity_bounds")
+        # 先尝试用 entity id
+        bounds = None
+        try:
+            bounds = get_entity_bounds(eid)
+        except Exception as e:
+            _log(f"get_entity_bounds(entity_id) failed: {e}")
+
+        # 再尝试用 datakey
+        if bounds is None and get_datakey_from_entity is not None:
+            try:
+                dk = get_datakey_from_entity(eid)
+                _log(f"get_datakey_from_entity returned type={type(dk).__name__ if dk is not None else None}")
+                if dk is not None:
+                    bounds = get_entity_bounds(dk)
+            except Exception as e:
+                _log(f"get_entity_bounds(datakey) failed: {e}")
+
+        center = _bounds_center(bounds)
+        if center:
+            _log(f"get_selected_component_position: from bounds: {center}")
+            return center
+        _log("get_selected_component_position: bounds not available or invalid")
+
+    # 回退：从 entity / instance 读参数推断
+    try:
+        params = _read_params_from_entity(eid)
+        _log(f"get_selected_component_position: read params from entity, type={type(params).__name__ if params else None}")
+
+        # 再回退：扫描所有 instance key，通过“绑定实体”关系找到选中实体对应的参数化组件实例
+        if not params and get_all_instancekey is not None and get_allbinding_entity_from_data is not None:
+            try:
+                target_tuples = [_entity_id_tuple(e) for e in entity_ids]
+                target_tuples = [t for t in target_tuples if t is not None]
+                _log(f"get_selected_component_position: binding scan target_tuples={target_tuples}")
+                scanned = 0
+                for ik in get_all_instancekey():
+                    scanned += 1
+                    try:
+                        bound_entities = get_allbinding_entity_from_data(ik)
+                        if not bound_entities:
+                            continue
+                        for eid_tmp in entity_ids:
+                            if _entity_id_in_list(eid_tmp, bound_entities):
+                                params = _read_params_from_instancekey(ik)
+                                _log(f"get_selected_component_position: found binding instance for selected entity, params type={type(params).__name__ if params else None}")
+                                if params:
+                                    break
+                        if params:
+                            break
+                    except Exception as e:
+                        _log(f"get_selected_component_position binding scan item error: {e}")
+                    if scanned >= 300:
+                        _log("get_selected_component_position: binding scan reached limit 300")
+                        break
+            except Exception as e:
+                _log(f"get_selected_component_position binding scan error: {e}")
+
+        # 再回退：扫描所有 instance key，按 ID 匹配选中实体
+        if not params and get_all_instancekey is not None:
+            target_ids = []
+            target_element_ids = []
+            for eid_tmp in entity_ids:
+                mid, eid_val = _safe_entity_id(eid_tmp, log=False)
+                if mid is not None and eid_val is not None:
+                    target_ids.append((mid, eid_val))
+                if eid_val is not None:
+                    target_element_ids.append(eid_val)
+            _log(f"get_selected_component_position: id scan target_ids={target_ids}, element_ids={target_element_ids}")
+            if target_ids or target_element_ids:
+                try:
+                    scanned = 0
+                    for ik in get_all_instancekey():
+                        scanned += 1
+                        if scanned > 300:
+                            _log("get_selected_component_position: id scan reached limit 300")
+                            break
+                        mid, eid_val = _safe_instance_id(ik, log=False)
+                        # 完全匹配（model + element）或仅 element id 匹配
+                        if (mid is not None and eid_val is not None and (mid, eid_val) in target_ids) or \
+                           (eid_val is not None and eid_val in target_element_ids):
+                            params = _read_params_from_instancekey(ik)
+                            _log(f"get_selected_component_position: matched instance key by id, params type={type(params).__name__ if params else None}")
+                            if params:
+                                break
+                except Exception as e:
+                    _log(f"get_selected_component_position id scan error: {e}")
+
+        # 最后回退：get_selected_instance_keys() 通常能把 entity id 转成 datakey
+        if not params:
+            keys = get_selected_instance_keys()
+            _log(f"get_selected_component_position: fallback instance keys count={len(keys)}")
+            if keys:
+                params = _read_params_from_instancekey(keys[0])
+                _log(f"get_selected_component_position: read params from selected instance key, type={type(params).__name__ if params else None}")
+
+        # 兜底：如果场景中只有一个 AI 可识别的组件，直接使用它
+        if not params and get_all_instancekey is not None and len(entity_ids) == 1:
+            try:
+                ai_candidates = []
+                for ik in get_all_instancekey():
+                    p = _read_params_from_instancekey(ik)
+                    if p and infer_component_type_from_params(p):
+                        ai_candidates.append(ik)
+                if len(ai_candidates) == 1:
+                    params = _read_params_from_instancekey(ai_candidates[0])
+                    _log(f"get_selected_component_position: fallback using the only AI component in scene")
+            except Exception as e:
+                _log(f"get_selected_component_position only-one fallback error: {e}")
+
+        pos = _position_from_params(params)
+        if pos:
+            _log(f"get_selected_component_position: from params: {pos}")
+        return pos
+    except Exception as e:
+        _log(f"get_selected_component_position fallback error: {e}")
+
+    return None
+
+
 def _find_id_attr(obj, kind):
-    """安全地从对象中读取 ID 属性（kind='model' 或 'element'）"""
+    """安全地从对象中读取 ID 属性（kind='model' 或 'element'）。
+    对 P3DInstanceKey 使用 _PClassId/_P3DInstanceId 作为 model/element 候选。"""
     if obj is None:
         return None
     if kind == 'model':
-        candidates = ['ModelId', '_ModelId', 'model_id', '_model_id', 'modelid']
+        candidates = ['ModelId', '_ModelId', '_PClassId', 'model_id', '_model_id', 'modelid', 'pclassid']
     else:
-        candidates = ['ElementId', '_ElementId', 'element_id', '_element_id', 'elementid']
+        candidates = ['ElementId', '_ElementId', '_P3DInstanceId', 'element_id', '_element_id', 'elementid', 'p3dinstanceid']
     for name in candidates:
         try:
             val = getattr(obj, name, None)
@@ -278,54 +520,63 @@ def _find_id_attr(obj, kind):
                 return val
         except Exception:
             continue
-    # 若仍失败，用 dir 再扫一次
-    try:
-        names = dir(obj)
-        for name in names:
-            low = name.lower().replace('_', '')
-            if (kind == 'model' and low == 'modelid') or (kind == 'element' and low == 'elementid'):
-                try:
-                    val = getattr(obj, name, None)
-                    if val is not None:
-                        return val
-                except Exception:
-                    continue
-    except Exception as e:
-        _log(f"_find_id_attr dir error: {e}")
     return None
 
 
-def _safe_entity_id(eid):
+def _is_instance_key(obj):
+    """判断对象是否为 P3DInstanceKey 类型"""
+    tname = type(obj).__name__
+    if 'P3DInstanceKey' in tname:
+        return True
+    if hasattr(obj, '_P3DInstanceId') or hasattr(obj, '_PClassId'):
+        return True
+    return False
+
+
+def _safe_entity_id(eid, log=True):
     """安全读取 entity id 的 ModelId/ElementId，避免访问异常"""
-    try:
-        _log(f"_safe_entity_id: eid type={type(eid).__name__}")
-    except Exception as e:
-        _log(f"_safe_entity_id log error: {e}")
     try:
         mid = _find_id_attr(eid, 'model')
         eid_val = _find_id_attr(eid, 'element')
-        if mid is None or eid_val is None:
-            _log(f"_safe_entity_id: could not read IDs, dir={dir(eid)}")
+        if log:
+            _log(f"_safe_entity_id: type={type(eid).__name__}, ModelId={mid}, ElementId={eid_val}")
         return mid, eid_val
     except Exception as e:
-        _log(f"_safe_entity_id error: {e}")
+        if log:
+            _log(f"_safe_entity_id error: {e}")
         return None, None
 
 
-def _safe_instance_id(ik):
-    """安全读取 instance key 的 ModelId/ElementId"""
-    try:
-        _log(f"_safe_instance_id: ik type={type(ik).__name__}")
-    except Exception as e:
-        _log(f"_safe_instance_id log error: {e}")
+def _entity_id_tuple(eid):
+    """把 entity id 转成 (ModelId, ElementId) 元组，用于比较"""
+    mid, eid_val = _safe_entity_id(eid, log=False)
+    if mid is not None and eid_val is not None:
+        return (mid, eid_val)
+    return None
+
+
+def _entity_id_in_list(eid, eid_list):
+    """判断 entity id 是否在一个 entity id 列表中（按 ModelId+ElementId 比较）"""
+    target = _entity_id_tuple(eid)
+    if target is None:
+        return False
+    for item in eid_list:
+        if target == _entity_id_tuple(item):
+            return True
+    return False
+
+
+def _safe_instance_id(ik, log=True):
+    """安全读取 instance key 的 ID（Model/Class 与 Element/Instance）"""
     try:
         mid = _find_id_attr(ik, 'model')
         eid_val = _find_id_attr(ik, 'element')
-        if mid is None or eid_val is None:
-            _log(f"_safe_instance_id: could not read IDs, dir={dir(ik)}")
+        if log:
+            _log(f"_safe_instance_id: type={type(ik).__name__}, ClassId={mid}, InstanceId={eid_val}")
         return mid, eid_val
     except Exception as e:
-        _log(f"_safe_instance_id error: {e}")
+        if log:
+            _log(f"_safe_instance_id error: {e}")
         return None, None
 
 
@@ -410,12 +661,131 @@ def _extract_line_endpoints_from_params(params):
     return None
 
 
+def _extract_xyz_from_placement(placement):
+    """从 Placement 对象/字典/矩阵中提取 x,y,z 平移分量（参考 CADBoard 实现）"""
+    try:
+        # dict-like
+        if isinstance(placement, dict):
+            for kx in ('x', 'X', 'origin_x', 'translation_x', 'OriginX', 'TranslationX'):
+                if kx in placement:
+                    x = float(placement[kx])
+                    y = float(placement.get('y', placement.get('Y', 0)))
+                    z = float(placement.get('z', placement.get('Z', 0)))
+                    return x, y, z
+            if 'origin' in placement:
+                return _extract_xyz_from_placement(placement['origin'])
+            if 'translation' in placement:
+                return _extract_xyz_from_placement(placement['translation'])
+            return None
+        # 对象属性
+        if hasattr(placement, 'x') and hasattr(placement, 'y'):
+            x = float(placement.x)
+            y = float(placement.y)
+            z = float(placement.z) if hasattr(placement, 'z') else 0.0
+            return x, y, z
+        # 列表/元组（Vec3 或矩阵）
+        if isinstance(placement, (list, tuple)):
+            if len(placement) >= 3:
+                try:
+                    return float(placement[0]), float(placement[1]), float(placement[2])
+                except Exception:
+                    pass
+            if len(placement) >= 16:
+                return float(placement[12]), float(placement[13]), float(placement[14])
+        # 方法
+        for method_name in ('get_translation', 'translation', 'get_origin', 'origin', 'get_position', 'position'):
+            if hasattr(placement, method_name):
+                try:
+                    result = getattr(placement, method_name)()
+                    if result is not None:
+                        extracted = _extract_xyz_from_placement(result)
+                        if extracted:
+                            return extracted
+                except Exception:
+                    pass
+    except Exception as e:
+        _log(f"_extract_xyz_from_placement error: {e}")
+    return None
+
+
+def _extract_xyz_from_transform(transform):
+    """从 GeTransform / 矩阵列表 / 字典中提取 x,y,z 平移分量"""
+    if transform is None:
+        return None
+    try:
+        # 优先使用 pyp3d 官方 helper
+        if get_matrixs_position is not None:
+            try:
+                pos = get_matrixs_position(transform)
+                if pos is not None:
+                    if hasattr(pos, 'x') and hasattr(pos, 'y'):
+                        return float(pos.x), float(pos.y), float(pos.z) if hasattr(pos, 'z') else 0.0
+                    if isinstance(pos, (list, tuple)) and len(pos) >= 3:
+                        return float(pos[0]), float(pos[1]), float(pos[2])
+            except Exception:
+                pass
+        # GeTransform._mat 是 3x4 行主序矩阵，平移在 [i][3]
+        if hasattr(transform, '_mat'):
+            mat = transform._mat
+            if isinstance(mat, (list, tuple)) and len(mat) == 3:
+                return float(mat[0][3]), float(mat[1][3]), float(mat[2][3])
+        # 16 元素列表/元组（列主序 OpenGL 风格）
+        if isinstance(transform, (list, tuple)) and len(transform) >= 16:
+            return float(transform[12]), float(transform[13]), float(transform[14])
+        # dict 形式
+        if isinstance(transform, dict):
+            for kx in ('x', 'X', 'origin_x', 'translation_x'):
+                if kx in transform:
+                    x = float(transform[kx])
+                    y = float(transform.get('y', transform.get('Y', 0)))
+                    z = float(transform.get('z', transform.get('Z', 0)))
+                    return x, y, z
+            if 'translation' in transform:
+                return _extract_xyz_from_transform(transform['translation'])
+            if 'origin' in transform:
+                return _extract_xyz_from_transform(transform['origin'])
+        # 对象属性
+        if hasattr(transform, 'x') and hasattr(transform, 'y'):
+            return float(transform.x), float(transform.y), float(transform.z) if hasattr(transform, 'z') else 0.0
+    except Exception as e:
+        _log(f"_extract_xyz_from_transform error: {e}")
+    return None
+
+
+def _merge_para_cmpt_property(params):
+    """展开 ParaCmptProperty 子字典"""
+    if not isinstance(params, dict) or 'ParaCmptProperty' not in params:
+        return params
+    prop = params.get('ParaCmptProperty')
+    if prop is None:
+        return params
+    extracted = {}
+    try:
+        if hasattr(prop, 'keys'):
+            for key in prop:
+                try:
+                    extracted[key] = prop[key]
+                except Exception:
+                    pass
+        elif isinstance(prop, dict):
+            extracted = dict(prop)
+    except Exception as e:
+        _log(f"_merge_para_cmpt_property error: {e}")
+    if extracted:
+        return {**params, **extracted}
+    return params
+
+
 def _read_params_from_instancekey(datakey):
     """
     从 P3DInstanceKey 读取参数字典。
-    优先 get_noumKV_from_instancekey，若为空则回退到 noumenon.at('ParaCmptProperty') 或遍历 noumenon。
+    优先 get_noumKV_from_instancekey，若为空则回退到 get_noumenon_from_datakey。
+    参考 CADBoard，会展开 ParaCmptProperty 并从 Placement/\a_transformation 提取世界坐标。
     """
     if datakey is None:
+        return None
+    if not _is_instance_key(datakey):
+        _log(f"_read_params_from_instancekey: reject non-instance-key type={type(datakey).__name__}")
         return None
     params = None
     if get_noumKV_from_instancekey is not None:
@@ -423,44 +793,55 @@ def _read_params_from_instancekey(datakey):
             params = get_noumKV_from_instancekey(datakey)
         except Exception as e:
             _log(f"_read_params_from_instancekey noumKV error: {e}")
-    if params and isinstance(params, dict) and len(params) > 0:
-        return params
-    if get_noumenon_from_instancekey is None:
+
+    if params is not None and isinstance(params, dict):
+        _log(f"_read_params_from_instancekey: noumKV keys={_safe_keys(params)}, len={len(params)}")
+        # 展开 ParaCmptProperty
+        params = _merge_para_cmpt_property(params)
+        # 从 Placement 提取世界坐标
+        if 'Placement' in params:
+            placement = params.get('Placement')
+            xyz = _extract_xyz_from_placement(placement)
+            if xyz is not None:
+                x, y, z = xyz
+                params['x'] = x
+                params['y'] = y
+                params['z'] = z
+                params['z_bottom'] = z
+                _log(f"_read_params_from_instancekey: extracted placement xyz=({x:.2f}, {y:.2f}, {z:.2f})")
+        # 从 transformation 矩阵提取世界坐标
+        trans_key = '\a_transformation'
+        if trans_key in params:
+            xyz = _extract_xyz_from_transform(params[trans_key])
+            if xyz is not None:
+                x, y, z = xyz
+                params['x'] = x
+                params['y'] = y
+                params['z'] = z
+                params['z_bottom'] = z
+                _log(f"_read_params_from_instancekey: extracted transform xyz=({x:.2f}, {y:.2f}, {z:.2f})")
+        if len(params) > 0:
+            return params
+
+    # 回退：读取完整 Noumenon 对象
+    if get_noumenon_from_datakey is None:
         return None
     try:
-        noum = get_noumenon_from_instancekey(datakey)
-        if noum is None:
-            return None
-        # 尝试参数化组件属性节点
-        try:
-            prop = noum.at('ParaCmptProperty')
-            if prop is not None:
-                if hasattr(prop, 'keys'):
-                    d = {}
-                    for key in prop:
-                        d[key] = prop[key]
-                    return d
-                elif isinstance(prop, dict):
-                    return dict(prop)
-        except Exception:
-            pass
-        # 回退：直接遍历 noumenon
-        try:
-            d = {}
-            for key in noum:
-                d[key] = noum[key]
-            return d
-        except Exception:
-            pass
+        noum = get_noumenon_from_datakey(datakey)
+        params = _read_params_from_noumenon(noum)
+        if params:
+            _log(f"_read_params_from_instancekey: got params from noumenon, keys={_safe_keys(params)}")
+            return params
     except Exception as e:
         _log(f"_read_params_from_instancekey noumenon error: {e}")
     return None
 
 
 def _read_params_from_noumenon(noum):
-    """从 Noumenon 对象中读取参数化组件的参数字典。"""
+    """从 Noumenon 对象中读取参数化组件的参数字典，包含世界坐标。"""
     if noum is None:
         return None
+    d = None
     # 优先读取参数化组件属性节点 ParaCmptProperty
     try:
         prop = noum.at('ParaCmptProperty')
@@ -475,25 +856,52 @@ def _read_params_from_noumenon(noum):
             else:
                 for key in prop:
                     d[key] = prop[key]
-            if d:
-                return d
     except Exception:
         pass
     # 回退：直接遍历 noumenon
-    try:
-        d = {}
-        for key in noum:
-            d[key] = noum[key]
+    if not d:
+        try:
+            d = {}
+            for key in noum:
+                d[key] = noum[key]
+        except Exception:
+            pass
+    if not d:
+        try:
+            d = {}
+            for key, val in noum.items():
+                d[key] = val
+        except Exception:
+            pass
+    if d:
+        d = _merge_para_cmpt_property(d)
+        if 'Placement' in d:
+            placement = d.get('Placement')
+            xyz = _extract_xyz_from_placement(placement)
+            if xyz is not None:
+                x, y, z = xyz
+                d['x'] = x
+                d['y'] = y
+                d['z'] = z
+        trans_key = '\a_transformation'
+        if trans_key in d:
+            xyz = _extract_xyz_from_transform(d[trans_key])
+            if xyz is not None:
+                x, y, z = xyz
+                d['x'] = x
+                d['y'] = y
+                d['z'] = z
+                d['z_bottom'] = z
         if d:
             return d
-    except Exception:
-        pass
+    # 最后尝试：即使没有任何参数，也读 transformation 矩阵的平移作为位置
     try:
-        d = {}
-        for key, val in noum.items():
-            d[key] = val
-        if d:
-            return d
+        trans_key = '\a_transformation'
+        if trans_key in noum:
+            xyz = _extract_xyz_from_transform(noum[trans_key])
+            if xyz is not None:
+                x, y, z = xyz
+                return {'x': x, 'y': y, 'z': z, 'z_bottom': z, trans_key: noum[trans_key]}
     except Exception:
         pass
     return None
@@ -503,10 +911,12 @@ def _read_params_from_entity(eid):
     """从选中的几何实体 entity id 直接读取参数（优先用 get_noumenon_on_entityid）。"""
     if eid is None:
         return None
+    _log(f"_read_params_from_entity: start, type={type(eid).__name__}")
     # 方式1：get_noumenon_on_entityid 直接返回实体对应的 noumenon
     if get_noumenon_on_entityid is not None:
         try:
             noum = get_noumenon_on_entityid(eid)
+            _log(f"_read_params_from_entity: get_noumenon_on_entityid returned type={type(noum).__name__ if noum is not None else None}")
             params = _read_params_from_noumenon(noum)
             if params:
                 _log(f"_read_params_from_entity: got params via get_noumenon_on_entityid, keys={_safe_keys(params)}")
@@ -517,6 +927,7 @@ def _read_params_from_entity(eid):
     if get_datakey_from_entity is not None:
         try:
             dk = get_datakey_from_entity(eid)
+            _log(f"_read_params_from_entity: get_datakey_from_entity returned type={type(dk).__name__ if dk is not None else None}")
             if dk is not None:
                 params = _read_params_from_instancekey(dk)
                 if params:
@@ -533,6 +944,7 @@ def _read_params_from_entity(eid):
                         _log(f"_read_params_from_entity get_noumenon_from_datakey error: {e2}")
         except Exception as e:
             _log(f"_read_params_from_entity datakey error: {e}")
+    _log("_read_params_from_entity: all methods failed")
     return None
 
 
@@ -874,13 +1286,13 @@ def get_selected_line_endpoints():
         except Exception as e:
             _log(f"get_selected_line_endpoints datakey error: {e}")
 
-    # 方式3：尝试 get_noumenon_from_instancekey（如果有 datakey）
+    # 方式3：尝试 get_noumenon_from_datakey（如果有 datakey）
     for eid in entity_ids:
         try:
             dk = get_datakey_from_entity(eid) if get_datakey_from_entity is not None else None
-            if dk is not None and get_noumenon_from_instancekey is not None:
+            if dk is not None and get_noumenon_from_datakey is not None:
                 try:
-                    noum = get_noumenon_from_instancekey(dk)
+                    noum = get_noumenon_from_datakey(dk)
                     _log(f"get_selected_line_endpoints: noumenon type={type(noum).__name__}, keys={_safe_keys(noum)}, items={_safe_items_preview(noum, 10)}")
                     if noum is not None:
                         endpoints = _extract_line_endpoints_from_params(noum)

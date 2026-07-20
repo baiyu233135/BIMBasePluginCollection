@@ -7,6 +7,7 @@ import math
 import sys
 import os
 import traceback
+import importlib.util
 
 # 确保 AI_Modeling 目录在 sys.path 最前面，避免 CADBoard 的同名模块抢先。
 _plugin_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -35,6 +36,19 @@ except ImportError as e:
 
 # 调试日志
 _debug_log_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'ai_modeling_debug.log')
+
+# 项目根目录（用于加载复杂组件）
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# 组件注册表（延迟导入，避免循环依赖）
+_ComponentRegistry = None
+
+def _get_registry():
+    global _ComponentRegistry
+    if _ComponentRegistry is None:
+        from ai_modeling.component_registry import ComponentRegistry
+        _ComponentRegistry = ComponentRegistry()
+    return _ComponentRegistry
 
 def _log(msg):
     try:
@@ -157,8 +171,8 @@ if _pyp3d_ok:
     except Exception as e:
         _log(f"component_factory: failed to import from bimbase_sync: {e}")
 
-# 兜底：如果 bimbase_sync 导入失败，使用本地定义（通常不会走到这里）
-if _CylinderComponent is None:
+# 兜底：如果 bimbase_sync 导入失败且 pyp3d 可用，使用本地定义
+if _CylinderComponent is None and Component is not None:
     class CylinderComponent(Component):
         def __init__(self, radius=100, height=200, ox=0, oy=0, oz=0):
             super().__init__()
@@ -179,7 +193,7 @@ if _CylinderComponent is None:
             self['圆柱'] = Sweep(section, path)
     _CylinderComponent = CylinderComponent
 
-if _BoxComponent is None:
+if _BoxComponent is None and Component is not None:
     class BoxComponent(Component):
         def __init__(self, length=200, width=100, height=150, ox=0, oy=0, oz=0):
             super().__init__()
@@ -202,7 +216,7 @@ if _BoxComponent is None:
             self['长方体'] = Sweep(section, path)
     _BoxComponent = BoxComponent
 
-if _CubeComponent is None:
+if _CubeComponent is None and Component is not None:
     class CubeComponent(Component):
         def __init__(self, size=100, ox=0, oy=0, oz=0):
             super().__init__()
@@ -221,7 +235,7 @@ if _CubeComponent is None:
             self['正方体'] = translate(ox, oy, oz) * scale(a, a, a) * Cube()
     _CubeComponent = CubeComponent
 
-if _SphereComponent is None:
+if _SphereComponent is None and Component is not None:
     class SphereComponent(Component):
         def __init__(self, radius=100, ox=0, oy=0, oz=0):
             super().__init__()
@@ -240,7 +254,7 @@ if _SphereComponent is None:
             self['球体'] = translate(ox, oy, oz) * scale(r, r, r) * Sphere()
     _SphereComponent = SphereComponent
 
-if _ConeComponent is None:
+if _ConeComponent is None and Component is not None:
     class ConeComponent(Component):
         def __init__(self, radius=100, height=200, ox=0, oy=0, oz=0):
             super().__init__()
@@ -260,7 +274,7 @@ if _ConeComponent is None:
             self['圆锥'] = translate(ox, oy, oz) * scale(r, r, h) * Cone()
     _ConeComponent = ConeComponent
 
-if _TriangularPrismComponent is None:
+if _TriangularPrismComponent is None and Component is not None:
     class TriangularPrismComponent(Component):
         def __init__(self, 直角边1=100, 直角边2=100, 高度=200, ox=0, oy=0, oz=0):
             super().__init__()
@@ -304,6 +318,89 @@ COMPONENT_DEFAULTS = {
     'triangular_prism': {'直角边1': 100, '直角边2': 100, '高度': 200},
 }
 
+# 复杂组件（__init__ 不接受参数，参数通过 Attr 设置）
+_COMPLEX_COMPONENT_TYPES = set()
+
+
+def _read_component_keys(comp):
+    """安全读取 Component 的所有键名"""
+    try:
+        if hasattr(comp, 'keys'):
+            return list(comp.keys())
+        if hasattr(comp, '__iter__'):
+            return list(comp)
+    except Exception as e:
+        _log(f"_read_component_keys error: {e}")
+    return []
+
+
+def _attr_to_value(v):
+    """把 Attr/数值统一转成可序列化的 Python 值"""
+    try:
+        if hasattr(v, 'value'):
+            v = v.value
+        return float(v)
+    except Exception:
+        pass
+    try:
+        return int(v)
+    except Exception:
+        pass
+    if v is None:
+        return None
+    return str(v)
+
+
+def _load_complex_component(file_path, class_name, component_key):
+    """动态加载组件测试目录下的复杂组件"""
+    global _COMPLEX_COMPONENT_TYPES
+    if not os.path.exists(file_path):
+        _log(f"complex component file not found: {file_path}")
+        return False
+    try:
+        module_name = f"_ai_modeling_complex_{component_key}"
+        spec = importlib.util.spec_from_file_location(module_name, file_path)
+        module = importlib.util.module_from_spec(spec)
+        # 避免模块内 if __name__ == '__main__' 的 place() 被触发
+        module.__name__ = module_name
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+        cls = getattr(module, class_name)
+
+        # 实例化一次以读取默认参数
+        defaults = {}
+        try:
+            sample = cls()
+            for k in _read_component_keys(sample):
+                try:
+                    defaults[k] = _attr_to_value(sample[k])
+                except Exception as e2:
+                    _log(f"  read default {k} failed: {e2}")
+        except Exception as e:
+            _log(f"complex component sample instantiate failed: {e}")
+
+        COMPONENT_CLASSES[component_key] = cls
+        COMPONENT_DEFAULTS[component_key] = defaults
+        _COMPLEX_COMPONENT_TYPES.add(component_key)
+        _log(f"loaded complex component '{component_key}' from {file_path} with defaults={defaults}")
+        return True
+    except Exception as e:
+        _log(f"failed to load complex component '{component_key}': {e}")
+        return False
+
+
+# 尝试加载复杂组件（失败不影响基础几何体）
+_load_complex_component(
+    os.path.join(_PROJECT_ROOT, '组件测试', '引桥桥墩.py'),
+    '引桥桥墩',
+    'pier'
+)
+_load_complex_component(
+    os.path.join(_PROJECT_ROOT, '组件测试', '索缆锚锭.py'),
+    '索塔锚块',
+    'anchor'
+)
+
 
 def _get_valid_kwargs(cls, kwargs):
     """过滤掉组件 __init__ 不接受的参数，避免 AI 误识别参数导致构造失败"""
@@ -329,12 +426,125 @@ def create_component(component_type, params=None):
     defaults = COMPONENT_DEFAULTS.get(component_type, {}).copy()
     if params:
         defaults.update(params)
-    defaults = _get_valid_kwargs(cls, defaults)
+
     try:
-        return cls(**defaults)
+        if component_type in _COMPLEX_COMPONENT_TYPES:
+            # 复杂组件 __init__ 不接受参数，先默认实例化再覆盖 Attr
+            comp = cls()
+            for k, v in defaults.items():
+                try:
+                    if k in _read_component_keys(comp):
+                        comp[k] = v
+                except Exception as e2:
+                    _log(f"create_component override {k} failed: {e2}")
+            if hasattr(comp, 'replace'):
+                try:
+                    comp.replace()
+                except Exception as e2:
+                    _log(f"create_component complex replace failed: {e2}")
+        else:
+            defaults = _get_valid_kwargs(cls, defaults)
+            comp = cls(**defaults)
+
+        # 记录 AI 建模使用的参数和类型，供注册表/复制使用
+        try:
+            comp._ai_modeling_component_type = component_type
+            comp._ai_modeling_params = dict(defaults)
+        except Exception as e2:
+            _log(f"create_component store metadata failed: {e2}")
+        return comp
     except Exception as e:
         _log(f"create_component error: {e}")
         return None
+
+
+def _infer_component_type_from_comp(comp):
+    """从组件实例推断 component_type key"""
+    if comp is None:
+        return None
+    # 优先使用创建时记录的元数据
+    try:
+        t = getattr(comp, '_ai_modeling_component_type', None)
+        if t:
+            return t
+    except Exception:
+        pass
+    # 按类型名匹配
+    type_name = type(comp).__name__
+    name_map = {
+        'CylinderComponent': 'cylinder',
+        'BoxComponent': 'box',
+        'CubeComponent': 'cube',
+        'SphereComponent': 'sphere',
+        'ConeComponent': 'cone',
+        'TriangularPrismComponent': 'triangular_prism',
+        '引桥桥墩': 'pier',
+        '索塔锚块': 'anchor',
+    }
+    if type_name in name_map:
+        return name_map[type_name]
+    # 按已有类反向查找
+    for key, cls in COMPONENT_CLASSES.items():
+        if type(comp) is cls:
+            return key
+    return None
+
+
+def _extract_component_params_from_comp(comp):
+    """从组件实例提取可序列化的参数字典"""
+    if comp is None:
+        return {}
+    # 优先使用创建时记录的参数
+    try:
+        params = getattr(comp, '_ai_modeling_params', None)
+        if params:
+            return dict(params)
+    except Exception:
+        pass
+    # 实时读取 Attr
+    result = {}
+    for k in _read_component_keys(comp):
+        try:
+            result[k] = _attr_to_value(comp[k])
+        except Exception:
+            pass
+    return result
+
+
+def _record_placement(comp, x, y, z, eid=None):
+    """将成功放置的组件记录到注册表"""
+    try:
+        registry = _get_registry()
+        entity_id = eid
+        instance_key = None
+
+        # 尝试通过 entity_id 获取 datakey
+        if entity_id is not None:
+            try:
+                from pyp3d import get_datakey_from_entity
+                dk = get_datakey_from_entity(entity_id)
+                if dk is not None:
+                    instance_key = dk
+            except Exception as e:
+                _log(f"_record_placement get_datakey_from_entity failed: {e}")
+
+        # 如果没有传入 entity_id，尝试从 place_to 工具读取
+        if entity_id is None:
+            try:
+                from pyp3d import get_place_to_entityId, entityid_isvaid
+                eid2 = get_place_to_entityId()
+                if eid2 is not None and entityid_isvaid(eid2):
+                    entity_id = eid2
+            except Exception:
+                pass
+
+        comp_type = _infer_component_type_from_comp(comp)
+        params = _extract_component_params_from_comp(comp)
+        placement = {'x': float(x), 'y': float(y), 'z': float(z)}
+        key = instance_key if instance_key is not None else entity_id
+        registry.register(key, comp_type, params, placement, entity_id=entity_id)
+    except Exception as e:
+        _log(f"_record_placement error: {e}")
 
 
 def place_component_at(comp, x, y, z):
@@ -375,6 +585,7 @@ def place_component_at(comp, x, y, z):
         is_valid = entityid_isvaid(eid) if eid is not None else False
         _log(f"place_component_at: create_geometry eid={eid}, valid={is_valid}")
         if is_valid:
+            _record_placement(comp, x, y, z, eid=eid)
             try:
                 from pyp3d import zoom_all_view
                 zoom_all_view()
@@ -392,6 +603,7 @@ def place_component_at(comp, x, y, z):
                 _log(f"place_component_at: trying _PlaceToDirect({x},{y},{z})")
                 _PlaceToDirect(comp, translate(float(x), float(y), float(z)))
                 _log("place_component_at: _PlaceToDirect SUCCESS")
+                _record_placement(comp, x, y, z)
                 return True, f"✅ 已自动布置到 ({x}, {y}, {z})"
             except Exception as e:
                 _log(f"place_component_at: _PlaceToDirect failed: {e}")
@@ -402,6 +614,7 @@ def place_component_at(comp, x, y, z):
                 _log(f"place_component_at: trying place_to({x},{y},{z})")
                 place_to(comp, translate(float(x), float(y), float(z)))
                 _log("place_component_at: place_to SUCCESS")
+                _record_placement(comp, x, y, z)
                 return True, f"✅ 已自动布置到 ({x}, {y}, {z})"
             except Exception as e:
                 _log(f"place_component_at: place_to failed: {e}")
@@ -423,6 +636,7 @@ def place_component_at(comp, x, y, z):
                 _log("place_component_at: trying place_to with baked offset")
                 place_to(comp, translate(0.0, 0.0, 0.0))
                 _log("place_component_at: place_to with baked offset SUCCESS")
+                _record_placement(comp, x, y, z)
                 return True, f"✅ 已自动布置到 ({x}, {y}, {z})"
             except Exception as e:
                 _log(f"place_component_at: place_to with baked offset failed: {e}")
@@ -451,6 +665,7 @@ def place_component_at(comp, x, y, z):
             if comp_type:
                 ok, msg = _place_via_file_import(comp_type, comp_params, x, y, z)
                 if ok:
+                    _record_placement(comp, x, y, z)
                     return True, msg
                 _log(f"place_component_at: file import failed, falling back: {msg}")
         except Exception as e:
@@ -459,6 +674,7 @@ def place_component_at(comp, x, y, z):
         # 方案3：自动模拟交互点击
         try:
             _auto_place_click_and_move(comp, float(x), float(y), float(z))
+            _record_placement(comp, x, y, z)
             return True, f"✅ 已自动布置到 ({x}, {y}, {z})"
         except Exception as e:
             _log(f"place_component_at: auto_click scheme failed: {e}")

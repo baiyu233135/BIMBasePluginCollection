@@ -36,7 +36,8 @@ except ImportError:
 from ai_modeling.config import load_config, set_api_key, get_api_key, save_config, CONFIG_DIR, CONFIG_FILE
 from ai_modeling.chat_thread import AIChatThread, AIChatNonStreamThread
 from ai_modeling.command_parser import ModelingCommandParser
-from ai_modeling.component_factory import create_component, place_component_at, batch_place
+from ai_modeling.component_factory import create_component, place_component_at, batch_place, _infer_component_type_from_comp
+from ai_modeling.component_registry import ComponentRegistry, get_registry
 from ai_modeling.array_generator import linear_array, rectangular_array, polar_array
 from ai_modeling.route import Route, ArcRoute, sample_route_for_components
 from ai_modeling.component_path import (
@@ -45,7 +46,8 @@ from ai_modeling.component_path import (
 )
 from ai_modeling.bimbase_modifier import (
     modify_selected_component, get_selected_component_info, infer_component_type_from_params,
-    get_selected_line_endpoints, get_selected_curve_arc_params
+    get_selected_line_endpoints, get_selected_curve_arc_params,
+    get_selected_component_position, get_selected_instance_keys
 )
 
 
@@ -138,7 +140,7 @@ class AIModelingWindow(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("🤖 BIMBase AI智能建模助手")
-        self.setGeometry(200, 150, 520, 680)
+        self.setGeometry(200, 150, 860, 680)
         # 非模态 + 置顶，允许用户与BIMBase主窗口交互
         self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
         self.setStyleSheet("""
@@ -153,8 +155,10 @@ class AIModelingWindow(QDialog):
         self._chat_thread = None
         self._streaming = False
         self._last_commands = []  # 最后执行的命令（用于撤销/查看）
+        self._registry = get_registry()
 
         self._build_ui()
+        self._validate_registry()
         self._show_welcome()
 
     def _build_ui(self):
@@ -162,10 +166,8 @@ class AIModelingWindow(QDialog):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(8)
 
-        # 标题栏
+        # 标题栏（仅保留模式指示器和功能按钮，标题已在窗口标题栏显示）
         header = QHBoxLayout()
-        title = QLabel("<b style='font-size:14px;'>🤖 BIMBase AI智能建模助手</b>")
-        header.addWidget(title)
 
         self.mode_indicator = QLabel("⚡ 本地")
         self.mode_indicator.setStyleSheet("QLabel { color: #1565C0; font-size: 12px; padding: 2px 6px; }")
@@ -173,14 +175,22 @@ class AIModelingWindow(QDialog):
         header.addStretch()
 
         config_btn = QPushButton("⚙️ 配置")
-        config_btn.setMaximumWidth(60)
+        config_btn.setFixedWidth(250)
+        config_btn.setToolTip("配置 DeepSeek / 百度语音 API Key")
         config_btn.clicked.connect(self._show_config)
         header.addWidget(config_btn)
 
         clear_btn = QPushButton("🗑️ 清空")
-        clear_btn.setMaximumWidth(60)
+        clear_btn.setFixedWidth(250)
+        clear_btn.setToolTip("清空当前聊天记录")
         clear_btn.clicked.connect(self._clear_chat)
         header.addWidget(clear_btn)
+
+        cache_btn = QPushButton("🧹 清理缓存")
+        cache_btn.setFixedWidth(250)
+        cache_btn.setToolTip("清空 AI 建模组件注册表和日志文件（不删除 BIMBase 几何体）")
+        cache_btn.clicked.connect(self._clear_ai_cache)
+        header.addWidget(cache_btn)
         layout.addLayout(header)
 
         # 聊天显示区
@@ -360,20 +370,75 @@ class AIModelingWindow(QDialog):
         self.status_label.setText(f"语音错误: {msg}")
         self._append_system(f"❌ 语音输入错误: {msg}", "#d32f2f")
 
+    def _validate_registry(self):
+        """启动时校验注册表与当前 BIMBase 场景的一致性"""
+        try:
+            from pyp3d import get_all_instancekey, get_entity_bounds
+            self._registry.validate_and_update(
+                get_all_keys_func=get_all_instancekey,
+                bounds_func=get_entity_bounds
+            )
+        except Exception as e:
+            _log(f"_validate_registry error: {e}")
+
+    def _get_position_from_registry_by_entity_id(self):
+        """根据当前选中的 entity id，在注册表中查找匹配的位置"""
+        try:
+            from ai_modeling.bimbase_modifier import get_selected_entity_ids
+            entity_ids = get_selected_entity_ids()
+            _log(f"_get_position_from_registry_by_entity_id: entity_ids count={len(entity_ids)}")
+            for eid in entity_ids:
+                # 优先用 entity 对象本身匹配（注册表 key 会同时包含 ModelId+ElementId）
+                record = self._registry.get_by_entity_id(eid)
+                if not record:
+                    record = self._registry.get(eid)
+                if record and record.get('placement'):
+                    p = record['placement']
+                    pos = (float(p.get('x', 0)), float(p.get('y', 0)), float(p.get('z', 0)))
+                    _log(f"_get_position_from_registry_by_entity_id: matched {eid} -> {pos}")
+                    return pos
+        except Exception as e:
+            _log(f"_get_position_from_registry_by_entity_id error: {e}")
+        return None
+
+    def _get_last_created_position(self):
+        """获取最近一次 AI 生成组件的位置（用于未选中任何实体时的回退）"""
+        try:
+            records = self._registry.all_records()
+            if not records:
+                return None
+            # 按 created_at 排序，取最新的一条
+            latest = None
+            latest_ts = ''
+            for key, record in records.items():
+                ts = record.get('created_at', '')
+                if ts > latest_ts:
+                    latest_ts = ts
+                    latest = record
+            if latest and latest.get('placement'):
+                p = latest['placement']
+                return (float(p.get('x', 0)), float(p.get('y', 0)), float(p.get('z', 0)))
+        except Exception as e:
+            _log(f"_get_last_created_position error: {e}")
+        return None
+
     def _show_welcome(self):
         welcome = (
             "<p style='color:#666;'><b>👋 欢迎使用 BIMBase AI智能建模助手！</b></p>"
             "<p style='color:#666;'>你可以这样对我说：</p>"
             "<ul style='color:#666;'>"
             "<li><b>生成组件：</b>在(1000,2000,500)生成半径300高800的圆柱</li>"
+            "<li><b>选中位置生成：</b>在选中的圆柱位置生成半径200的正方体</li>"
             "<li><b>相对位置：</b>在选中的实体上方500mm生成一个正方体，边长200</li>"
+            "<li><b>复制组件：</b>复制选中的圆柱到(1000,2000,0)</li>"
             "<li><b>阵列生成：</b>沿X轴每隔1000mm生成一个圆柱，共5个，半径200高500</li>"
             "<li><b>沿直线布置：</b>沿选中的直线每隔500mm放半径50高100的圆柱，共10个</li>"
             "<li><b>沿曲线布置：</b>沿圆心(0,0,0)半径500从0°到180°的圆弧每隔200mm放圆柱</li>"
             "<li><b>修改组件：</b>把选中的圆柱半径改成400，高度改成1000</li>"
+            "<li><b>修改保留位置：</b>把选中圆柱半径改成400，位置不变</li>"
             "<li><b>批量布置：</b>生成3×3方阵，间距2000，每个位置放一个正方体边长300</li>"
             "</ul>"
-            "<p style='color:#999;font-size:11px;'>💡 提示：先在BIMBase中选中组件，再说'修改选中的...'</p>"
+            "<p style='color:#999;font-size:11px;'>💡 提示：先在BIMBase中选中组件，再说'修改选中的...'或'复制选中的...'</p>"
         )
         self._append_html(welcome)
 
@@ -420,6 +485,11 @@ class AIModelingWindow(QDialog):
             self.mode_indicator.setText("⚡ 本地")
             self.status_label.setText("本地执行中...")
             self._execute_local_create(parsed, text)
+            return
+        elif parsed and parsed.get('action') == 'copy':
+            self.mode_indicator.setText("⚡ 本地")
+            self.status_label.setText("本地执行复制...")
+            self._execute_local_copy(parsed, text)
             return
         elif parsed and parsed.get('action') == 'modify':
             self.mode_indicator.setText("⚡ 本地")
@@ -479,12 +549,22 @@ class AIModelingWindow(QDialog):
                 base_x, base_y, base_z = pos.get('x', 0), pos.get('y', 0), pos.get('z', 0)
             elif pos['mode'] == 'relative':
                 # 相对坐标：以当前选中实体为基准
-                infos = get_selected_component_info()
-                if infos:
-                    p = infos[0].get('params', {})
-                    base_x = float(p.get('cx', p.get('x', p.get('x1', 0))))
-                    base_y = float(p.get('cy', p.get('y', p.get('y1', 0))))
-                    base_z = float(p.get('z_top', p.get('z', p.get('高度', p.get('height', 0)))))
+                base_pos = get_selected_component_position()
+                if base_pos is None:
+                    # 回退1：按 entity id 查注册表
+                    base_pos = self._get_position_from_registry_by_entity_id()
+                    if base_pos:
+                        self._append_system(f"⚠️ 未从实体读取到位置，使用注册表中该组件记录的位置 ({base_pos[0]:.1f}, {base_pos[1]:.1f}, {base_pos[2]:.1f}) 作为基准", "#f57c00")
+                if base_pos is None:
+                    # 回退2：最近一次生成的组件
+                    base_pos = self._get_last_created_position()
+                    if base_pos:
+                        self._append_system(f"⚠️ 未检测到选中组件，使用最近一次生成位置 ({base_pos[0]:.1f}, {base_pos[1]:.1f}, {base_pos[2]:.1f}) 作为基准", "#f57c00")
+                if base_pos is None:
+                    self._append_system("❌ 未在 BIMBase 中选中有效组件，也无法从注册表获取位置", "#d32f2f")
+                    self.status_label.setText("就绪")
+                    return
+                base_x, base_y, base_z = base_pos
                 axis = pos.get('axis', 'z')
                 distance = pos.get('distance', 0)
                 if axis == 'x':
@@ -495,12 +575,20 @@ class AIModelingWindow(QDialog):
                     base_z += distance
             elif pos['mode'] == 'selected':
                 # 以选中实体位置为基准（不偏移）
-                infos = get_selected_component_info()
-                if infos:
-                    p = infos[0].get('params', {})
-                    base_x = float(p.get('cx', p.get('x', p.get('x1', 0))))
-                    base_y = float(p.get('cy', p.get('y', p.get('y1', 0))))
-                    base_z = float(p.get('z_top', p.get('z', 0)))
+                base_pos = get_selected_component_position()
+                if base_pos is None:
+                    base_pos = self._get_position_from_registry_by_entity_id()
+                    if base_pos:
+                        self._append_system(f"⚠️ 未从实体读取到位置，使用注册表中该组件记录的位置 ({base_pos[0]:.1f}, {base_pos[1]:.1f}, {base_pos[2]:.1f})", "#f57c00")
+                if base_pos is None:
+                    base_pos = self._get_last_created_position()
+                    if base_pos:
+                        self._append_system(f"⚠️ 未检测到选中组件，使用最近一次生成位置 ({base_pos[0]:.1f}, {base_pos[1]:.1f}, {base_pos[2]:.1f}) 作为基准", "#f57c00")
+                if base_pos is None:
+                    self._append_system("❌ 未在 BIMBase 中选中有效组件，也无法从注册表获取位置", "#d32f2f")
+                    self.status_label.setText("就绪")
+                    return
+                base_x, base_y, base_z = base_pos
 
             # 处理阵列
             coords = [(base_x, base_y, base_z)]
@@ -549,6 +637,91 @@ class AIModelingWindow(QDialog):
             if not ok:
                 self._append_system(f"  [{i+1}] ❌ {msg}", "#d32f2f")
 
+        self.status_label.setText("就绪")
+
+    def _execute_local_copy(self, parsed, original_text):
+        """本地执行复制命令：复制选中的组件到指定位置"""
+        target = parsed.get('target', {'mode': 'selected'})
+        pos = parsed.get('position', {'mode': 'selected'})
+
+        if target.get('mode') != 'selected':
+            self._append_system("❌ 复制功能目前仅支持复制选中组件", "#d32f2f")
+            self.status_label.setText("就绪")
+            return
+
+        # 获取选中组件信息
+        infos = get_selected_component_info()
+        if not infos:
+            self._append_system("❌ 未在 BIMBase 中选中任何组件，请先选中要复制的组件", "#d32f2f")
+            self.status_label.setText("就绪")
+            return
+
+        info = infos[0]
+        comp_type = info.get('type')
+        params = info.get('params') or {}
+
+        if not comp_type:
+            # 尝试从注册表匹配
+            keys = get_selected_instance_keys()
+            if keys:
+                record = self._registry.get(keys[0])
+                if record:
+                    comp_type = record.get('component_type')
+                    params = record.get('params', {})
+            if not comp_type:
+                self._append_system("❌ 无法识别选中组件类型", "#d32f2f")
+                self.status_label.setText("就绪")
+                return
+
+        # 确定目标位置
+        if pos['mode'] == 'absolute':
+            x, y, z = pos.get('x', 0), pos.get('y', 0), pos.get('z', 0)
+        elif pos['mode'] == 'relative':
+            base_pos = get_selected_component_position()
+            if base_pos is None:
+                base_pos = self._get_position_from_registry_by_entity_id()
+                if base_pos:
+                    self._append_system("⚠️ 未从实体读取到位置，使用注册表中该组件记录的位置作为复制基准", "#f57c00")
+            if base_pos is None:
+                base_pos = self._get_last_created_position()
+                if base_pos:
+                    self._append_system("⚠️ 未检测到选中组件，使用最近一次生成位置作为复制基准", "#f57c00")
+            if base_pos is None:
+                self._append_system("❌ 无法读取选中组件位置，也没有可回退的位置", "#d32f2f")
+                self.status_label.setText("就绪")
+                return
+            bx, by, bz = base_pos
+            axis = pos.get('axis', 'z')
+            distance = pos.get('distance', 0)
+            x, y, z = bx, by, bz
+            if axis == 'x':
+                x += distance
+            elif axis == 'y':
+                y += distance
+            elif axis == 'z':
+                z += distance
+        else:
+            # 默认复制到原位置
+            base_pos = get_selected_component_position()
+            if base_pos is None:
+                base_pos = self._get_position_from_registry_by_entity_id()
+                if base_pos:
+                    self._append_system("⚠️ 未从实体读取到位置，复制到注册表中该组件记录的位置", "#f57c00")
+            if base_pos is None:
+                base_pos = self._get_last_created_position()
+                if base_pos:
+                    self._append_system("⚠️ 未检测到选中组件，复制到最近一次生成位置", "#f57c00")
+            if base_pos is None:
+                self._append_system("❌ 无法读取选中组件位置，也没有可回退的位置", "#d32f2f")
+                self.status_label.setText("就绪")
+                return
+            x, y, z = base_pos
+
+        ok, msg = place_component_at(create_component(comp_type, params), x, y, z)
+        self._append_system(
+            f"{'✅' if ok else '❌'} {msg}",
+            "#2E7D32" if ok else "#d32f2f"
+        )
         self.status_label.setText("就绪")
 
     def _build_route_placements(self, route_info, comp_type, comp_params):
@@ -695,13 +868,42 @@ class AIModelingWindow(QDialog):
         """本地执行修改命令"""
         changes = parsed.get('params', {})
         target = parsed.get('target', {'mode': 'selected'})
+        preserve_position = parsed.get('preserve_position', False)
 
-        if target.get('mode') == 'selected':
-            ok, msg = modify_selected_component(changes)
-            self._append_system(f"{'✅' if ok else '❌'} {msg}",
-                                "#2E7D32" if ok else "#d32f2f")
-        else:
+        if target.get('mode') != 'selected':
             self._append_system("❌ 仅支持修改选中组件", "#d32f2f")
+            self.status_label.setText("就绪")
+            return
+
+        # 如要求保留位置，先记录当前位置
+        original_pos = None
+        selected_keys = get_selected_instance_keys()
+        if preserve_position:
+            original_pos = get_selected_component_position()
+            if original_pos is None and selected_keys:
+                record = self._registry.get(selected_keys[0])
+                if record:
+                    p = record.get('placement', {})
+                    original_pos = (float(p.get('x', 0)), float(p.get('y', 0)), float(p.get('z', 0)))
+
+        ok, msg = modify_selected_component(changes)
+        self._append_system(f"{'✅' if ok else '❌'} {msg}",
+                            "#2E7D32" if ok else "#d32f2f")
+
+        # 保留位置：更新注册表中的 placement 为修改前的位置
+        if ok and preserve_position and original_pos is not None and selected_keys:
+            try:
+                record = self._registry.get(selected_keys[0])
+                if record:
+                    record['placement'] = {
+                        'x': float(original_pos[0]),
+                        'y': float(original_pos[1]),
+                        'z': float(original_pos[2]),
+                    }
+                    self._registry.save()
+                    self._append_system(f"📍 已保留原位置: ({original_pos[0]:.1f}, {original_pos[1]:.1f}, {original_pos[2]:.1f})")
+            except Exception as e:
+                _log(f"_execute_local_modify preserve_position error: {e}")
 
         self.status_label.setText("就绪")
 
@@ -739,13 +941,16 @@ class AIModelingWindow(QDialog):
             "2. 信息不足时返回：{\"action\": \"ask\", \"question\": \"追问内容\"}\n"
             "3. 闲聊/问答返回：{\"action\": \"chat\", \"message\": \"回答内容\"}\n\n"
             "## 操作JSON格式\n"
-            "创建组件: {\"action\": \"create\", \"component_type\": \"cylinder|box|cube|sphere|cone\", "
+            "创建组件: {\"action\": \"create\", \"component_type\": \"cylinder|box|cube|sphere|cone|pier|anchor\", "
             "\"params\": {\"radius\":300, \"height\":800}, "
             "\"position\": {\"mode\": \"absolute\", \"x\":1000, \"y\":2000, \"z\":500}, "
             "\"array\": null or {\"mode\":\"linear\",\"axis\":\"x\",\"spacing\":1000,\"count\":5}, "
             "\"route\": null or {\"mode\":\"line\",\"start\":[0,0,0],\"end\":[100000,0,0],\"spacing\":20000}}\n"
+            "复制组件: {\"action\": \"copy\", \"target\": {\"mode\":\"selected\"}, "
+            "\"position\": {\"mode\": \"absolute\", \"x\":1000, \"y\":2000, \"z\":500}}\n"
             "修改组件: {\"action\": \"modify\", \"target\": {\"mode\":\"selected\"}, "
-            "\"changes\": {\"radius\":400, \"height\":1000}}\n"
+            "\"changes\": {\"radius\":400, \"height\":1000}, "
+            "\"preserve_position\": false}\n"
             "删除组件: {\"action\": \"delete\", \"target\": {\"mode\":\"selected\"}}\n\n"
             "## 路线说明\n"
             "route 用于沿一条路线等距布置组件，被放置的组件会自动旋转使其轴线/长边与路线切线方向一致。\n"
@@ -767,6 +972,14 @@ class AIModelingWindow(QDialog):
             "- cube（正方体）: size（边长）\n"
             "- sphere（球体）: radius（半径）\n"
             "- cone（圆锥）: radius（底面半径）, height（高度）\n"
+            "- pier（引桥桥墩）: 盖梁总长, 盖梁总高, 盖梁宽, 墩柱直径, 墩柱间距, 墩高, 系梁根数\n"
+            "- anchor（索缆锚锭/索塔锚块）: 锚块总长, 锚块总高, 锚块宽度, 承台长度, 承台宽度, 承台高度, 底柱半径, 底柱高度\n"
+            "## 位置模式说明\n"
+            "- absolute: 绝对坐标 (x,y,z)\n"
+            "- relative: 相对选中实体偏移，如 {\"mode\":\"relative\",\"axis\":\"z\",\"distance\":500} 表示上方 500mm\n"
+            "- selected: 使用选中实体当前位置\n"
+            "## 保留位置\n"
+            "当用户说'位置不变'、'保留位置'时，modify 指令设置 preserve_position=true\n"
         )
 
     @pyqtSlot(str)
@@ -833,9 +1046,35 @@ class AIModelingWindow(QDialog):
                 changes = data.get('changes', {})
                 target = data.get('target', {'mode': 'selected'})
                 if target.get('mode') == 'selected':
+                    preserve = data.get('preserve_position', False)
+                    original_pos = None
+                    selected_keys = get_selected_instance_keys()
+                    if preserve:
+                        original_pos = get_selected_component_position()
+                        if original_pos is None and selected_keys:
+                            record = self._registry.get(selected_keys[0])
+                            if record:
+                                p = record.get('placement', {})
+                                original_pos = (float(p.get('x', 0)), float(p.get('y', 0)), float(p.get('z', 0)))
                     ok, msg = modify_selected_component(changes)
                     self._append_system(f"{'✅' if ok else '❌'} {msg}",
                                         "#2E7D32" if ok else "#d32f2f")
+                    if ok and preserve and original_pos is not None and selected_keys:
+                        try:
+                            record = self._registry.get(selected_keys[0])
+                            if record:
+                                record['placement'] = {
+                                    'x': float(original_pos[0]),
+                                    'y': float(original_pos[1]),
+                                    'z': float(original_pos[2]),
+                                }
+                                self._registry.save()
+                                self._append_system(f"📍 已保留原位置: ({original_pos[0]:.1f}, {original_pos[1]:.1f}, {original_pos[2]:.1f})")
+                        except Exception as e:
+                            _log(f"_execute_ai_json preserve_position error: {e}")
+                return
+            elif action == 'copy':
+                self._execute_local_copy(data, "AI指令")
                 return
             elif action == 'delete':
                 self._append_system("❌ 删除功能暂不支持（BIMBase未提供删除API）", "#d32f2f")
@@ -858,6 +1097,56 @@ class AIModelingWindow(QDialog):
         self.chat_display.clear()
         self.chat_history.clear()
         self._show_welcome()
+
+    def _clear_ai_cache(self):
+        """清理 AI 建模缓存：注册表 + 日志"""
+        try:
+            from PyQt5.QtWidgets import QMessageBox
+            _Qt = 5
+        except ImportError:
+            from PyQt6.QtWidgets import QMessageBox
+            _Qt = 6
+
+        reply = QMessageBox.question(
+            self,
+            "确认清理缓存",
+            "确定要清空 AI 建模的组件注册表和日志文件吗？\n（不会删除 BIMBase 中已生成的几何体）",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        cleared = []
+        try:
+            count = self._registry.clear()
+            cleared.append(f"注册表记录 {count} 条")
+        except Exception as e:
+            _log(f"_clear_ai_cache registry error: {e}")
+            self._append_system(f"❌ 清空注册表失败: {e}", "#d32f2f")
+
+        log_files = [
+            'ai_modeling.log',
+            'ai_modeling_debug.log',
+            'debug_selection.log',
+            'ai_modeling_config_debug.log',
+        ]
+        removed_logs = 0
+        for name in log_files:
+            path = os.path.join(_plugin_dir, name)
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+                    removed_logs += 1
+            except Exception as e:
+                _log(f"_clear_ai_cache remove log {name} error: {e}")
+        if removed_logs > 0:
+            cleared.append(f"日志文件 {removed_logs} 个")
+
+        if cleared:
+            self._append_system(f"🧹 已清理：{', '.join(cleared)}")
+        else:
+            self._append_system("🧹 没有需要清理的缓存")
 
     def closeEvent(self, event):
         # 停止线程
