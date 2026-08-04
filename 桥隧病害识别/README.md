@@ -31,13 +31,36 @@
 ├── 桥隧病害识别_使用说明.md      # 原始使用说明
 ├── models/
 │   └── yolov8n.pt               # 预训练权重
+├── datasets/                    # 从巡检报告提取的病害照片数据集
+│   └── bridge_disease/
+│       ├── raw/all/             # 全部导出图片
+│       ├── raw/disease_closeup/ # 病害特写照片
+│       ├── raw/bridge_overview/ # 桥梁整体照片
+│       ├── by_component/        # 按构件类型分类
+│       ├── by_disease/          # 按病害类型分类
+│       ├── split/train/         # 训练集
+│       ├── split/test/          # 测试集
+│       ├── labels.json          # 结构化标签
+│       └── labels.csv           # CSV 格式标签
 ├── training/
+│   ├── extract_dataset.py       # 从 Word 巡检报告提取图片并分类
 │   ├── train_disease_yolo.py    # YOLO 训练脚本
 │   └── download_datasets.py     # 数据集下载
 ├── Picture/
 │   └── 桥隧识别.ico              # 图标
 └── docs/                        # 技术文档
 ```
+
+## 投影测试组件
+
+用于验证病害投影效果的 4 个简化参数化组件位于 `组件测试/` 目录下，并注册在 `组件测试.pyplugin` 的“桥隧投影测试”面板：
+
+- `投影测试T梁`
+- `投影测试横隔板`
+- `投影测试湿接缝`
+- `投影测试墩柱`
+
+`face_projection.py` 已同步增加对应的面信息，可在 BIMBase 中选中组件后点击“投影到BIMBase”验证效果。详见 `组件测试/docs/投影测试组件说明.md`。
 
 ## 入口
 

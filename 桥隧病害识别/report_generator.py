@@ -333,6 +333,12 @@ class ReportGenerator:
             if getattr(r, "ai_diagnosed", False):
                 info.append(("AI 智能诊断", getattr(r, "ai_diagnosis", "") or "已诊断"))
 
+            # 每条记录附带对应的处理建议（按病害类型+严重程度）
+            advice_map = DISEASE_TREATMENT_ADVICE.get(r.disease_class, {})
+            advice = advice_map.get(severity) or advice_map.get("中等") or ""
+            if advice:
+                info.append(("处理建议", advice))
+
             for label, value in info:
                 p = doc.add_paragraph(style='List Bullet')
                 p.add_run(f"{label}: ").bold = True

@@ -1,0 +1,205 @@
+================================================================================
+  桥隧病害识别 — 数据集建设、模型训练与投影全流程
+  日期：2026-08-04
+  记录范围：桥隧病害识别功能的数据提取 → 人工标注 → 两轮模型训练 →
+           投影测试组件 → 对话框清理与报告优化
+  目的：便于新对话快速恢复上下文，避免重复说明
+================================================================================
+
+
+一、我的需求
+------------
+
+1.1 总体目标（来自早期规划，目标②）
+  - 以手中的桥隧病害照片为例，导入图片后识别病害并在图片上圈出；
+  - 生成检测报告；
+  - 点击投影时，智能投影到 BIMBase 中已布置好的 3D 构件里。
+
+1.2 本轮具体需求（按对话顺序）
+  ① 数据源整理：从 数据参考源/桥隧数据源/ 的巡检报告中提取病害照片并分类，
+     分好训练集和测试集；只保留病害特写和桥梁整体照片。
+  ② 报告参考：利用 6.docx/7.docx/第8册.docx/第9册.docx 作为格式参考。
+  ③ 新建 4 个投影测试组件（T梁、横隔板、湿接缝、墩柱），移到 组件测试/
+     目录并注册到 组件测试.pyplugin 的“桥隧投影测试”面板（含图标按钮）。
+  ④ 训练 YOLO 病害检测模型：先用 CV 伪标签试点，再用人工标注正式训练。
+  ⑤ 本地标注工具：图片选中 → CV 伪标签 → 人工修正 → 导出 YOLO 格式；
+     后续要求增加“已修复”标签。
+  ⑥ 对话框清理功能：一键清理 AI 判定非病害的记录 + 手动删除选中记录。
+  ⑦ 删除记录时同步清除图片上对应的红框。
+  ⑧ 生成报告时，每条记录配一张“单独红框”标注图 + 对应处理建议。
+  ⑨ 本地版本先不提交（过程中），最后一次性提交最新可用版本。
+  ⑩ 有任何问题先问我，确保明白了再执行。
+
+
+二、你暂时做到哪里
+------------------
+
+2.1 数据集建设（已完成）
+  - 新增 桥隧病害识别/training/extract_dataset.py：
+    用 zipfile + XML 解析（不依赖 Word COM，避免宏安全和进程残留），
+    从 4 份巡检报告提取图片并按题注关键词分类。
+  - 提取结果：共 2429 张（6.docx 1030 / 7.docx 1087 / 第8册 70 / 第9册 242），
+    病害特写约 1246 张。
+  - 输出到 桥隧病害识别/datasets/bridge_disease/：
+    raw/all、raw/disease_closeup、raw/bridge_overview、
+    by_component/（T梁683、横隔板197、墩柱90、湿接缝55、其他503）、
+    by_disease/（剥落556、裂缝302、锈蚀112、蜂窝麻面57、渗水30、露筋15、未分类456）、
+    split/train+test、labels.json、labels.csv。
+  - 注意：extract_dataset.py 首次用 Word COM 失败时，Word 把 6.docm/7.docm
+    自动另存为 .docx（用户已确认用 docx 格式即可）。
+
+2.2 投影测试组件（已完成）
+  - 新建 4 个组件并放在 组件测试/ 目录：
+    投影测试T梁.py、投影测试横隔板.py、投影测试湿接缝.py、投影测试墩柱.py。
+  - 已注册到 组件测试.pyplugin 的“桥隧投影测试”面板，含 4 个 .ico 图标
+    （组件测试/Picture/，由 _generate_projection_icons.py 生成）。
+  - 组件测试/docs/投影测试组件说明.md 已建。
+  - 关键教训：pyp3d 的 Cube() 原点在**角点**而非几何中心！
+    第一版 T 梁因按“中心原点”写 translate，导致底板/腹板/翼缘错位（断开、
+    多出一块长板）。修复为按角点原点：
+      bottom = translate(-dw/2, -L/2, 0)      * scale(dw, L, dh)  * Cube()
+      web    = translate(-tw/2, -L/2, dh)     * scale(tw, L, web_h) * Cube()
+      flange = translate(-fw/2, -L/2, dh+web_h) * scale(fw, L, fh) * Cube()
+    横隔板预留孔、墩柱圆柱也统一为 Z 从 0 起算。
+  - face_projection.py 已同步新增 4 个组件的面信息（bottom/web_side/
+    flange_bottom、front/side、top/side 等）。
+
+2.3 模型训练（已完成两轮）
+  - 训练框架：桥隧病害识别/training/train_disease_yolo.py（本次给 patience
+    加了命令行参数，0=关闭早停）。
+  - 第 1 轮（CV 伪标签试点）：
+    generate_yolo_pseudo_labels.py 用 cv_anomaly_detector 生成伪框，
+    每类约 100 张，训练集 372 张 / 3389 框。mAP50 仅 0.004，证明流程通。
+  - 第 2 轮（第一轮人工标注 683 张，921 框）：
+    prepare_manual_dataset.py 整理（546 训练 / 137 验证）。
+    训练 41 epoch 早停（patience=20），best 在 epoch 21。
+    mAP50 = 0.38。已复制为 models/disease_yolov8n.pt。
+  - 第 3 轮（合并数据集 873 张，1285 框）：
+    用户补充标注在 人工标注数据集00/（586 张，其中 395 张与旧数据重复、
+    图片 MD5 相同但标签已修正，190 张全新）。
+    merge_manual_datasets.py 合并：重复图片用新标签，其余取并集。
+    从第 2 轮 best.pt 继续 fine-tune，50 epoch 全部跑完（patience=0）。
+    best 在 epoch 38。
+  - 公平对比（同一验证集 175 张）：
+      旧模型(683张) mAP50=0.202 / 新模型(873张) mAP50=0.312，全面提升：
+      裂缝 0.29→0.51、剥落 0.22→0.32、渗水 0.23→0.27、
+      锈蚀 0.48→0.76、已修复 0.20→0.33、露筋/蜂窝麻面仍为 0（样本 <12）。
+    新模型已接入 桥隧病害识别/models/disease_yolov8n.pt，
+    旧模型备份为 models/disease_yolov8n_round1_backup.pt。
+  - 新增 training/training_progress.py：随时查看 results.csv 训练进度。
+  - 注意：disease_detector.py 默认模型路径就是 models/disease_yolov8n.pt，
+    可直接被对话框的 YOLO 模式加载，CPU 推理。
+
+2.4 本地标注工具（已完成）
+  - 桥隧病害识别/training/local_annotator.py：
+    PyQt5 GUI，打开图片目录 → 生成 CV 伪标签 → 人工增删改框 →
+    保存 YOLO 标签 → 导出 images/labels/data.yaml。
+    病害类别共 7 类：裂缝/剥落/露筋/蜂窝麻面/渗水/锈蚀/已修复（绿色）。
+    也支持命令行批量生成伪标签。
+  - local_annotator_README.md、人工标注指南.md 已建。
+  - 如需 exe：pip install pyinstaller 后
+    pyinstaller --onefile --windowed local_annotator.py。
+
+2.5 对话框功能优化（已完成）
+  - disease_marker.py：修复 'P3DInstanceKey' object has no attribute '_data'。
+    根因是 component_key 是 P3DInstanceKey 对象，`if component_key:` 和
+    `str(component_key)` 会触发 __len__ 访问不存在的 _data。
+    修复：`if component_key is not None:` + try/except 安全转字符串（两处）。
+  - disease_dialog.py 新增：
+    a) “🧹 清理AI判定非病害”按钮：删除 ai_diagnosis/note 含“疑似正常、
+       正常纹理、正常标记、文字标记、无明显病害、非病害”等关键词的记录。
+    b) “❌ 删除选中记录”按钮：删除表格中选中行（支持 Ctrl 多选）。
+    c) 记录中保存结构化 bbox=(x1,y1,x2,y2)；
+       新增 _redraw_marked_image()，删除记录后在原图上重绘红框，
+       使红框与记录一一对应（红框标签同步当前病害类型）。
+    d) 生成报告时，为每条带 bbox 的记录生成“单独红框”图片
+       （只圈该条病害，标签为“病害类型 #序号”）。
+  - report_generator.py：每条记录下新增“处理建议”行
+    （按病害类型+严重程度从 DISEASE_TREATMENT_ADVICE 匹配）。
+  - test_t_beam_workflow.py：全流程验证（CV 检测/面投影/报告）通过。
+  - test_t_beam_projection.py：T 梁专用投影脚本（按片位置等比映射到腹板侧面），
+    用 CADBoard/bimbase_sync.py 的 _PlaceToDirect 自动放置红色小球点云。
+    关键教训：`from bimbase_sync import _PlaceToDirect` 是值导入拿到 None，
+    必须 `import bimbase_sync as m; m._ensure_place_to_direct(); m._PlaceToDirect(...)`。
+
+
+三、技术栈与关键实现
+--------------------
+
+3.1 环境
+  - BIMBase Plugin SDK 1.6.2，pyp3d（BIMBase 内置 python-3.7.9-embed-amd64）
+  - 开发机 Python：D:\zengpython3.13.2（装了 ultralytics 8.4.58、torch cpu、
+    opencv-python、PyQt5、python-docx、Pillow、pywin32）
+  - 训练设备：CPU（无 GPU）
+
+3.2 数据提取（关键点）
+  - .docx/.docm 本质是 ZIP，用 zipfile 读 word/media/* 出图，
+    解析 word/document.xml 的 <w:drawing>/<a:blip r:embed> 关联题注，
+    比 Word COM 稳定（COM 会遇到宏安全、'文件已被删除'、进程残留）。
+
+3.3 模型训练（关键点）
+  - YOLO 数据集标准结构：images/{train,val} + labels/{train,val} + data.yaml。
+  - data.yaml 的 path 必须是实际目录（人工标注数据集00 的 data.yaml 路径
+    与实际文件夹名不一致，已重新生成）。
+  - fine-tune 从上一轮 best.pt 继续会经历“先降后升”；
+    不同验证集之间 mAP 不可直接比较，必须在同一验证集评估对比。
+  - 露筋(12框)、蜂窝麻面(7框)样本太少，模型还学不会，需继续补标。
+
+3.4 BIMBase 放置（关键点）
+  - place() 会进入手动布置工具；自动放置要用 _PlaceToDirect
+    （create_component + 设置 TRANSFORMATION + UnifiedFunction create）。
+  - 组件类必须在模块级别定义，BIMBase 才能序列化。
+  - Cube() 原点是角点；球体用 Sphere()；颜色用 .color(r,g,b,a)（0~1）。
+
+3.5 对话框记录结构（关键点）
+  - self.records 为 dict 列表，字段：id/photo/marked_image/component/
+    component_no/disease/severity/position/size/bbox/note/time/
+    ai_diagnosed/ai_diagnosis。
+  - AI 非病害判定：ai_diagnosis 或 note 含“疑似正常/正常纹理/正常标记/
+    文字标记/无明显病害/非真实病害/非病害”等关键词。
+
+
+四、本地版本管理
+----------------
+
+  - 仓库根目录：C:\ProgramData\PKPM\BIMBase\Plugins\Pro\V1.6\pythonplugin\
+  - 本轮结束时已提交一次（最新可用版本）：
+    提交信息：feat(桥隧病害识别): 数据集建设+两轮YOLO训练+投影组件+对话框清理与报告优化
+  - .gitignore 已更新，排除：
+    datasets/、runs/、training/runs/、disease_config.json（含密钥）、
+    disease_records.json、component_registry.json、training/yolov8n.pt、
+    CADBoard/test_place_to_output.txt。
+  - 入库的关键产物：4 个投影组件及图标、extract/merge/prepare/训练/进度/
+    标注工具脚本、训练好的 models/disease_yolov8n.pt（6.3MB）及备份、
+    对话框与报告生成器代码修改、相关文档。
+  - 未执行 git push（GitHub Token 仍未配置）。
+
+
+五、过程文件
+------------
+
+  - 本文件即为 桥隧03 过程文件。
+  - 路径：docs/对话记录/桥隧03.txt
+  - 相关前序文件：
+    docs/对话记录/对话记录_20260620.txt（三大目标与当前阶段限定）
+    docs/对话记录/桥隧01、桥隧02（更早的病害识别探索）
+
+
+六、后续建议与待确认
+--------------------
+
+  1. 继续补标：露筋、蜂窝麻面（目前 <12 框），以及渗水、已修复，
+     然后在合并数据集上再训一轮。
+  2. 对话框 YOLO 检测的置信度阈值可从 0.25 降到 0.15，
+     以检出更多剥落/渗水（误检会增加，需用户确认）。
+  3. 病害投影到真实桥梁构件（非测试组件）的像素→3D 表面映射尚未做，
+     目前 test_t_beam_projection.py 只做了等比映射到测试 T 梁腹板侧面。
+  4. AI 智能诊断的 API Key 已配置在 disease_config.json（不入库），
+     若失效需在对话框“配置 AI Key”里更新。
+  5. 若要把对话框里的“桥隧病害识别”与 trained YOLO 模型联调，
+     可在 BIMBase 中实测检测效果并反馈问题。
+
+
+================================================================================
+  本文件由 Kimi Code CLI 根据 2026-08-04 对话整理生成
+================================================================================

@@ -73,6 +73,10 @@ class FaceProjectionEngine:
         '正方体': 'front',
         '圆柱': 'front',
         '直角三棱柱': 'side_a',
+        '投影测试T梁': 'bottom',
+        '投影测试横隔板': 'front',
+        '投影测试湿接缝': 'top',
+        '投影测试墩柱': 'front',
     }
 
     def __init__(self, component_type: str, params: dict,
@@ -353,6 +357,164 @@ class FaceProjectionEngine:
             width=hyp,
             height=h,
             u_axis=(a / hyp, -b / hyp, 0),   # 沿斜边方向
+            v_axis=(0, 0, 1),
+        )
+
+    # ---------- 投影测试T梁 ----------
+
+    def _get_投影测试T梁_bottom_face(self) -> FaceInfo:
+        """梁底面（仰视拍摄时的主要投影面），底面位于组件基准点 Z=base_z"""
+        L = float(self.params.get('梁长', 3000))
+        dw = float(self.params.get('底板宽', 80))
+        return FaceInfo(
+            face_name='bottom',
+            plane='xy',
+            center=(self.base_x, self.base_y, self.base_z),
+            normal=(0, 0, -1),
+            width=dw,
+            height=L,
+            u_axis=(1, 0, 0),
+            v_axis=(0, 1, 0),
+        )
+
+    def _get_投影测试T梁_web_side_face(self) -> FaceInfo:
+        """腹板侧面（沿 X 方向看，位于腹板一侧）"""
+        L = float(self.params.get('梁长', 3000))
+        tw = float(self.params.get('腹板宽', 20))
+        dh = float(self.params.get('底板高', 25))
+        fh = float(self.params.get('翼缘高', 20))
+        H = float(self.params.get('总高', 160))
+        web_h = H - dh - fh
+        return FaceInfo(
+            face_name='web_side',
+            plane='yz',
+            center=(self.base_x - tw / 2, self.base_y, self.base_z + dh + web_h / 2),
+            normal=(-1, 0, 0),
+            width=L,
+            height=web_h,
+            u_axis=(0, 1, 0),
+            v_axis=(0, 0, 1),
+        )
+
+    def _get_投影测试T梁_flange_bottom_face(self) -> FaceInfo:
+        """翼缘底面（掉角、剥落常见位置）"""
+        L = float(self.params.get('梁长', 3000))
+        fw = float(self.params.get('翼缘宽', 200))
+        dh = float(self.params.get('底板高', 25))
+        fh = float(self.params.get('翼缘高', 20))
+        H = float(self.params.get('总高', 160))
+        web_h = H - dh - fh
+        return FaceInfo(
+            face_name='flange_bottom',
+            plane='xy',
+            center=(self.base_x, self.base_y, self.base_z + dh + web_h),
+            normal=(0, 0, -1),
+            width=fw,
+            height=L,
+            u_axis=(1, 0, 0),
+            v_axis=(0, 1, 0),
+        )
+
+    # ---------- 投影测试横隔板 ----------
+
+    def _get_投影测试横隔板_front_face(self) -> FaceInfo:
+        """横隔板大桩号面/小桩号面（Y 方向正面）"""
+        W = float(self.params.get('宽度', 200))
+        H = float(self.params.get('高度', 160))
+        T = float(self.params.get('厚度', 20))
+        return FaceInfo(
+            face_name='front',
+            plane='xz',
+            center=(self.base_x, self.base_y - T / 2, self.base_z + H / 2),
+            normal=(0, -1, 0),
+            width=W,
+            height=H,
+            u_axis=(1, 0, 0),
+            v_axis=(0, 0, 1),
+        )
+
+    def _get_投影测试横隔板_side_face(self) -> FaceInfo:
+        """横隔板侧面（X 方向）"""
+        W = float(self.params.get('宽度', 200))
+        H = float(self.params.get('高度', 160))
+        T = float(self.params.get('厚度', 20))
+        return FaceInfo(
+            face_name='side',
+            plane='yz',
+            center=(self.base_x - W / 2, self.base_y, self.base_z + H / 2),
+            normal=(-1, 0, 0),
+            width=T,
+            height=H,
+            u_axis=(0, 1, 0),
+            v_axis=(0, 0, 1),
+        )
+
+    # ---------- 投影测试湿接缝 ----------
+
+    def _get_投影测试湿接缝_top_face(self) -> FaceInfo:
+        """湿接缝顶面"""
+        L = float(self.params.get('长度', 3000))
+        top_w = float(self.params.get('顶宽', 50))
+        H = float(self.params.get('高度', 80))
+        return FaceInfo(
+            face_name='top',
+            plane='xy',
+            center=(self.base_x, self.base_y, self.base_z + H),
+            normal=(0, 0, 1),
+            width=top_w,
+            height=L,
+            u_axis=(1, 0, 0),
+            v_axis=(0, 1, 0),
+        )
+
+    def _get_投影测试湿接缝_side_face(self) -> FaceInfo:
+        """湿接缝侧面（X 方向）"""
+        L = float(self.params.get('长度', 3000))
+        top_w = float(self.params.get('顶宽', 50))
+        bottom_w = float(self.params.get('底宽', 30))
+        H = float(self.params.get('高度', 80))
+        # 侧面取梯形中位宽
+        mid_w = (top_w + bottom_w) / 2
+        return FaceInfo(
+            face_name='side',
+            plane='xz',
+            center=(self.base_x - mid_w / 2, self.base_y, self.base_z + H / 2),
+            normal=(-1, 0, 0),
+            width=L,
+            height=H,
+            u_axis=(0, 1, 0),
+            v_axis=(0, 0, 1),
+        )
+
+    # ---------- 投影测试墩柱 ----------
+
+    def _get_投影测试墩柱_front_face(self) -> FaceInfo:
+        """墩柱正面（圆柱近似为矩形面）"""
+        D = float(self.params.get('柱径', 120))
+        H = float(self.params.get('柱高', 800))
+        return FaceInfo(
+            face_name='front',
+            plane='xz',
+            center=(self.base_x, self.base_y - D / 2, self.base_z + H / 2),
+            normal=(0, -1, 0),
+            width=D,
+            height=H,
+            u_axis=(1, 0, 0),
+            v_axis=(0, 0, 1),
+        )
+
+    def _get_投影测试墩柱_side_face(self) -> FaceInfo:
+        """墩柱侧面展开（圆柱近似）"""
+        D = float(self.params.get('柱径', 120))
+        H = float(self.params.get('柱高', 800))
+        return FaceInfo(
+            face_name='side',
+            plane='xz',
+            center=(self.base_x - D / 2, self.base_y, self.base_z + H / 2),
+            normal=(-1, 0, 0),
+            width=math.pi * D,
+            height=H,
+            u_axis=(0, 1, 0),
             v_axis=(0, 0, 1),
         )
 

@@ -240,7 +240,24 @@ class DiseaseDialog(QDialog):
 
         self.lbl_count = QLabel("共 0 条记录")
         v.addWidget(self.lbl_count)
-        
+
+        # 清理按钮行
+        row_clean = QHBoxLayout()
+        self.btn_clean_ai = QPushButton("🧹 清理AI判定非病害")
+        self.btn_clean_ai.setStyleSheet("QPushButton{background:#EF6C00;color:white;font-weight:bold;}")
+        self.btn_clean_ai.setToolTip(
+            "一键删除 AI 诊断为“疑似正常纹理/标记、无明显病害”的记录及其对应标注"
+        )
+        self.btn_clean_ai.clicked.connect(self._on_clean_ai_non_disease)
+        row_clean.addWidget(self.btn_clean_ai)
+
+        self.btn_delete_selected = QPushButton("❌ 删除选中记录")
+        self.btn_delete_selected.setStyleSheet("QPushButton{background:#616161;color:white;font-weight:bold;}")
+        self.btn_delete_selected.setToolTip("删除表格中当前选中的一条或多条记录")
+        self.btn_delete_selected.clicked.connect(self._on_delete_selected_records)
+        row_clean.addWidget(self.btn_delete_selected)
+        v.addLayout(row_clean)
+
         # 投影按钮
         self.btn_project = QPushButton("📍 投影选中记录到BIMBase")
         self.btn_project.setMinimumHeight(36)
@@ -421,6 +438,7 @@ class DiseaseDialog(QDialog):
                     "severity": severity,
                     "position": f"像素坐标: x={x1}, y={y1}",
                     "size": f"宽{w} × 高{h} 像素",
+                    "bbox": (x1, y1, x2, y2),
                     "note": f"自动识别第 {idx} 处异常区域，置信度 {r.confidence:.2f}",
                     "time": datetime.now().strftime("%Y-%m-%d %H:%M"),
                     "ai_diagnosed": False,
@@ -597,6 +615,106 @@ class DiseaseDialog(QDialog):
         self.table.resizeColumnsToContents()
         self.lbl_count.setText(f"共 {len(self.records)} 条记录")
 
+    # ============================================================
+    # 标注图红框同步
+    # ============================================================
+
+    def _records_for_current_photo_with_bbox(self):
+        """返回当前照片且带 bbox 的记录。"""
+        return [r for r in self.records
+                if r.get("photo") == self.current_image_path
+                and r.get("bbox") is not None]
+
+    def _draw_boxes_on_photo(self, photo_path, boxes_with_labels, output_path=None):
+        """
+        在原图上绘制若干 (bbox, label) 红框，返回输出路径。
+
+        Args:
+            photo_path: 原图路径
+            boxes_with_labels: [(x1, y1, x2, y2, label), ...]
+            output_path: 输出路径，None 则存临时目录
+        """
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+        except ImportError:
+            return None
+
+        try:
+            img = Image.open(photo_path).convert('RGB')
+        except Exception:
+            return None
+
+        draw = ImageDraw.Draw(img)
+        try:
+            font = ImageFont.truetype("simhei.ttf", 18)
+        except Exception:
+            try:
+                font = ImageFont.truetype("msyh.ttf", 18)
+            except Exception:
+                font = ImageFont.load_default()
+
+        color = (255, 0, 0)
+        for (x1, y1, x2, y2, label) in boxes_with_labels:
+            for t in range(3):
+                draw.rectangle([x1 - t, y1 - t, x2 + t, y2 + t], outline=color, width=1)
+            bbox_text = draw.textbbox((0, 0), label, font=font)
+            tw, th = bbox_text[2] - bbox_text[0], bbox_text[3] - bbox_text[1]
+            draw.rectangle([x1, y1 - th - 6, x1 + tw + 6, y1], fill=color)
+            draw.text((x1 + 3, y1 - th - 3), label, fill=(255, 255, 255), font=font)
+
+        if output_path is None:
+            import tempfile
+            base = os.path.splitext(os.path.basename(photo_path))[0]
+            output_path = os.path.join(tempfile.gettempdir(), f"{base}_sync.jpg")
+
+        try:
+            img.save(output_path, quality=95)
+            return output_path
+        except Exception:
+            return None
+
+    def _redraw_marked_image(self):
+        """
+        根据当前照片对应的剩余记录，重新绘制标注图，
+        使红框与记录一一对应（删除记录后同步清除红框）。
+        """
+        if not self.current_image_path:
+            return
+
+        records = self._records_for_current_photo_with_bbox()
+        if not records:
+            # 没有记录了，恢复原图显示
+            pix = QPixmap(self.current_image_path)
+            if not pix.isNull():
+                scaled = pix.scaled(
+                    self.scroll.width() - 20, self.scroll.height() - 20,
+                    Qt.KeepAspectRatio, Qt.SmoothTransformation
+                )
+                self.lbl_image.setPixmap(scaled)
+            self.current_marked_image_path = ""
+            return
+
+        boxes = []
+        for r in records:
+            x1, y1, x2, y2 = r["bbox"]
+            label = f"{r.get('disease', '异常区域')}"
+            boxes.append((x1, y1, x2, y2, label))
+
+        out = self._draw_boxes_on_photo(self.current_image_path, boxes)
+        if out and os.path.exists(out):
+            self.current_marked_image_path = out
+            # 更新所有记录的 marked_image 指向新图
+            for r in self.records:
+                if r.get("photo") == self.current_image_path:
+                    r["marked_image"] = out
+            pix = QPixmap(out)
+            if not pix.isNull():
+                scaled = pix.scaled(
+                    self.scroll.width() - 20, self.scroll.height() - 20,
+                    Qt.KeepAspectRatio, Qt.SmoothTransformation
+                )
+                self.lbl_image.setPixmap(scaled)
+
     def _on_clear_records(self):
         if not self.records:
             return
@@ -604,6 +722,84 @@ class DiseaseDialog(QDialog):
         if reply == QMessageBox.Yes:
             self.records.clear()
             self._refresh_table()
+            self._redraw_marked_image()
+            self.btn_report.setEnabled(False)
+
+    # AI 判定“非病害”的关键词（出现在 ai_diagnosis / note 中即认为非病害）
+    _AI_NON_DISEASE_KEYWORDS = [
+        "疑似正常",
+        "正常纹理",
+        "正常标记",
+        "文字标记",
+        "无明显病害",
+        "非真实病害",
+        "非病害",
+        "非结构病害",
+        "不属于病害",
+    ]
+
+    def _is_ai_non_disease(self, record: dict) -> bool:
+        """判断记录是否被 AI 诊断为非病害（正常纹理/标记等）。"""
+        if not record.get("ai_diagnosed", False):
+            return False
+        text = (record.get("ai_diagnosis", "") or "") + " " + (record.get("note", "") or "")
+        return any(kw in text for kw in self._AI_NON_DISEASE_KEYWORDS)
+
+    def _on_clean_ai_non_disease(self):
+        """一键清理 AI 判定为非病害的记录。"""
+        if not self.records:
+            QMessageBox.information(self, "提示", "当前没有记录")
+            return
+
+        to_remove = [r for r in self.records if self._is_ai_non_disease(r)]
+        if not to_remove:
+            QMessageBox.information(
+                self, "提示",
+                "没有找到 AI 判定为非病害的记录。\n"
+                "（需先执行【AI 智能诊断】，且诊断结论包含“疑似正常纹理/标记”等）"
+            )
+            return
+
+        reply = QMessageBox.question(
+            self, "确认清理",
+            f"共找到 {len(to_remove)} 条 AI 判定为非病害的记录，确定删除？\n\n"
+            f"删除后不可恢复。"
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        self.records = [r for r in self.records if not self._is_ai_non_disease(r)]
+        self._refresh_table()
+        self._redraw_marked_image()
+        if not self.records:
+            self.btn_report.setEnabled(False)
+        QMessageBox.information(self, "完成", f"已清理 {len(to_remove)} 条 AI 判定非病害的记录")
+
+    def _on_delete_selected_records(self):
+        """手动删除表格中选中的记录。"""
+        if not self.records:
+            QMessageBox.information(self, "提示", "当前没有记录")
+            return
+
+        selected_rows = sorted({idx.row() for idx in self.table.selectedIndexes()}, reverse=True)
+        if not selected_rows:
+            QMessageBox.information(self, "提示", "请先在表格中选中要删除的记录（可按住 Ctrl 多选）")
+            return
+
+        reply = QMessageBox.question(
+            self, "确认删除",
+            f"确定删除选中的 {len(selected_rows)} 条记录？\n\n删除后不可恢复。"
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        for row in selected_rows:
+            if 0 <= row < len(self.records):
+                del self.records[row]
+
+        self._refresh_table()
+        self._redraw_marked_image()
+        if not self.records:
             self.btn_report.setEnabled(False)
 
     def _on_generate_report(self):
@@ -612,21 +808,42 @@ class DiseaseDialog(QDialog):
             return
 
         # 组装为MarkerRecord格式
+        # 为每条带 bbox 的记录生成“单独红框”图片，报告中一条记录对应一张红框图+建议
+        import tempfile
         mr_list = []
-        for r in self.records:
+        for idx, r in enumerate(self.records, 1):
             severity = r.get("severity", "轻微")
             confidence = {"轻微": 0.3, "中等": 0.55, "严重": 0.8, "极严重": 0.95}.get(severity, 0.5)
+
+            bbox = r.get("bbox")
+            marked_path = r.get("marked_image", "")
+            photo_path = r.get("photo", "")
+
+            # 如果有 bbox 和原图，生成只含该记录红框的单独图片
+            if bbox is not None and photo_path and os.path.exists(photo_path):
+                x1, y1, x2, y2 = bbox
+                label = f"{r.get('disease', '异常区域')} #{idx}"
+                out_path = os.path.join(
+                    tempfile.gettempdir(),
+                    f"disease_single_{r['id']}.jpg"
+                )
+                single = self._draw_boxes_on_photo(
+                    photo_path, [(x1, y1, x2, y2, label)], output_path=out_path
+                )
+                if single and os.path.exists(single):
+                    marked_path = single
+
             mr_list.append(MarkerRecord(
                 record_id=r["id"],
-                photo_path=r["photo"],
+                photo_path=photo_path,
                 component_type=r["component"],
                 component_key=r["component_no"],
                 disease_class=r["disease"],
                 confidence=confidence,
-                bbox=(0, 0, 0, 0),
+                bbox=tuple(bbox) if bbox is not None else (0, 0, 0, 0),
                 marker_x=0, marker_y=0, marker_z=0,
                 created_at=r["time"],
-                marked_image_path=r.get("marked_image", ""),
+                marked_image_path=marked_path,
                 ai_diagnosis=r.get("ai_diagnosis", ""),
                 ai_diagnosed=r.get("ai_diagnosed", False),
                 severity=severity,

@@ -28,6 +28,25 @@ dlls.txt
 # 大数据集
 datasets/
 
+# 大型源数据（巡检报告 docx，体积过大，单独管理）
+数据参考源/桥隧数据源/*.docx
+数据参考源/桥隧数据源/*.docm
+
+# 训练输出（权重/缓存/可视化，体积大且可再生）
+runs/
+桥隧病害识别/training/runs/
+
+# 密钥与运行时数据（不入库）
+桥隧病害识别/disease_config.json
+桥隧病害识别/disease_records.json
+component_registry.json
+AI_Modeling/component_registry.json
+CADBoard/component_registry.json
+CADBoard/test_place_to_output.txt
+
+# 训练时自动下载的预训练权重副本（正式权重在 models/ 下）
+桥隧病害识别/training/yolov8n.pt
+
 # 第三方软件资源（体积过大，单独管理）
 OrcaSlicer/
 

@@ -531,11 +531,24 @@ class DiseaseMarkerManager:
             MarkerRecord对象，失败返回None
         """
         import uuid
+
+        # component_key 可能是 P3DInstanceKey 对象，直接 str() 会触发
+        # '_data' 属性访问异常。这里做安全转换。
+        component_key_str = ""
+        if component_key is not None:
+            try:
+                component_key_str = str(component_key)
+            except Exception:
+                try:
+                    component_key_str = repr(component_key)
+                except Exception:
+                    component_key_str = "<unknown_key>"
+
         record = MarkerRecord(
             record_id=str(uuid.uuid4())[:8],
             photo_path=photo_path,
             component_type=component_type,
-            component_key=str(component_key) if component_key else "",
+            component_key=component_key_str,
             disease_class=disease_result.class_name,
             confidence=disease_result.confidence,
             bbox=disease_result.bbox,
@@ -588,11 +601,24 @@ class DiseaseMarkerManager:
             MarkerRecord对象，失败返回None
         """
         import uuid
+
+        # component_key 可能是 P3DInstanceKey 对象，直接 str() 会触发
+        # '_data' 属性访问异常。这里做安全转换。
+        component_key_str = ""
+        if component_key is not None:
+            try:
+                component_key_str = str(component_key)
+            except Exception:
+                try:
+                    component_key_str = repr(component_key)
+                except Exception:
+                    component_key_str = "<unknown_key>"
+
         record = MarkerRecord(
             record_id=str(uuid.uuid4())[:8],
             photo_path=photo_path,
             component_type=component_type,
-            component_key=str(component_key) if component_key else "",
+            component_key=component_key_str,
             disease_class=disease_class,
             confidence=confidence,
             bbox=(0, 0, 0, 0),

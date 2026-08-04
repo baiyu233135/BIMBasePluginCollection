@@ -1,0 +1,121 @@
+================================================================================
+  CAD画板 AI 复合指令解析修复 — 对话记录
+  日期：2026-07-14
+  记录范围：本次对话关于修复 CADBoard 画板 AI 对"改参数+同步到坐标"
+           复合指令的解析错误
+  目的：便于新对话快速恢复上下文，避免重复说明
+================================================================================
+
+
+一、我的需求
+------------
+
+1.1 问题描述
+  - 修复画板 AI 对复合指令的解析。
+  - 典型错误输入示例：
+      "把低柱排数改为1，同步到bimbase(800,200,986)的位置"
+  - 错误现象：
+      - 被错误解析为纯 `sync` 动作，只提取了位置；
+      - 参数（底柱排数）未被修改；
+      - 同步时因元素仍带有 `pdf_recognized` 标记，弹出手动坐标输入框。
+
+1.2 期望行为
+  - 复合指令应优先识别 modify + position 语义；
+  - 解析结果应为 `modify_component`，同时携带参数变更和坐标；
+  - 执行时先修改组件参数，再按指定坐标重新放置并同步到 BIMBase，不弹窗。
+
+
+二、你暂时做到哪里
+------------------
+
+2.1 根因定位
+  - `LocalCommandParser.parse()` 中，"同步"关键字被 `ACTION_MAP` 先匹配到，
+    直接走 sync 分支；
+  - sync 分支虽然会调用 `_parse_modify()` 检查是否为复合指令，但检查条件是
+    `modify_cmd.get('changes') or modify_cmd.get('position')`；
+  - 对于组件参数修改，`_parse_modify()` 返回的是 `{'action':'agent',
+    'tool':'modify_component','params':{...}}`，changes/position 嵌套在
+    `params` 中，导致复合指令检查失败，最终返回纯 sync。
+
+2.2 已完成的修复
+  - 修改文件：
+      CADBoard/utils/ai_panel.py
+      test_parse_cn.py（回归测试）
+  - Git 提交：
+      d449a36 fix(ai_panel): 复合指令优先识别 modify+position，
+              修复同步误解析为纯 sync
+  - 关键改动：
+    a) 复合指令检查同时读取 `params` 内的 `changes` / `position`；
+    b) `_split_target_prop()` 中加入复杂构件参数列表（墩高、盖梁总长、
+       系梁根数、底柱/低柱系列参数等），避免"把低柱排数改为1"被拆错；
+    c) `_parse_property_text()` 中将单独出现的"底柱"映射为"底柱排数"；
+    d) 普通 `modify` 返回结果也携带 `position`，避免坐标丢失。
+
+2.3 验证结果（python test_parse_cn.py）
+  - "把这个组件的底柱改为一，并同步到bimbase(985,211,951)的位置"
+    -> {'action':'agent','tool':'modify_component',
+        'params':{'target':{'component':True},
+                  'changes':{'底柱排数':1.0},
+                  'path':'auto',
+                  'position':{'x':985.0,'y':211.0,'z':951.0}}}
+  - "把低柱排数改为一，同步到bimbase(800,200,986)的位置"
+    -> {'action':'agent','tool':'modify_component',
+        'params':{'target':{'component':True},
+                  'changes':{'底柱排数':1.0},
+                  'path':'auto',
+                  'position':{'x':800.0,'y':200.0,'z':986.0}}}
+  - 纯同步指令仍保持原行为：
+      "同步到bimbase(100,200,300)"
+      -> {'action':'sync','position':{...}}
+
+2.4 工作区清理
+  - `CADBoard/component_registry.json` 已恢复为上次提交状态；
+  - `.dwl` / `.dwl2` 锁文件因 BIMBase/CAD 进程占用无法删除，
+    但它们未被跟踪，不影响后续提交。
+
+
+三、技术栈
+----------
+
+- BIMBase Plugin SDK 1.6.2
+- pyp3d（BIMBase 三维几何内核）
+- Python 3.x
+- PyQt5 / PyQt6（GUI 框架）
+- 核心模块：
+  - CADBoard/utils/ai_panel.py        自然语言解析器（LocalCommandParser）
+  - CADBoard/utils/ai_executor.py     AI 指令执行引擎
+  - CADBoard/utils/bimbase_agent.py   轻量级 BIMBase Agent
+  - CADBoard/bimbase_sync.py          画板同步到 BIMBase
+  - CADBoard/utils/component_registry.py
+  - CADBoard/utils/generated_component_cache.py
+- 参数化组件：组件测试/（引桥桥墩、索缆锚锭等）
+- 运行时缓存：cad组件缓存/
+
+
+四、本地版本管理
+----------------
+
+- Git 仓库根目录：
+    C:\ProgramData\PKPM\BIMBase\Plugins\Pro\V1.6\pythonplugin\
+- 当前相关提交：
+    d449a36 fix(ai_panel): 复合指令优先识别 modify+position，
+            修复同步误解析为纯 sync
+- 工作区状态：
+    - 已干净；
+    - 仅残留被 CAD 占用的未跟踪锁文件（.dwl/.dwl2）。
+
+
+五、CAD画板过程文件
+-------------------
+
+- 本文件即为 CAD03 过程文件。
+- 文件路径：docs/对话记录/CAD03.txt
+- 用途：归档本次 CADBoard 画板 AI 复合指令解析修复的对话背景、
+        需求、进度与技术栈，供后续新对话快速恢复上下文。
+
+
+六、后续说明
+------------
+
+- 如有任何疑问或需要补充的细节，请随时提出；
+- 在执行下一步操作前，我会先确认理解无误再执行。

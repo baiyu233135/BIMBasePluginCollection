@@ -37,13 +37,14 @@ def check_ultralytics():
         return False
 
 
-def train(data_yaml: str, epochs: int = 100, imgsz: int = 640, 
+def train(data_yaml: str, epochs: int = 100, imgsz: int = 640,
           batch: int = 8, device: str = 'cpu', workers: int = 4,
           model_path: str = 'yolov8n.pt',
-          output_dir: str = '../models'):
+          output_dir: str = '../models',
+          patience: int = 20):
     """
     训练YOLOv8n病害检测模型。
-    
+
     Args:
         data_yaml: 数据集配置文件路径
         epochs: 训练轮数
@@ -53,6 +54,7 @@ def train(data_yaml: str, epochs: int = 100, imgsz: int = 640,
         workers: 数据加载线程数
         model_path: 预训练权重路径
         output_dir: 模型输出目录
+        patience: 早停耐心值，0 表示关闭早停（训练完所有 epochs）
     """
     from ultralytics import YOLO
     
@@ -78,7 +80,7 @@ def train(data_yaml: str, epochs: int = 100, imgsz: int = 640,
         batch=batch,
         device=device,
         workers=workers,
-        patience=20,           # 早停耐心值
+        patience=patience,     # 早停耐心值，0=关闭早停
         save=True,
         project=output_dir,
         name='disease_yolov8n',
@@ -139,6 +141,8 @@ def main():
                        help="预训练权重 (默认: yolov8n.pt)")
     parser.add_argument("--output", "-o", default="../models",
                        help="模型输出目录 (默认: ../models)")
+    parser.add_argument("--patience", "-p", type=int, default=20,
+                       help="早停耐心值，0 表示关闭早停 (默认: 20)")
     parser.add_argument("--export", action="store_true",
                        help="训练完成后导出ONNX模型")
     args = parser.parse_args()
@@ -162,6 +166,7 @@ def main():
             workers=args.workers,
             model_path=args.model,
             output_dir=args.output,
+            patience=args.patience,
         )
         
         if args.export:
