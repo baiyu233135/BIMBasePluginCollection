@@ -156,20 +156,23 @@ def _circle_section(radius, segments=32):
 # python_transformation_operation 执行时就能正确找到模块
 
 _CylinderComponent = _BoxComponent = _CubeComponent = _SphereComponent = _ConeComponent = _TriangularPrismComponent = None
+_ApproachPierComponent = None
 
-if _pyp3d_ok:
-    try:
-        from bimbase_sync import (
-            CylinderComponent as _CylinderComponent,
-            BoxComponent as _BoxComponent,
-            CubeComponent as _CubeComponent,
-            SphereComponent as _SphereComponent,
-            ConeComponent as _ConeComponent,
-            TriangularPrismComponent as _TriangularPrismComponent,
-        )
-        _log("component_factory: imported classes from bimbase_sync")
-    except Exception as e:
-        _log(f"component_factory: failed to import from bimbase_sync: {e}")
+# 无论 pyp3d 是否可用都尝试导入（bimbase_sync 自带占位回退，可离线导入），
+# 保证 COMPONENT_CLASSES/COMPONENT_DEFAULTS 注册完整，便于离线测试与诊断。
+try:
+    from bimbase_sync import (
+        CylinderComponent as _CylinderComponent,
+        BoxComponent as _BoxComponent,
+        CubeComponent as _CubeComponent,
+        SphereComponent as _SphereComponent,
+        ConeComponent as _ConeComponent,
+        TriangularPrismComponent as _TriangularPrismComponent,
+        ApproachPierComponent as _ApproachPierComponent,
+    )
+    _log("component_factory: imported classes from bimbase_sync")
+except Exception as e:
+    _log(f"component_factory: failed to import from bimbase_sync: {e}")
 
 # 兜底：如果 bimbase_sync 导入失败且 pyp3d 可用，使用本地定义
 if _CylinderComponent is None and Component is not None:
@@ -307,6 +310,8 @@ COMPONENT_CLASSES = {
     'sphere': _SphereComponent,
     'cone': _ConeComponent,
     'triangular_prism': _TriangularPrismComponent,
+    # 引桥桥墩：类定义在 bimbase_sync.py（DependentFile），BIMBase 才能序列化/放置
+    'pier': _ApproachPierComponent,
 }
 
 COMPONENT_DEFAULTS = {
@@ -316,6 +321,15 @@ COMPONENT_DEFAULTS = {
     'sphere': {'radius': 100},
     'cone': {'radius': 100, 'height': 200},
     'triangular_prism': {'直角边1': 100, '直角边2': 100, '高度': 200},
+    'pier': dict(_ApproachPierComponent.DEFAULT_PARAMS) if _ApproachPierComponent is not None else {
+        '盖梁总长': 1930.0, '盖梁总高': 300.0, '盖梁宽': 300.0,
+        '墩柱直径': 250.0, '墩柱间距': 1140.0, '墩高': 1200.0, '系梁根数': 2,
+    },
+}
+
+# 各组件允许写入的参数键（用于过滤解析器/注册表带入的伪参数与内部键）
+_COMPONENT_ALLOWED_KEYS = {
+    'pier': set(COMPONENT_DEFAULTS['pier'].keys()) | {'偏移X', '偏移Y', '偏移Z'},
 }
 
 # 复杂组件（__init__ 不接受参数，参数通过 Attr 设置）
@@ -390,11 +404,8 @@ def _load_complex_component(file_path, class_name, component_key):
 
 
 # 尝试加载复杂组件（失败不影响基础几何体）
-_load_complex_component(
-    os.path.join(_PROJECT_ROOT, '组件测试', '引桥桥墩.py'),
-    '引桥桥墩',
-    'pier'
-)
+# 注意：引桥桥墩（pier）已改为在 bimbase_sync.py 中定义（BIMBase 序列化要求），
+# 不再走动态加载；索缆锚锭（anchor）暂未迁移，保持原动态加载路径。
 _load_complex_component(
     os.path.join(_PROJECT_ROOT, '组件测试', '索缆锚锭.py'),
     '索塔锚块',
@@ -407,10 +418,22 @@ def _get_valid_kwargs(cls, kwargs):
     try:
         import inspect
         sig = inspect.signature(cls.__init__)
+        # __init__ 含 **kwargs 时放行全部参数（如 ApproachPierComponent）
+        for p in sig.parameters.values():
+            if p.kind == inspect.Parameter.VAR_KEYWORD:
+                return kwargs
         valid = set(sig.parameters.keys()) - {'self'}
         return {k: v for k, v in kwargs.items() if k in valid}
     except Exception:
         return kwargs
+
+
+def _filter_component_params(component_type, params):
+    """过滤不属于该组件的参数（解析器伪参数、注册表带入的内部键等）"""
+    allowed = _COMPONENT_ALLOWED_KEYS.get(component_type)
+    if not allowed or not params:
+        return params
+    return {k: v for k, v in params.items() if k in allowed}
 
 
 def create_component(component_type, params=None):
@@ -425,7 +448,7 @@ def create_component(component_type, params=None):
         return None
     defaults = COMPONENT_DEFAULTS.get(component_type, {}).copy()
     if params:
-        defaults.update(params)
+        defaults.update(_filter_component_params(component_type, params))
 
     try:
         if component_type in _COMPLEX_COMPONENT_TYPES:
@@ -478,6 +501,7 @@ def _infer_component_type_from_comp(comp):
         'SphereComponent': 'sphere',
         'ConeComponent': 'cone',
         'TriangularPrismComponent': 'triangular_prism',
+        'ApproachPierComponent': 'pier',
         '引桥桥墩': 'pier',
         '索塔锚块': 'anchor',
     }
@@ -547,6 +571,34 @@ def _record_placement(comp, x, y, z, eid=None):
         _log(f"_record_placement error: {e}")
 
 
+def _count_entities():
+    """统计当前模型实体数（用于校验放置是否真的成功），失败返回 -1"""
+    try:
+        from pyp3d import get_all_entityid
+        ids = get_all_entityid() or []
+        return len(ids)
+    except Exception as e:
+        _log(f"_count_entities failed: {e}")
+        return -1
+
+
+def _verify_new_entity(before_count):
+    """校验放置后是否真的产生了新实体；before_count < 0 表示无法统计，回退到 entityId 校验"""
+    eid_valid = False
+    try:
+        from pyp3d import get_place_to_entityId
+        eid = get_place_to_entityId()
+        eid_valid = bool(eid) and bool(entityid_isvaid(eid))
+    except Exception as e:
+        _log(f"_verify_new_entity: get_place_to_entityId failed: {e}")
+    if before_count >= 0:
+        after_count = _count_entities()
+        _log(f"_verify_new_entity: before={before_count}, after={after_count}, eid_valid={eid_valid}")
+        return after_count > before_count or eid_valid
+    _log(f"_verify_new_entity: entity count unavailable, eid_valid={eid_valid}")
+    return eid_valid
+
+
 def place_component_at(comp, x, y, z):
     """
     将组件自动布置到指定三维坐标（官方 create_geometry 优先）
@@ -601,10 +653,13 @@ def place_component_at(comp, x, y, z):
         if _PlaceToDirect is not None:
             try:
                 _log(f"place_component_at: trying _PlaceToDirect({x},{y},{z})")
+                before = _count_entities()
                 _PlaceToDirect(comp, translate(float(x), float(y), float(z)))
-                _log("place_component_at: _PlaceToDirect SUCCESS")
-                _record_placement(comp, x, y, z)
-                return True, f"✅ 已自动布置到 ({x}, {y}, {z})"
+                if _verify_new_entity(before):
+                    _log("place_component_at: _PlaceToDirect SUCCESS (verified)")
+                    _record_placement(comp, x, y, z)
+                    return True, f"✅ 已自动布置到 ({x}, {y}, {z})"
+                _log("place_component_at: _PlaceToDirect produced no new entity, falling through")
             except Exception as e:
                 _log(f"place_component_at: _PlaceToDirect failed: {e}")
 
@@ -612,10 +667,13 @@ def place_component_at(comp, x, y, z):
         if place_to is not None:
             try:
                 _log(f"place_component_at: trying place_to({x},{y},{z})")
+                before = _count_entities()
                 place_to(comp, translate(float(x), float(y), float(z)))
-                _log("place_component_at: place_to SUCCESS")
-                _record_placement(comp, x, y, z)
-                return True, f"✅ 已自动布置到 ({x}, {y}, {z})"
+                if _verify_new_entity(before):
+                    _log("place_component_at: place_to SUCCESS (verified)")
+                    _record_placement(comp, x, y, z)
+                    return True, f"✅ 已自动布置到 ({x}, {y}, {z})"
+                _log("place_component_at: place_to produced no new entity, falling through")
             except Exception as e:
                 _log(f"place_component_at: place_to failed: {e}")
 

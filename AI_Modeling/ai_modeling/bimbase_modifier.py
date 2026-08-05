@@ -144,6 +144,11 @@ def infer_component_type_from_params(params):
     if not params:
         return None
     keys = set(params.keys())
+    # 复杂组件（引桥桥墩 / 索缆锚锭）
+    if '盖梁总长' in keys or '墩柱间距' in keys or '系梁根数' in keys:
+        return 'pier'
+    if '锚块总长' in keys or '底柱半径' in keys or '承台长度' in keys:
+        return 'anchor'
     if '半径' in keys and '高度' in keys and '边长' not in keys:
         return 'cylinder'
     if '长度' in keys and '宽度' in keys and '高度' in keys:
@@ -179,6 +184,16 @@ def modify_instance_by_key(instance_key, changes):
             old_params = get_instance_params(instance_key)
             comp_type = infer_component_type_from_params(old_params)
             if not comp_type:
+                # 回退：从注册表记录推断组件类型（AI 放置的组件有记录）
+                try:
+                    from ai_modeling.component_registry import ComponentRegistry
+                    record = ComponentRegistry().get(instance_key)
+                    if record:
+                        comp_type = record.get('component_type')
+                        _log(f"modify_instance_by_key: type from registry = {comp_type}")
+                except Exception as e2:
+                    _log(f"modify_instance_by_key: registry fallback failed: {e2}")
+            if not comp_type:
                 return False, "无法推断组件类型"
 
             # 合并新参数
@@ -207,6 +222,10 @@ def modify_instance_by_key(instance_key, changes):
             modified = False
             for k, v in changes.items():
                 try:
+                    # 跳过不属于该组件的伪参数（如解析器从"墩高2000"套出的 height）
+                    if hasattr(noum, '__contains__') and k not in noum:
+                        _log(f"  skip {k}: not a component key")
+                        continue
                     noum[k] = v
                     modified = True
                 except Exception as e2:

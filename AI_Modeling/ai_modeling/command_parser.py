@@ -46,6 +46,42 @@ class ModelingCommandParser:
     ]
 
     @classmethod
+    def _cn_section_to_int(cls, section):
+        """把不超过“万”的汉字数字段转为整数，如 三百二十 -> 320、十五 -> 15、两 -> 2"""
+        digit = {'零': 0, '一': 1, '二': 2, '两': 2, '三': 3, '四': 4,
+                 '五': 5, '六': 6, '七': 7, '八': 8, '九': 9}
+        unit = {'十': 10, '百': 100, '千': 1000}
+        total = 0
+        num = 0
+        for ch in section:
+            if ch in digit:
+                num = digit[ch]
+            elif ch in unit:
+                if num == 0:
+                    num = 1
+                total += num * unit[ch]
+                num = 0
+            else:
+                return None
+        return total + num
+
+    @classmethod
+    def _replace_chinese_numerals(cls, text):
+        """把文本中的汉字数字（零一二两三四五六七八九十百千万）替换为阿拉伯数字"""
+        def _conv(m):
+            s = m.group(0)
+            if '万' in s:
+                left, _, right = s.partition('万')
+                lv = cls._cn_section_to_int(left) if left else 1
+                rv = cls._cn_section_to_int(right) if right else 0
+                if lv is None or rv is None:
+                    return s
+                return str(lv * 10000 + rv)
+            v = cls._cn_section_to_int(s)
+            return str(v) if v is not None else s
+        return re.sub(r'[零一二两三四五六七八九十百千万]+', _conv, text)
+
+    @classmethod
     def parse(cls, text):
         """
         解析自然语言，返回结构化命令字典
@@ -59,6 +95,8 @@ class ModelingCommandParser:
         }
         """
         text = text.strip().lower().replace('，', ',').replace('（', '(').replace('）', ')')
+        # 汉字数字转阿拉伯数字（如“间隔二十米放置五个”→“间隔20米放置5个”）
+        text = cls._replace_chinese_numerals(text)
 
         result = {
             'action': None,
@@ -525,11 +563,14 @@ class ModelingCommandParser:
         if m:
             spacing = cls._parse_length_with_unit(m.group(1), text)
 
-        # 共 N 个
-        count_pat = r'(?:共|生成)\s*(\d+)\s*个'
-        m = re.search(count_pat, text)
-        if m:
-            count = int(m.group(1))
+        # 数量：优先“共 N 个”（明确总数），其次动作词+N个，最后通用“N 个”回退
+        for count_pat in (r'共\s*(\d+)\s*个',
+                          r'(?:生成|放置|布置)\s*(\d+)\s*个',
+                          r'(\d+)\s*个'):
+            m = re.search(count_pat, text)
+            if m:
+                count = int(m.group(1))
+                break
 
         return spacing, count
 
