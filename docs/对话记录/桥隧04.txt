@@ -1,0 +1,205 @@
+================================================================================
+  桥隧病害识别 — 真实构件病害投影 + 照片交互框选
+  日期：2026-08-05
+  记录范围：病害投影到真实构件（引桥桥墩/柱式桥墩）全链路打通 →
+           照片红框可交互化（点选/框选/删除）→ 位置坐标统一 →
+           点云组件属性面板显示病害类型
+  目的：便于新对话快速恢复上下文，避免重复说明
+================================================================================
+
+
+一、我的需求
+------------
+
+1.1 本轮主需求（按对话顺序）
+  ① 病害投影到真实构件：把对话框里带真实 bbox 的病害记录，投影到 BIMBase
+     中真实摆放的桥墩构件表面上（不再只是估算位置放红方块）。
+     首批构件选定为 柱式桥墩/墩柱；面由用户下拉选择；比例按“等比铺满整面”，
+     位置大致准确即可。
+  ② 可以采用点云模拟到表面上（替代最初的阴影薄片方案）。
+  ③ 点击病害红框可选中，再删即删除红框及对应词条；在照片上手动拖拽框选
+     可添加病害及词条。
+  ④ 病害位置无论本地解析还是 AI 辅助，统一以图像原点（左上角）为原点、
+     用坐标形式（框中心像素坐标）显示。
+  ⑤ 手动框选生成记录时，左侧面板已填写的 病害位置/尺寸/备注 要合并进去。
+  ⑥ 点击投影生成的病害组件时，BIMBase 属性面板的参数表里要显示病害类型。
+
+1.2 过程中反馈并修复的问题
+  - “无参数”弹窗：选中组件读不到参数。
+  - 引桥桥墩被误判为“异形盖梁”，导致无法投影。
+  - 投影位置不对（薄片飘到构件外）。
+  - 点云投影 0/1 跳过（放置静默失败）。
+  - 黄框选中后无法取消。
+
+1.3 沟通约定
+  - 有任何问题都可以先问用户，确保明白了再执行。
+  - 未经确认不执行 git commit/push；本轮结束后整理本文档并做本地提交。
+
+
+二、你暂时做到哪里（全部完成，关键功能已实测通过）
+--------------------------------------------------
+
+2.1 真实构件病害投影（新增）
+  - face_projection.py：
+    * 新增 FACE_REGISTRY + get_available_faces()，供 UI 下拉选面。
+    * 新增 柱式桥墩 4 面：左/右墩柱正面、系梁正面、盖梁正面
+      （几何严格按 桥梁组件/2-下部结构/柱式桥墩.py 推导：原点在盖梁前左下角，
+      墩柱 x=235 / x=L-235，系梁仅在墩柱高>1500 时存在）。
+    * 新增 引桥桥墩 4 面（同名）：原点在双墩柱中心底部，墩柱 z∈[0,墩高]，
+      系梁首根顶面 z=墩高-200。
+    * 新增 photo_bbox_to_shadow()：照片 bbox 等比铺满映射到面局部坐标，
+      病害颜色查 DISEASE_COLOR_MAP，未知类型（如“已修复”）绿色兜底。
+  - bimbase_query.py：签名表新增 引桥桥墩（盖梁总长+墩柱直径+墩高，得分 34
+    压过异形盖梁的 10），修复误判。
+  - disease_dialog.py：
+    * 新增“投影面”下拉框（获取选中组件后按类型填充）和“基准坐标”输入框
+      （自动回填，可手动覆盖）。
+    * _on_disease_project 实现真实投影：选中行优先（否则全部 bbox 有效记录）
+      → PIL 读照片尺寸 → photo_bbox_to_shadow → PointCloudGenerator 生成点云
+      → create_point_cloud_marker → _PlaceToDirect 自动放置。
+    * 标记样式按用户要求为彩色点云（8mm 小立方体、间距 15mm、颜色按病害类型、
+      法向偏移符号已修正为表面外侧）。
+  - 实测通过（2026-08-05）：引桥桥墩左墩柱正面投影点云准确落在墩柱表面。
+
+2.2 投影链路三个关键 bug 修复
+  - “无参数”：选中实体是代理（CADBoard/bimbase_sync.py:2362 注释证实），
+    且旧扫描过滤器关键词太窄（柱式桥墩参数一个都不在）。
+    修复：新增 _scan_all_components() 全场景扫描 + infer_bridge_component_type
+    识别；扫到多个构件弹列表让用户选；提示语改为如实说明。
+  - 基准坐标读出 (0,0,0)：旧代码只试 Placement 单键，且提取器不认识
+    GeTransform._mat。修复：_extract_xyz_robust（移植 AI_Modeling 实测代码，
+    覆盖 _mat 3x4 矩阵/16 元素列表/字典/对象属性/get_matrixs_position），
+    依次试 '\a_transformation'、'\aGraphicElement::m_transform'、Placement、
+    BaseTransform；手动输入框兜底。
+  - 位置翻倍偏移：标记几何内部已烘焙世界坐标，_PlaceToDirect 又施加一次
+    translate → 实际落点 = 2×目标。修复：放置一律用零变换 translate(0,0,0)
+    （病害投影 + 面投影/纹理/点云三个测试流程同步修复）。
+
+2.3 点云放置失败修复
+  - _DiseasePointCloudMarker.replace() 内局部 import Cube 遮蔽模块级导入；
+    BIMBase 放置时用默认参数重实例化（points=None）走空点云分支，在 import
+    之前引用 Cube → UnboundLocalError。修复：改用模块级 Cube/scale/translate，
+    局部只 import Combine。放置失败现在会写日志，不再静默。
+
+2.4 照片红框可交互化（新增）
+  - 新文件 image_box_widget.py：ImageBoxLabel（QLabel 子类），红框改为
+    QPainter 矢量叠加绘制（原图 + 叠加层），支持：
+    * 点击红框选中（变黄）/ 再点一次或单击空白处取消选中；
+    * 空白处拖拽框选新病害（青色虚线，≥5px 生效，自动裁剪到照片范围）；
+    * 选中框按 Delete 删除；控件坐标 ↔ 照片像素坐标双向换算。
+  - disease_dialog.py 接入：
+    * 图片点框 ↔ 表格选中行 双向同步；点选后左侧“病害类型”下拉同步显示
+      该记录的病害类型；
+    * 框选即按面板当前病害类型/严重程度新增记录，并合并面板已填的
+      位置/尺寸/备注（坐标与像素尺寸保留在前，用户文本以“；”追加），
+      添加后清空三个输入框；
+    * 烘焙版标注图逻辑保留（供 AI 诊断与报告用），显示层改为叠加。
+
+2.5 位置坐标统一
+  - 本地自动识别：位置栏改为“框中心 (cx, cy) 像素”（原点=照片左上角）。
+  - AI 智能诊断：不再用 AI 文字描述覆盖位置栏，诊断后统一改回 bbox 框中心
+    坐标；AI 部位描述保留在备注（“部位: …”）。
+  - AI 诊断前收集 bbox 改为优先读记录的真实 bbox 字段（原先解析位置文本，
+    格式一变就静默退化为 (0,0,0,0)），文本解析仅作兜底。
+
+2.6 点云组件属性面板显示病害类型
+  - _DiseasePointCloudMarker 新增 Attr '病害类型'（show/obvious），投影时传入
+    记录的病害类型。已实测可在 BIMBase 属性面板看到。
+  - 注意：本轮之前已投影的旧点云组件无此参数，需删掉重新投影。
+
+2.7 测试与验证
+  - 新增 test_pier_projection_mapping.py：33 个离线测试全部通过
+    （两类桥墩面几何、base 偏移、无系梁返回 None、bbox 映射、颜色兜底、
+    shadow_to_world、引桥桥墩类型识别回归）。
+  - _extract_xyz_robust 7 种输入形态离线测试通过。
+  - image_box_widget 坐标换算/命中/选中逻辑 offscreen 冒烟测试通过。
+  - 全部改动文件 py_compile 通过。
+
+
+三、技术栈与关键实现（务必记住）
+--------------------------------
+
+3.1 环境
+  - BIMBase 2025（D:\BIMBASE\BIMBase建模软件 2025），Plugin SDK 1.6.2，
+    pyp3d SDK v18446497937724801024（源码在 D盘 PythonScript/python-3.7.9-embed-amd64
+    /Lib/site-packages/pyp3d/，可查接口定义）。
+  - BIMBase 内置 python-3.7.9-embed-amd64（PyQt5）；开发机 D:\zengpython3.13.2
+    跑离线测试（PyQt5 offscreen、PIL）。
+
+3.2 选中组件参数读取
+  - get_current_entityId → get_datakey_from_entity 拿到的是“参数化组件代理”，
+    读不到参数（官方注释证实）。正路：get_all_instancekey() 全场景扫描 +
+    get_noumKV_from_instancekey + 展开 ParaCmptProperty +
+    infer_bridge_component_type 签名识别；多构件时让用户选。
+  - P3DInstanceKey 不可 str()/repr()/bool()（触发 _data AttributeError）。
+
+3.3 构件基准坐标（世界坐标）
+  - 优先级：手动输入 → params 的 x/y/z_bottom → noumKV 的
+    '\a_transformation' / '\aGraphicElement::m_transform' / Placement /
+    BaseTransform（GeTransform._mat 是 3x4 行主序矩阵，平移在 [i][3]）。
+  - 目前只取平移，不处理旋转（组件被旋转放置时面方向会按未旋转算）。
+
+3.4 标记放置（最易踩坑）
+  - 几何烘焙世界坐标后，放置必须用零变换，否则平移应用两次。
+  - pyp3d Cube() 原点在角点而非几何中心。
+  - pyp3d Component 的 replace() 里不要局部 import 与模块级同名的名字
+    （Cube 等）——BIMBase 放置时会用默认参数重实例化并跑 replace()，
+    提前分支引用被遮蔽的名字会 UnboundLocalError。
+  - 组件类必须在模块级定义（DependentFile 序列化）。
+  - 放置用 CADBoard/bimbase_sync._PlaceToDirect（create_component +
+    TRANSFORMATION + UnifiedFunction create），不走 place() 手动模式；
+    调用前把 sys.argv[0] 指向 CADBoard/bimbase_sync.py。
+
+3.5 照片框交互
+  - 红框矢量叠加（QPainter），不要烘焙进显示图；烘焙图仅供报告/AI 诊断。
+  - 框→记录靠并行索引表 _view_record_indices（只含当前照片且有 bbox 的记录）。
+  - 拖拽阈值 5px 区分“单击空白取消选中”与“框选添加”。
+
+3.6 关键文件
+  - 桥隧病害识别/face_projection.py     面几何 + bbox→面映射 + 点云生成器
+  - 桥隧病害识别/disease_dialog.py      对话框（扫描/投影/交互/记录）
+  - 桥隧病害识别/disease_marker.py      标记组件（点云/阴影/纹理/立方体）
+  - 桥隧病害识别/image_box_widget.py    可交互图片控件
+  - 桥隧病害识别/bimbase_query.py       构件类型签名识别
+  - 桥隧病害识别/test_pier_projection_mapping.py  离线回归测试（33 用例）
+  - 调试日志：桥隧病害识别/bridge_disease_debug.log（[MARKER] 投影、
+    [AI_DIAG] 诊断）、根目录 bridge_disease_debug.log（[SEL] 扫描）、
+    CADBoard/bimbase_sync_debug.log（_place_impl 放置细节）
+
+
+四、本地版本管理
+----------------
+  - 仓库根目录：C:\ProgramData\PKPM\BIMBase\Plugins\Pro\V1.6\pythonplugin\
+  - 本轮提交（用户已指示）：
+    feat(桥隧病害识别): 真实构件病害点云投影+照片交互框选+位置坐标统一
+    包含：face_projection/bimbase_query/disease_dialog/disease_marker 修改，
+    新增 image_box_widget.py、test_pier_projection_mapping.py、本文档。
+  - 未执行 git push（GitHub Token 仍未配置，仅本地仓库）。
+  - 运行时产物（*.log、disease_records.json、disease_config.json 等）按
+    .gitignore 不入库。
+
+
+五、沟通约定
+------------
+  1. 用户明确要求：“你有任何问题都可以问我，确保明白了再执行”。
+  2. 复杂/多文件修改前先确认需求与方案再动手。
+  3. 未经用户确认，不执行 git commit/push/reset/rebase 等版本变更。
+  4. 每轮较大改动后整理技术记录到 docs/对话记录/，避免单条对话过长产生幻觉。
+
+
+六、后续可做（待用户确认）
+--------------------------
+  1. VLM 面识别：复用已接通的 qwen-vl-max（ai_diagnosis.py 通道），让大模型
+     判断“照片拍的是哪个面/取景范围”，几何引擎仍负责坐标计算；手动选面兜底。
+  2. 取景范围标定：当前“等比铺满整面”在照片只拍局部时位置会偏，可加
+     缩放/偏移微调或 VLM 估计取景框。
+  3. 组件旋转放置时投影方向的处理（目前只读平移）。
+  4. 点云组件参数表可加 严重程度/病害编号；对话框病害类型下拉可加“已修复”。
+  5. 其他真实构件（T梁/箱梁/横隔板等）的面定义扩展。
+  6. 露筋/蜂窝麻面继续补标训练（mAP 仍为 0 的两类）。
+  7. 配置 GitHub Token 后 git push origin main。
+
+
+================================================================================
+  本文件由 Kimi Code CLI 根据 2026-08-05 对话整理生成
+================================================================================

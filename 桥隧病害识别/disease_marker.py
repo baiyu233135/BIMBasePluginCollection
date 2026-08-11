@@ -214,7 +214,8 @@ if _pyp3d_ok and Component is not None:
             point_size : 每个小点的尺寸(mm)
             face_plane : 面类型 'xz'/'xy'/'yz'
         """
-        def __init__(self, x=0, y=0, z=0, points=None, point_size=3.0, face_plane='xz'):
+        def __init__(self, x=0, y=0, z=0, points=None, point_size=3.0, face_plane='xz',
+                     disease_type=''):
             super().__init__()
             self['x'] = Attr(float(x), show=True, obvious=True)
             self['y'] = Attr(float(y), show=True, obvious=True)
@@ -224,6 +225,8 @@ if _pyp3d_ok and Component is not None:
             self['point_count'] = Attr(len(points) if points else 0, show=True, obvious=True)
             # 由于点数量可能很多，不将每个点存为Attr，而是序列化为字符串存一个Attr
             self['points_data'] = Attr(self._encode_points(points or []), show=True, obvious=True)
+            # 病害类型（在BIMBase属性面板中可见）
+            self['病害类型'] = Attr(str(disease_type), show=True, obvious=True)
             self['点云'] = Attr(None, show=True, obvious=True)
             self.replace()
 
@@ -259,11 +262,13 @@ if _pyp3d_ok and Component is not None:
             points = self._decode_points(self['points_data'])
 
             if not points:
+                # 注意：不要在函数内局部 import Cube（会遮蔽模块级导入，
+                # 导致本分支 UnboundLocalError）；模块顶部已导入 Cube/scale/translate
                 self['点云'] = Cube()
                 return
 
             try:
-                from pyp3d import Combine, Cube, scale, translate
+                from pyp3d import Combine
                 half = ps / 2.0
                 parts = []
                 for u, v, z, (r, g, b) in points:
@@ -461,7 +466,7 @@ class DiseaseMarkerComponent:
     @staticmethod
     def create_point_cloud_marker(x: float, y: float, z: float,
                                   points: list, point_size: float = 3.0,
-                                  face_plane: str = 'xz'):
+                                  face_plane: str = 'xz', disease_type: str = ''):
         """
         创建点云标记组件实例（大量彩色小立方体密集排列）。
 
@@ -470,6 +475,7 @@ class DiseaseMarkerComponent:
             points: 点列表，每个点为 (local_u, local_v, 0, (r, g, b))
             point_size: 每个小点的尺寸(mm)
             face_plane: 面类型 'xz'/'xy'/'yz'
+            disease_type: 病害类型（显示在BIMBase属性面板）
         """
         if not _pyp3d_ok or _DiseasePointCloudMarker is None:
             _log("pyp3d不可用或_DiseasePointCloudMarker未定义")
@@ -477,10 +483,11 @@ class DiseaseMarkerComponent:
 
         try:
             comp = _DiseasePointCloudMarker(
-                x, y, z, points, point_size, face_plane
+                x, y, z, points, point_size, face_plane, disease_type
             )
             _log(f"点云标记创建成功: pos=({x:.1f},{y:.1f},{z:.1f}), "
-                 f"points={len(points) if points else 0}, size={point_size}")
+                 f"points={len(points) if points else 0}, size={point_size}, "
+                 f"病害类型={disease_type}")
             return comp
         except Exception as e:
             _log(f"创建点云标记失败: {e}\n{traceback.format_exc()}")

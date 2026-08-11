@@ -34,6 +34,66 @@ DISEASE_COLOR_MAP = {
 
 DISEASE_CLASSES = list(DISEASE_COLOR_MAP.keys())
 
+# 未知病害类型（如"已修复"）的兜底颜色：绿
+_FALLBACK_COLOR = (0, 200, 0)
+
+# 各构件类型可用的投影面清单（供 UI 下拉选择）
+FACE_REGISTRY = {
+    '长方体': ['front', 'top', 'left'],
+    '正方体': ['front', 'top'],
+    '圆柱': ['front', 'side'],
+    '直角三棱柱': ['side_a', 'side_b', 'hypotenuse'],
+    '投影测试T梁': ['bottom', 'web_side', 'flange_bottom'],
+    '投影测试横隔板': ['front', 'side'],
+    '投影测试湿接缝': ['top', 'side'],
+    '投影测试墩柱': ['front', 'side'],
+    '柱式桥墩': ['左墩柱正面', '右墩柱正面', '系梁正面', '盖梁正面'],
+    '引桥桥墩': ['左墩柱正面', '右墩柱正面', '系梁正面', '盖梁正面'],
+}
+
+
+def get_available_faces(component_type: str) -> List[str]:
+    """获取指定构件类型可投影的面名称列表"""
+    return list(FACE_REGISTRY.get(component_type, []))
+
+
+def photo_bbox_to_shadow(face: "FaceInfo", bbox: Tuple[float, float, float, float],
+                         photo_w: int, photo_h: int, disease_type: str) -> "ShadowRegion":
+    """
+    将照片上的病害 bbox 按“等比铺满整面”映射为面上的阴影区域。
+
+    假设照片取景范围≈目标面：照片 X → 面 U 方向，照片 Y（向下）→ 面 V 方向（向上取反）。
+
+    Args:
+        face: 目标面几何信息
+        bbox: 照片上的病害框 (x1, y1, x2, y2)，像素
+        photo_w, photo_h: 照片像素尺寸
+        disease_type: 病害类型（决定颜色，未知类型用绿色兜底）
+
+    Returns:
+        ShadowRegion（面局部坐标，原点在面中心）
+    """
+    x1, y1, x2, y2 = bbox
+    cx = (x1 + x2) / 2.0
+    cy = (y1 + y2) / 2.0
+    bw = max(1.0, x2 - x1)
+    bh = max(1.0, y2 - y1)
+
+    u = (cx / photo_w - 0.5) * face.width
+    v = (0.5 - cy / photo_h) * face.height
+    w = bw / photo_w * face.width
+    h = bh / photo_h * face.height
+
+    color = DISEASE_COLOR_MAP.get(disease_type, _FALLBACK_COLOR)
+    return ShadowRegion(
+        local_u=u,
+        local_v=v,
+        width=w,
+        height=h,
+        disease_type=disease_type,
+        color_rgb=color,
+    )
+
 
 @dataclass
 class ShadowRegion:
@@ -77,6 +137,8 @@ class FaceProjectionEngine:
         '投影测试横隔板': 'front',
         '投影测试湿接缝': 'top',
         '投影测试墩柱': 'front',
+        '柱式桥墩': '左墩柱正面',
+        '引桥桥墩': '左墩柱正面',
     }
 
     def __init__(self, component_type: str, params: dict,
@@ -515,6 +577,152 @@ class FaceProjectionEngine:
             width=math.pi * D,
             height=H,
             u_axis=(0, 1, 0),
+            v_axis=(0, 0, 1),
+        )
+    # ---------- 柱式桥墩（真实组件，桥梁组件/2-下部结构/柱式桥墩.py） ----------
+    # 组件原点：盖梁前左下角（z=0 为盖梁截面顶起点）。
+    # 左墩柱圆心 x=235，右墩柱 x=L-235，墩柱从 z=-85 向下延伸 DZH，半径 R=桩基径。
+
+    def _pier_params(self):
+        DZH = float(self.params.get('墩柱高', 1700))
+        R = float(self.params.get('桩基径', 110))
+        L = float(self.params.get('盖梁宽度', 1220))
+        W = float(self.params.get('盖梁厚度', 230))
+        TH = float(self.params.get('盖梁高', 95))
+        DH = float(self.params.get('档墙高', 60))
+        TH1 = float(self.params.get('系梁高', 200))
+        return DZH, R, L, W, TH, DH, TH1
+
+    def _get_柱式桥墩_左墩柱正面_face(self) -> FaceInfo:
+        """左墩柱正面（圆柱按矩形近似，朝 -Y 方向）"""
+        DZH, R, L, W, TH, DH, TH1 = self._pier_params()
+        return FaceInfo(
+            face_name='左墩柱正面',
+            plane='xz',
+            center=(self.base_x + 235, self.base_y + W / 2 - R, self.base_z - 85 - DZH / 2),
+            normal=(0, -1, 0),
+            width=2 * R,
+            height=DZH,
+            u_axis=(1, 0, 0),
+            v_axis=(0, 0, 1),
+        )
+
+    def _get_柱式桥墩_右墩柱正面_face(self) -> FaceInfo:
+        """右墩柱正面（圆柱按矩形近似，朝 -Y 方向）"""
+        DZH, R, L, W, TH, DH, TH1 = self._pier_params()
+        return FaceInfo(
+            face_name='右墩柱正面',
+            plane='xz',
+            center=(self.base_x + L - 235, self.base_y + W / 2 - R, self.base_z - 85 - DZH / 2),
+            normal=(0, -1, 0),
+            width=2 * R,
+            height=DZH,
+            u_axis=(1, 0, 0),
+            v_axis=(0, 0, 1),
+        )
+
+    def _get_柱式桥墩_系梁正面_face(self) -> Optional[FaceInfo]:
+        """首段系梁正面（朝 -Y 方向）。墩柱高 <=1500 时无系梁，返回 None"""
+        DZH, R, L, W, TH, DH, TH1 = self._pier_params()
+        if DZH <= 1500:
+            return None
+        seg = int(DZH / 1500)
+        pos = DZH / (seg + 1)   # 首段系梁顶面 z = -pos
+        return FaceInfo(
+            face_name='系梁正面',
+            plane='xz',
+            center=(self.base_x + L / 2, self.base_y + W / 2 - R + 30, self.base_z - pos - TH1 / 2),
+            normal=(0, -1, 0),
+            width=L - 580,
+            height=TH1,
+            u_axis=(1, 0, 0),
+            v_axis=(0, 0, 1),
+        )
+
+    def _get_柱式桥墩_盖梁正面_face(self) -> FaceInfo:
+        """盖梁正面（y=0 平面，截面按外接矩形近似）"""
+        DZH, R, L, W, TH, DH, TH1 = self._pier_params()
+        return FaceInfo(
+            face_name='盖梁正面',
+            plane='xz',
+            center=(self.base_x + L / 2, self.base_y, self.base_z + (DH + TH - 85) / 2),
+            normal=(0, -1, 0),
+            width=L,
+            height=DH + TH + 85,
+            u_axis=(1, 0, 0),
+            v_axis=(0, 0, 1),
+        )
+    # ---------- 引桥桥墩（组件测试/引桥桥墩.py，AI_Modeling 同款） ----------
+    # 组件原点：两墩柱中心连线的中点、墩柱底部（z=0）。
+    # 墩柱 z 从 0 到墩高，盖梁在 z=墩高 到 墩高+盖梁总高。
+
+    def _ap_pier_params(self):
+        cap_l = float(self.params.get('盖梁总长', 1930))
+        cap_h = float(self.params.get('盖梁总高', 300))
+        cap_w = float(self.params.get('盖梁宽', 300))
+        col_d = float(self.params.get('墩柱直径', 250))
+        col_s = float(self.params.get('墩柱间距', 1140))
+        col_h = float(self.params.get('墩高', 1200))
+        tie_n = int(self.params.get('系梁根数', 2))
+        return cap_l, cap_h, cap_w, col_d, col_s, col_h, tie_n
+
+    def _get_引桥桥墩_左墩柱正面_face(self) -> FaceInfo:
+        """左墩柱正面（圆柱按矩形近似，朝 -Y 方向）"""
+        cap_l, cap_h, cap_w, col_d, col_s, col_h, tie_n = self._ap_pier_params()
+        return FaceInfo(
+            face_name='左墩柱正面',
+            plane='xz',
+            center=(self.base_x - col_s / 2, self.base_y - col_d / 2, self.base_z + col_h / 2),
+            normal=(0, -1, 0),
+            width=col_d,
+            height=col_h,
+            u_axis=(1, 0, 0),
+            v_axis=(0, 0, 1),
+        )
+
+    def _get_引桥桥墩_右墩柱正面_face(self) -> FaceInfo:
+        """右墩柱正面（圆柱按矩形近似，朝 -Y 方向）"""
+        cap_l, cap_h, cap_w, col_d, col_s, col_h, tie_n = self._ap_pier_params()
+        return FaceInfo(
+            face_name='右墩柱正面',
+            plane='xz',
+            center=(self.base_x + col_s / 2, self.base_y - col_d / 2, self.base_z + col_h / 2),
+            normal=(0, -1, 0),
+            width=col_d,
+            height=col_h,
+            u_axis=(1, 0, 0),
+            v_axis=(0, 0, 1),
+        )
+
+    def _get_引桥桥墩_系梁正面_face(self) -> Optional[FaceInfo]:
+        """首根系梁正面（朝 -Y 方向）。系梁根数<1 时返回 None"""
+        cap_l, cap_h, cap_w, col_d, col_s, col_h, tie_n = self._ap_pier_params()
+        if tie_n < 1 or col_h <= 0:
+            return None
+        tie_l = max(col_s - col_d, 100.0)
+        # 与组件代码一致：首根系梁顶面 z = 墩高-200，梁高 200，半径 100（y=-100 处为正面）
+        return FaceInfo(
+            face_name='系梁正面',
+            plane='xz',
+            center=(self.base_x, self.base_y - 100, self.base_z + col_h - 300),
+            normal=(0, -1, 0),
+            width=tie_l,
+            height=200.0,
+            u_axis=(1, 0, 0),
+            v_axis=(0, 0, 1),
+        )
+
+    def _get_引桥桥墩_盖梁正面_face(self) -> FaceInfo:
+        """盖梁正面（朝 -Y 方向，梯形截面按外接矩形近似）"""
+        cap_l, cap_h, cap_w, col_d, col_s, col_h, tie_n = self._ap_pier_params()
+        return FaceInfo(
+            face_name='盖梁正面',
+            plane='xz',
+            center=(self.base_x, self.base_y - cap_w / 2, self.base_z + col_h + cap_h / 2),
+            normal=(0, -1, 0),
+            width=cap_l,
+            height=cap_h,
+            u_axis=(1, 0, 0),
             v_axis=(0, 0, 1),
         )
 
