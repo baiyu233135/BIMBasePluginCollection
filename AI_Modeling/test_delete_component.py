@@ -135,13 +135,14 @@ class DeleteSelectedComponentsTestCase(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn('没有可用的删除 API', msg)
 
-    def test_delete_not_verified(self):
-        # 删除前后实体数相同且实体仍有效 → 判定未生效，不注销注册表
+    def test_delete_count_unchanged_still_success(self):
+        # 实测现象：delete_one_entity 未抛异常即删除成功，但 get_all_entityid 计数
+        # 可能不变（参数化组件计数口径不同）→ 不判失败，正常注销注册表
         (ok, msg, deleted), mocks = self._run_with_selection(
             ['eid1'], ['ik1'], before_after=(10, 10))
-        self.assertFalse(ok)
-        self.assertIn('未减少', msg)
-        mocks['registry'].unregister.assert_not_called()
+        self.assertTrue(ok)
+        self.assertEqual(deleted, 1)
+        mocks['registry'].unregister.assert_called_with('ik1')
 
     def test_delete_verified_by_count(self):
         (ok, msg, deleted), mocks = self._run_with_selection(

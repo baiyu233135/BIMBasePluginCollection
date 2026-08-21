@@ -331,16 +331,11 @@ def delete_selected_components():
             return False, "没有可用的删除 API", 0
         return False, f"删除失败: {errors[0] if errors else '未知错误'}", 0
 
-    # 校验删除确实生效：实体计数减少，或已删实体失效
+    # 校验说明：实测（2026-08-13）delete_one_entity 成功后 get_all_entityid 计数
+    # 可能不变（参数化组件实体的计数口径不同），因此计数对比只写日志、不判失败，
+    # 避免"删成功了却报错"的误报。
     after = _count_entities()
     _log(f"delete_selected_components: before={before}, after={after}, api_deleted={deleted}")
-    verified = True
-    if before >= 0 and after >= 0:
-        verified = after < before
-        if not verified and entity_ids:
-            verified = any(not _is_entity_valid(eid) for eid in entity_ids)
-    if not verified:
-        return False, "删除指令已执行，但场景实体数未减少，可能未生效，请检查 BIMBase 视图", 0
 
     # 从注册表注销（instance_key / entity_id 两种键都尝试）
     try:

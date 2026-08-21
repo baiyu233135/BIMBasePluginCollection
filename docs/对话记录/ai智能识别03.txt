@@ -57,7 +57,9 @@ pyp3d SDK（v18446497937724801024/pyp3d_api.py）实际提供：
 四、技术要点（务必记住）
 ------------------------
   1. 删除 API 存在！delete_one_entity 按实体删即可，删参数化组件实体即可移除。
-  2. 删除后必须校验：_count_entities() 前后对比，或 entityid_isvaid 复查。
+  2. 删除校验的教训（2026-08-13 实测修正）：delete_one_entity 未抛异常即应判成功；
+     get_all_entityid 计数对比会误报（参数化组件实体删除后计数可能不变），
+     只能写日志参考，不能作为失败依据。放置校验（_verify_new_entity）不受此影响。
   3. 注册表清理：unregister(instance_key) 直接传活对象；按 entity_id 删记录需
      用 _key_str 转换后与 record['entity_id'] 比对。
   4. 窗口路由测试不必建真实窗口：AIModelingWindow._execute_local_delete(fake_self, ...)
