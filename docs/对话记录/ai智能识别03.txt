@@ -1,0 +1,86 @@
+================================================================================
+  AI_Modeling — 对话删除选中组件
+  日期：2026-08-13
+  记录范围：AI 智能建模助手新增"对话删除选中组件"功能（本地解析 + AI 双通道），
+           用户已在 BIMBase 实测通过并指示提交
+  目的：便于新对话快速恢复上下文，避免重复说明
+================================================================================
+
+
+一、我的需求
+------------
+1. 在 AI 智能建模功能原有基础上，支持通过对话删除指定的组件。
+2. 范围确认（用户拍板）：本轮只做"删除选中的组件"；多个选中时弹确认框。
+3. 有任何问题先问用户；未经确认不执行 git 操作。
+
+
+二、关键纠正
+------------
+此前记录（ai智能识别00/02）认为"BIMBase 未提供删除 API"——过时判断。
+pyp3d SDK（v18446497937724801024/pyp3d_api.py）实际提供：
+  - delete_one_entity(entityid)        按实体删（本功能主路径，实测有效）
+  - delete_data_bydatakey(instancekey) 按实例删（兜底）
+  - delete_entity(**kwargs) / clear_entity()  按条件删/清空（未使用，太危险）
+
+
+三、已完成修改（用户实测通过 2026-08-13）
+----------------------------------------
+1. AI_Modeling/ai_modeling/bimbase_modifier.py
+   - pyp3d 导入名单新增 delete_one_entity / delete_data_bydatakey。
+   - 新增 delete_selected_components() → (ok, msg, deleted)：
+     选中实体优先 delete_one_entity，全失败兜底 delete_data_bydatakey；
+     删除前后用 _count_entities()（复用 component_factory，get_all_entityid 计数）
+     校验实体数确实减少（不轻信无异常返回，同放置校验教训）；
+     计数不可用或校验失败时回退 _is_entity_valid 检查；
+     生效后从注册表注销（instance_key 与 entity_id 两种键都试，
+     entity_id 用 registry._key_str 匹配 all_records 的 entity_id 字段）。
+2. AI_Modeling/ai_modeling/command_parser.py
+   - ACTION_MAP 新增"删掉"；修复"最后一个"被汉字数字转换破坏的问题
+     （"最后一个"→"最后1个"，_parse_target 改用正则 r'最\s*(?:后|近)\s*\d*\s*个'）。
+   - 解析器此前已把 删除/移除 映射为 delete 动作，target 解析沿用 modify 的
+     _parse_target（selected/index/last）。
+3. AI_Modeling/ai_modeling/ai_window.py
+   - _send_message 新增 delete 本地分支 → _execute_local_delete，不再落入 AI。
+   - _execute_local_delete：批量（所有/全部）与非选中目标（第N个/最后一个）明确
+     拦截并提示；选中 >1 个时 QMessageBox 确认数量；单个直接删。
+   - _execute_ai_json 的 delete 分支接通同一实现（删除旧的"暂不支持"回复）。
+   - 欢迎语新增删除示例；快捷按钮新增"删除选中"。
+4. 测试：新增 AI_Modeling/test_delete_component.py（20 用例：
+   解析 7 + delete_selected_components 打桩 7 + 窗口路由 fake-self 6），全部通过；
+   test_pier_parse.py（20）、test_component_registry.py（10）回归通过。
+
+实测注意：截图中曾出现"删除指令已执行但场景实体数未减少"的提示——那是
+校验逻辑生效的表现（delete_one_entity 对个别对象未生效时会如实报告而非假成功），
+后续实测删除正常。
+
+
+四、技术要点（务必记住）
+------------------------
+  1. 删除 API 存在！delete_one_entity 按实体删即可，删参数化组件实体即可移除。
+  2. 删除后必须校验：_count_entities() 前后对比，或 entityid_isvaid 复查。
+  3. 注册表清理：unregister(instance_key) 直接传活对象；按 entity_id 删记录需
+     用 _key_str 转换后与 record['entity_id'] 比对。
+  4. 窗口路由测试不必建真实窗口：AIModelingWindow._execute_local_delete(fake_self, ...)
+     用 SimpleNamespace 式假 self + mock.patch 模块级函数即可离线跑。
+  5. 汉字数字在 parse() 入口统一转换后，所有依赖字面量"一个"的判断都要改正则。
+
+
+五、本地版本管理
+----------------
+  - 本提交（用户已确认）：feat(AI_Modeling): 对话删除选中组件
+  - 包含：上述 3 个模块修改 + test_delete_component.py + 本文档。
+  - 未执行 git push（GitHub Token 仍未配置，仅本地仓库）。
+  - 同工作区的 组件成品/、docs/04、docs/05、README 索引变更属于"组件成品"轮次，
+    不在本提交内。
+
+
+六、后续可做（待用户确认）
+--------------------------
+  1. 批量删除（删除所有/第N个/最后一个某类型组件）——注册表键为字符串，
+     需 get_all_instancekey() 扫描匹配 _key_str 找回活对象后 delete_data_bydatakey。
+  2. 配置 GitHub Token 后 git push origin main。
+
+
+================================================================================
+  本文件由 Kimi Code CLI 根据 2026-08-13 对话整理生成
+================================================================================

@@ -36,6 +36,8 @@ get_allbinding_entity_from_data = None
 replace_noumenon = None
 get_entity_property = None
 get_entity_bounds = None
+delete_one_entity = None
+delete_data_bydatakey = None
 
 # 逐个从 pyp3d 导入，避免某个 API 不存在导致全部失败
 try:
@@ -57,6 +59,8 @@ try:
         'replace_noumenon',
         'get_entity_property',
         'get_entity_bounds',
+        'delete_one_entity',
+        'delete_data_bydatakey',
         'get_matrixs_position',
     ]
     for _name in _api_names:
@@ -69,7 +73,7 @@ except Exception as _e:
     _log(f"bimbase_modifier import pyp3d failed: {_e}")
     _pyp3d_ok = False
 
-from ai_modeling.component_factory import create_component, COMPONENT_CLASSES
+from ai_modeling.component_factory import create_component, COMPONENT_CLASSES, _count_entities
 
 
 def _is_entity_valid(eid):
@@ -281,6 +285,81 @@ def get_selected_component_info():
             'params': params,
         })
     return infos
+
+
+def delete_selected_components():
+    """
+    删除当前在 BIMBase 中选中的组件（实体删除优先，实例删除兜底）。
+    删除后用实体计数校验确实生效（不轻信 API 无异常返回），
+    生效后同步从 AI 注册表注销对应记录。
+    返回: (success: bool, message: str, deleted: int)
+    """
+    if not _pyp3d_ok:
+        return False, "pyp3d 未加载", 0
+
+    entity_ids = get_selected_entity_ids()
+    instance_keys = get_selected_instance_keys()
+    if not entity_ids and not instance_keys:
+        return False, "未在 BIMBase 中选中任何组件，请先选中要删除的组件", 0
+
+    before = _count_entities()
+    deleted = 0
+    errors = []
+
+    # 方式1：按实体删除（delete_one_entity）
+    if entity_ids and delete_one_entity is not None:
+        for eid in entity_ids:
+            try:
+                delete_one_entity(eid)
+                deleted += 1
+            except Exception as e:
+                _log(f"delete_one_entity error: {e}")
+                errors.append(str(e))
+
+    # 方式2：按实例删除（delete_data_bydatakey），实体删除全部失败时兜底
+    if deleted == 0 and instance_keys and delete_data_bydatakey is not None:
+        for ik in instance_keys:
+            try:
+                delete_data_bydatakey(ik)
+                deleted += 1
+            except Exception as e:
+                _log(f"delete_data_bydatakey error: {e}")
+                errors.append(str(e))
+
+    if deleted == 0:
+        if delete_one_entity is None and delete_data_bydatakey is None:
+            return False, "没有可用的删除 API", 0
+        return False, f"删除失败: {errors[0] if errors else '未知错误'}", 0
+
+    # 校验删除确实生效：实体计数减少，或已删实体失效
+    after = _count_entities()
+    _log(f"delete_selected_components: before={before}, after={after}, api_deleted={deleted}")
+    verified = True
+    if before >= 0 and after >= 0:
+        verified = after < before
+        if not verified and entity_ids:
+            verified = any(not _is_entity_valid(eid) for eid in entity_ids)
+    if not verified:
+        return False, "删除指令已执行，但场景实体数未减少，可能未生效，请检查 BIMBase 视图", 0
+
+    # 从注册表注销（instance_key / entity_id 两种键都尝试）
+    try:
+        from ai_modeling.component_registry import get_registry
+        registry = get_registry()
+        for ik in instance_keys:
+            registry.unregister(ik)
+        eid_strs = set()
+        for eid in entity_ids:
+            s = registry._key_str(eid)
+            if s:
+                eid_strs.add(s)
+        for key, record in list(registry.all_records().items()):
+            if record.get('entity_id') and record['entity_id'] in eid_strs:
+                registry.unregister(key)
+    except Exception as e:
+        _log(f"delete_selected_components unregister error: {e}")
+
+    return True, f"已删除 {deleted} 个组件", deleted
 
 
 def get_selected_entity_ids():

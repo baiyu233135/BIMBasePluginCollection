@@ -47,7 +47,8 @@ from ai_modeling.component_path import (
 from ai_modeling.bimbase_modifier import (
     modify_selected_component, get_selected_component_info, infer_component_type_from_params,
     get_selected_line_endpoints, get_selected_curve_arc_params,
-    get_selected_component_position, get_selected_instance_keys
+    get_selected_component_position, get_selected_instance_keys,
+    delete_selected_components
 )
 
 
@@ -209,7 +210,7 @@ class AIModelingWindow(QDialog):
         tips_layout = QHBoxLayout()
         for tip_text in [
             "生成圆柱", "生成正方体", "生成球体",
-            "修改选中", "沿X轴阵列", "沿曲线布置",
+            "修改选中", "沿X轴阵列", "沿曲线布置", "删除选中",
         ]:
             btn = QPushButton(tip_text)
             btn.setStyleSheet("QPushButton { font-size: 10px; padding: 2px 6px; background: #e3f2fd; color: #1565C0; }")
@@ -436,6 +437,7 @@ class AIModelingWindow(QDialog):
             "<li><b>沿曲线布置：</b>沿圆心(0,0,0)半径500从0°到180°的圆弧每隔200mm放圆柱</li>"
             "<li><b>修改组件：</b>把选中的圆柱半径改成400，高度改成1000</li>"
             "<li><b>修改保留位置：</b>把选中圆柱半径改成400，位置不变</li>"
+            "<li><b>删除组件：</b>删除选中的组件</li>"
             "<li><b>批量布置：</b>生成3×3方阵，间距2000，每个位置放一个正方体边长300</li>"
             "</ul>"
             "<p style='color:#999;font-size:11px;'>💡 提示：先在BIMBase中选中组件，再说'修改选中的...'或'复制选中的...'</p>"
@@ -495,6 +497,11 @@ class AIModelingWindow(QDialog):
             self.mode_indicator.setText("⚡ 本地")
             self.status_label.setText("本地执行修改...")
             self._execute_local_modify(parsed, text)
+            return
+        elif parsed and parsed.get('action') == 'delete':
+            self.mode_indicator.setText("⚡ 本地")
+            self.status_label.setText("本地执行删除...")
+            self._execute_local_delete(parsed, text)
             return
 
         # 2. 本地无法解析，调用 AI
@@ -907,6 +914,50 @@ class AIModelingWindow(QDialog):
 
         self.status_label.setText("就绪")
 
+    def _execute_local_delete(self, parsed, original_text):
+        """本地执行删除命令：删除当前在 BIMBase 中选中的组件"""
+        target = parsed.get('target') or {'mode': 'selected'}
+
+        # 批量删除（所有/全部）暂不支持
+        if '所有' in original_text or '全部' in original_text:
+            self._append_system("❌ 暂不支持批量删除，请先在 BIMBase 中选中要删除的组件，再说'删除选中的组件'", "#d32f2f")
+            self.status_label.setText("就绪")
+            return
+
+        if target.get('mode') != 'selected':
+            self._append_system("❌ 删除功能目前仅支持删除选中组件，请先在 BIMBase 中选中", "#d32f2f")
+            self.status_label.setText("就绪")
+            return
+
+        # 多选时弹框确认数量（单个直接删）
+        try:
+            from ai_modeling.bimbase_modifier import get_selected_entity_ids
+            n_sel = max(len(get_selected_entity_ids()), len(get_selected_instance_keys()))
+        except Exception as e:
+            _log(f"_execute_local_delete count selection error: {e}")
+            n_sel = 0
+        if n_sel > 1:
+            try:
+                from PyQt5.QtWidgets import QMessageBox
+            except ImportError:
+                from PyQt6.QtWidgets import QMessageBox
+            reply = QMessageBox.question(
+                self,
+                "确认删除",
+                f"当前选中了 {n_sel} 个组件，确定全部删除吗？\n（该操作不可撤销）",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                self._append_system("已取消删除", "#999")
+                self.status_label.setText("就绪")
+                return
+
+        ok, msg, _deleted = delete_selected_components()
+        self._append_system(f"{'✅' if ok else '❌'} {msg}",
+                            "#2E7D32" if ok else "#d32f2f")
+        self.status_label.setText("就绪")
+
     def _call_ai(self, text):
         """调用 DeepSeek AI"""
         self.mode_indicator.setText("☁ AI")
@@ -1077,7 +1128,7 @@ class AIModelingWindow(QDialog):
                 self._execute_local_copy(data, "AI指令")
                 return
             elif action == 'delete':
-                self._append_system("❌ 删除功能暂不支持（BIMBase未提供删除API）", "#d32f2f")
+                self._execute_local_delete(data, "AI指令")
                 return
             else:
                 self._append_system(f"⚠️ 未知操作: {action}", "#999")

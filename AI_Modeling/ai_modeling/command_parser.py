@@ -22,7 +22,7 @@ class ModelingCommandParser:
         '生成': 'create', '创建': 'create', '画': 'create', '绘制': 'create', '画一个': 'create',
         '布置': 'create', '放置': 'create', '摆': 'create',
         '修改': 'modify', '改': 'modify', '调整': 'modify', '更新': 'modify',
-        '删除': 'delete', '移除': 'delete',
+        '删除': 'delete', '移除': 'delete', '删掉': 'delete',
         '复制': 'copy', '拷贝': 'copy',
     }
 
@@ -612,8 +612,8 @@ class ModelingCommandParser:
         m = re.search(r'第\s*(\d+)\s*个', text)
         if m:
             return {'mode': 'index', 'index': int(m.group(1)) - 1}
-        # 检测 "最后一个"
-        if '最后一个' in text or '最近一个' in text:
+        # 检测 "最后一个"/"最近一个"（汉字数字已在 parse 入口转为阿拉伯数字，如"最后1个"）
+        if re.search(r'最\s*(?:后|近)\s*\d*\s*个', text):
             return {'mode': 'last'}
         # 默认选中
         return {'mode': 'selected'}
