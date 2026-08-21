@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BIMPyPlugin>
+    <BfaLibName/>
+    <PluginVersion>1.0.0</PluginVersion>
+    <LoadStatus>true</LoadStatus>
+    <Category name="组件成品">
+        <Panel name="组件成品">
+            <Button name="铁路封闭网">
+                <command>铁路封闭网.py</command>
+                <iconPath>铁路封闭网.ico</iconPath>
+            </Button>
+            <Button name="铁路封闭网(原版)">
+                <command>铁路封闭网_原版.py</command>
+                <iconPath>铁路封闭网_原版.ico</iconPath>
+            </Button>
+        </Panel>
+    </Category>
+    <Name>组件成品</Name>
+    <PluginModule>C:\ProgramData\PKPM\BIMBase\Plugins\Pro\V1.6\pythonplugin\组件成品\</PluginModule>
+    <PluginSDKVersion>1.6.2</PluginSDKVersion>
+</BIMPyPlugin>

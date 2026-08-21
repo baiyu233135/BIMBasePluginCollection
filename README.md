@@ -55,6 +55,8 @@ CADBoard 面板 → 桥隧病害识别 → CADBoard/bridge_disease_launcher.py�
 - [项目总览](docs/01_项目总览.md)
 - [插件清单与入口](docs/02_插件清单与入口.md)
 - [环境搭建与安装](docs/03_环境搭建与安装.md)
+- [pyp3d 组件颜色与透明度](docs/04_pyp3d颜色与透明度.md)
+- [pyp3d 交互放置工具与放置坐标回写](docs/05_pyp3d交互放置工具与坐标回写.md)
 - [常见问题与调试](docs/99_常见问题与调试.md)
 
 各模块详细文档请进入对应目录查看 `README.md` 和 `docs/`。
