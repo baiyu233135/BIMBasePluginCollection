@@ -1,0 +1,104 @@
+================================================================================
+  智能识别04 — AI 智能建模助手：对话删除选中组件（含误报修复）
+  日期：2026-08-13（功能实现与实测）/ 2026-08-21（误报修复与文档归并）
+  记录范围：AI_Modeling 新增"对话删除选中组件"功能 → 用户实测删除成功但
+           校验误报"未生效" → 修正校验逻辑。本文档为最终完整记录；
+           ai智能识别03 保留为功能实现时的过程稿（其中"删除后必须用计数校验"
+           的说法已被实测修正，以本文档第四节为准）。
+  目的：便于新对话快速恢复上下文，避免重复说明
+================================================================================
+
+
+一、我的需求
+------------
+1. 在 AI 智能建模原有基础上，支持通过对话删除指定的组件。
+2. 范围（用户拍板）：本轮只做"删除选中的组件"；选中多个时弹确认框。
+3. 有任何问题先问用户；未经确认不执行 git 操作。
+
+
+二、关键纠正：删除 API 存在
+---------------------------
+此前记录（ai智能识别00/02）认为"BIMBase 未提供删除 API"——过时判断。
+pyp3d SDK（v18446497937724801024/pyp3d_api.py）实际提供：
+  - delete_one_entity(entityid)         按实体删（本功能主路径，实测有效）
+  - delete_data_bydatakey(instancekey)  按实例删（兜底路径）
+  - delete_entity(**kwargs) / clear_entity()  按条件删/清空（未使用，太危险）
+教训：SDK 能力以源码检索为准（grep "def delete"），不要沿用旧结论。
+
+
+三、实现（最终状态）
+--------------------
+1. AI_Modeling/ai_modeling/bimbase_modifier.py
+   - pyp3d 导入名单新增 delete_one_entity / delete_data_bydatakey（getattr 宽容式）。
+   - delete_selected_components() → (ok, msg, deleted)：
+     * 选中实体优先 delete_one_entity；全部抛异常时兜底 delete_data_bydatakey；
+     * API 无异常即判成功（见第四节误报修复）；
+     * 删除前后 _count_entities()（get_all_entityid 计数）只写日志、不判失败；
+     * 生效后从注册表注销：unregister(instance_key) 直接传活对象；按 entity_id
+       删记录时用 registry._key_str 转换后与 record['entity_id'] 比对
+       （P3DEntityId/P3DInstanceKey 不可 str()）。
+2. AI_Modeling/ai_modeling/command_parser.py
+   - ACTION_MAP 新增"删掉"（原有 删除/移除）。
+   - 修复"最后一个"被汉字数字转换破坏（"最后一个"→"最后1个"），
+     _parse_target 改用正则 r'最\s*(?:后|近)\s*\d*\s*个'。
+3. AI_Modeling/ai_modeling/ai_window.py
+   - _send_message 新增 delete 本地分支 → _execute_local_delete（不落 AI）。
+   - _execute_local_delete：批量（所有/全部）与非选中目标（第N个/最后一个）
+     明确拦截提示；选中 >1 个时 QMessageBox 确认数量；单个直接删。
+   - _execute_ai_json 的 delete 分支接通同一实现（删除旧的"暂不支持"回复）。
+   - 欢迎语新增删除示例；快捷按钮新增"删除选中"。
+4. 测试：AI_Modeling/test_delete_component.py（20 用例：解析 7 +
+   delete 逻辑打桩 7 + 窗口路由 fake-self 6），全部通过；
+   test_pier_parse.py（20）、test_component_registry.py（10）回归通过。
+
+
+四、实测与误报修复（重要教训）
+------------------------------
+现象：用户实测删除成功（组件消失），但面板报"删除指令已执行，但场景实体数
+未减少，可能未生效"——误报。
+根因：初版用 _count_entities() 前后对比做校验，但参数化组件实体经
+delete_one_entity 删除后，get_all_entityid 计数不一定减少（计数口径不同），
+entityid_isvaid 复查也可能仍有效（删除延迟/可撤销）。
+修复（2026-08-21）：API 无异常即判成功，计数对比仅写日志。
+教训：**校验手段本身也要实测验证**——放置校验（_verify_new_entity 计数增加）
+是可靠的，但同样的计数思路套在删除上就会误报；不同 API 的计数口径不同。
+关联提交：a4c7337。
+
+
+五、技术栈与关键实现（速查）
+----------------------------
+  - 运行环境：BIMBase 2025 / Plugin SDK 1.6.2 / 内嵌 python-3.7.9（PyQt5）；
+    开发机 D:\zengpython3.13.2 跑离线测试。
+  - 删除：delete_one_entity（主）/ delete_data_bydatakey（兜底）；
+    成功判据 = API 无异常；计数仅记日志。
+  - 选中获取：get_selected_entity_ids / get_selected_instance_keys
+    （get_selections 在本版本 pyp3d 不存在，必须 getattr 宽容导入）。
+  - 注册表：ComponentRegistry.unregister(instance_key)；entity_id 匹配用 _key_str。
+  - 解析器：汉字数字在 parse() 入口统一转换，依赖字面量"一个/最后"的判断
+    都要用兼容转换后的正则。
+  - 窗口路由离线测试法：不建真实窗口，AIModelingWindow._execute_local_delete(
+    fake_self, ...) + mock.patch 模块级函数（delete_selected_components /
+    get_selected_instance_keys / PyQt5.QtWidgets.QMessageBox.question）。
+  - 调试日志：AI_Modeling/ai_modeling_debug.log。
+
+
+六、本地版本管理
+----------------
+  - af260f9 feat(AI_Modeling): 对话删除选中组件（功能+测试+记录）
+  - a4c7337 fix: 删除成功不再误报（计数仅记日志）
+  - 本文档为删除功能的最终完整记录；ai智能识别03 保留为过程稿。
+  - 未执行 git push（GitHub Token 仍未配置，仅本地仓库）。
+  - 顺手清理：Sample.pyplugin（BIMBase 自动产物，指向不存在的 Sample 目录）已删除。
+
+
+七、后续可做（待用户确认）
+--------------------------
+  1. 批量删除（删除所有/第N个/最后一个某类型组件）：注册表键为字符串，
+     需 get_all_instancekey() 扫描按 _key_str 匹配找回活对象后删除；
+     大场景扫描注意"找到即停"（1944 实例逐个 RPC 分钟级的教训）。
+  2. 配置 GitHub Token 后 git push origin main。
+
+
+================================================================================
+  本文件由 Kimi Code CLI 根据 2026-08-13 / 2026-08-21 对话整理生成
+================================================================================
