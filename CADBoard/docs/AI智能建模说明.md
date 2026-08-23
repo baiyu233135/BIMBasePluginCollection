@@ -2,62 +2,70 @@
 
 ## 功能概述
 
-CADBoard 的 AI 智能建模功能将自然语言指令转换为参数化 BIM 构件。它有两种实现方式：
+自 CADBoard 1.2.0 起，AI_Modeling 的智能建模能力已**并入 CAD 画板右侧的 AI 助手面板**，不再有独立的"AI智能建模"窗口按钮。画板 AI 面板同时支持：
 
-1. **调用 AI_Modeling**：通过 `ai_modeling_launcher.py` 启动独立的 AI 建模助手窗口。
-2. **内嵌 AI 面板**：在 CAD画板内部集成 `utils/ai_panel.py`，实现轻量级 AI 助手。
+1. **2D 画板指令**：画圆/矩形/直线、删除、修改属性、三视图画编辑等（原有功能不变）；
+2. **3D 智能建模指令**（来自 AI_Modeling）：创建/复制/修改/删除 BIMBase 组件、线性/矩形阵列、沿直线/圆弧路线布置、沿组件面路径布置；
+3. **DeepSeek/Coze 云端对话**：本地解析失败时自动调用，AI 返回的单条建模 JSON 会被识别并直接执行。
 
 ## 入口
 
-- 插件按钮：**AI智能建模** → `ai_modeling_launcher.py`
+- 画板工具栏 **"AI助手"** 按钮 → 展开/收起右侧 AI 面板。
+
+## 指令路由
+
+```
+用户输入自然语言
+  ├── LocalCommandParser（画板 2D 指令，永远优先）
+  │     └── 成功 → ai_executor 执行（画板元素 / 同步 BIMBase）
+  ├── ModelingCommandParser（AI_Modeling 3D 建模指令，画板解析失败时介入）
+  │     └── 命中 → ai_modeling_launcher.execute_modeling_action()
+  │           └── 临时 AI_Modeling 窗口上下文执行（pyp3d 放置需要）
+  └── 均失败 → DeepSeek/Coze API
+        ├── 返回 {"commands":[...]} → 用户确认后 execute_batch 执行
+        └── 返回单条建模 JSON {"action":"create","component_type":...} → 直接执行
+```
+
+无 API Key 时 3D 建模指令仍可用（本地解析不依赖网络）。
+
+**"AI优先"开关**（面板标题栏）：勾选后所有输入先调用大模型理解语义再执行（AI 返回的单条建模 JSON 会直接执行），适合语音输入等不规范指令；不勾选则简单指令走本地解析，响应更快、离线可用。
+
+## 执行行为说明（1.2.0 起）
+
+- **无弹窗执行**：3D 建模指令在屏幕外隐藏的临时窗口上下文中执行（pyp3d 放置需要窗口事件循环），不再弹出 AI 建模窗口；指令完全没带坐标时才弹坐标输入框询问。
+- **坐标写入组件参数**：放置坐标默认写入组件的 `偏移X/偏移Y/偏移Z` 参数（BIMBase 属性面板可见），几何位置以该参数为准，坐标单位毫米；指令中说明"不要写入位置参数"时跳过写入。
+- **单位支持**：默认毫米，支持后缀（`50cm`/`2m`）和整体声明（`单位用米`），内部统一换算为毫米。
+- **整体上色**：支持"放一个红色的圆柱"、"把选中的组件涂成半透明灰色"等，现阶段为组件整体统一色（6 面同色，BIMBase 默认方向）。
+- 坐标三种写法：`在(500,200,100)`、`在500,200,100`、`在500.200.100`（均表示 X=500, Y=200, Z=100）。
+
+## 指令示例
+
+| 指令 | 效果 |
+|---|---|
+| 放一个半径2高5的圆柱 | 在指定/询问坐标放置圆柱 |
+| 在(1000,2000,500)生成半径300高800的圆柱 | 绝对坐标放置（毫米） |
+| 在500,200,100放一个圆柱 / 在500.200.100布置一个桥墩 | 三种坐标写法均可：带括号、纯逗号、点号分隔 |
+| 沿X轴每隔10放5个圆柱 | 线性阵列 |
+| 生成3×3方阵，间距2000，每个位置放一个正方体边长300 | 矩形阵列 |
+| 沿选中的直线每隔500mm放半径50高100的圆柱 | 沿路线布置 |
+| 复制选中的圆柱到(1000,2000,0) | 复制组件 |
+| 把选中的圆柱半径改成400 | 修改组件参数 |
+| 删除选中的组件 | 删除组件 |
 
 ## 主要文件
 
 | 文件 | 功能 |
 |---|---|
-| `ai_modeling_launcher.py` | 入口脚本，加载 `AI_Modeling/main.py` |
-| `utils/ai_panel.py` | CAD画板内嵌 AI 面板，含本地解析和 DeepSeek 对话 |
-| `utils/ai_executor.py` | AI 结构化指令执行引擎 |
-| `utils/mcp_tools.py` | MCP 工具接口 |
-| `ai_config.json` | DeepSeek/百度 API Key 配置 |
-
-## 指令流程
-
-```
-用户输入自然语言
-  ├── 本地解析（LocalCommandParser）
-  │     ├── 成功 → 直接调用 ai_executor 执行
-  │     └── 失败 → 调用 DeepSeek API
-  │             └── 返回 JSON 指令 → ai_executor 执行
-  └── 执行结果反馈到 CAD画板或 BIMBase
-```
-
-## 本地解析支持
-
-`utils/ai_panel.py` 中的 `LocalCommandParser` 支持以下类型指令：
-
-- 创建基础几何体（圆柱、长方体、正方体、球体、圆锥）
-- 修改属性（把/将/让……改成/变成/设为/改为 <数值>）
-- 删除实体
-- 简单阵列
-
-## 调用 AI_Modeling
-
-```python
-import sys
-sys.path.insert(0, '../AI_Modeling')
-from main import run
-run()
-```
+| `utils/ai_panel.py` | 画板内嵌 AI 面板（路由、DeepSeek 对话、配置、"AI优先"模式开关） |
+| `utils/ai_modeling_bridge.py` | AI_Modeling 解析桥接层（加载 command_parser.py、判定与执行入口） |
+| `ai_modeling_launcher.py` | 3D 命令执行载体：`execute_modeling_action()` 支持 create/copy/modify/delete |
+| `utils/ai_executor.py` | 画板 2D 结构化指令执行引擎 |
+| `ai_config.json` | DeepSeek/Coze/百度语音 API 配置（面板"配置"按钮维护） |
+| `../AI_Modeling/ai_modeling/command_parser.py` | 3D 建模中文指令解析器（被桥接层复用，源码不改动） |
+| `test_ai_modeling_bridge.py` | 桥接路由单元测试（`python CADBoard/test_ai_modeling_bridge.py`） |
 
 ## 依赖
 
-- `AI_Modeling/` 目录必须存在。
-- DeepSeek API Key（如需云端 AI 对话）。
+- `AI_Modeling/` 目录必须存在（解析器与放置逻辑的实际载体）。
+- DeepSeek API Key（可选，云端对话用）。
 - PyQt5/PyQt6、pyp3d。
-
-## 使用建议
-
-- 简单指令优先走本地解析，响应更快。
-- 复杂需求使用 DeepSeek 对话。
-- 如果 AI 返回的代码无法执行，可切换到 `AI建模/` 手动复制运行。

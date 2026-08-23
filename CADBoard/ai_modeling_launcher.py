@@ -51,9 +51,10 @@ def _load_ai_main():
         sys.path.remove(ai_dir)
     sys.path.insert(0, ai_dir)
 
-    # 清除可能已被 CADBoard 污染的同名模块缓存
+    # 清除可能已被污染的同名模块缓存（AI_Modeling 的组件类模块已改名为 aim_bimbase_sync，
+    # 与 CADBoard 的 bimbase_sync 不再冲突，切勿再清理 bimbase_sync）
     for key in list(sys.modules.keys()):
-        if key == 'bimbase_sync' or key.startswith('ai_modeling'):
+        if key == 'aim_bimbase_sync' or key.startswith('ai_modeling'):
             _log(f"_load_ai_main: clearing cached module {key}")
             del sys.modules[key]
 
@@ -64,13 +65,23 @@ def _load_ai_main():
     return ai_main
 
 
-def execute_parsed_command(parsed, original_text=""):
+# 建模动作 → AIModelingWindow 本地执行方法 的映射
+_ACTION_METHODS = {
+    'create': '_execute_local_create',
+    'copy': '_execute_local_copy',
+    'modify': '_execute_local_modify',
+    'delete': '_execute_local_delete',
+}
+
+
+def execute_modeling_action(parsed, original_text=""):
     """
-    在 AI_Modeling 窗口的上下文中执行结构化创建命令。
+    在 AI_Modeling 窗口的上下文中执行结构化建模命令（通用版）。
+    支持 create / copy / modify / delete 四种本地动作，
     每次都新建一个临时 AI 窗口、执行、关闭，以获得确定性的返回结果，
     避免与已有的 AI 窗口引用冲突。
 
-    parsed 格式与 AIModelingWindow._execute_local_create 一致，例如：
+    parsed 格式与 AIModelingWindow._execute_local_* 一致，例如：
       {
         'action': 'create',
         'component_type': 'cylinder',
@@ -87,19 +98,30 @@ def execute_parsed_command(parsed, original_text=""):
     except ImportError:
         from PyQt6.QtCore import QTimer
 
-    _log(f"execute_parsed_command: parsed={parsed}")
+    _log(f"execute_modeling_action: parsed={parsed}")
+
+    action = (parsed or {}).get('action')
+    method_name = _ACTION_METHODS.get(action)
+    if not method_name:
+        return False, f"不支持的建模动作: {action}"
 
     try:
+        # 快照模块环境：AI_Modeling 与 CADBoard 存在同名模块（bimbase_sync 等），
+        # _load_ai_main 会重排 sys.path 并清缓存，执行后必须恢复，
+        # 否则画板同步等链路会把组件类解析到 AI_Modeling 的同名模块而失败
+        _saved_path = list(sys.path)
+        _saved_mods = {k: sys.modules.get(k) for k in ('bimbase_sync', 'component_registry')}
         ai_main = _load_ai_main()
         try:
             from ai_modeling.ai_window import AIModelingWindow
         except Exception as e:
-            _log(f"execute_parsed_command: cannot import AIModelingWindow: {e}")
+            _log(f"execute_modeling_action: cannot import AIModelingWindow: {e}")
             return False, f"无法导入 AIModelingWindow: {e}"
         window = AIModelingWindow()
+        # 隐藏执行：移到屏幕外再 show，不抢占用户焦点
+        # （pyp3d 的 place_to/_PlaceToDirect 需要窗口进入事件循环，但不能完全不用窗口）
+        window.move(-32000, -32000)
         window.show()
-        window.raise_()
-        window.activateWindow()
 
         result = [False, ""]
 
@@ -119,20 +141,38 @@ def execute_parsed_command(parsed, original_text=""):
         def _do_exec():
             try:
                 before = _count_entities()
-                _log(f"execute_parsed_command: entity count before={before}")
-                window._execute_local_create(parsed, original_text)
+                _log(f"execute_modeling_action[{action}]: entity count before={before}")
+                getattr(window, method_name)(parsed, original_text)
                 after = _count_entities()
-                _log(f"execute_parsed_command: entity count after={after}")
-                if after > before:
+                _log(f"execute_modeling_action[{action}]: entity count after={after}")
+                if action == 'create':
+                    if after > before:
+                        result[0] = True
+                        result[1] = f"AI_Modeling 执行完成，新增 {after - before} 个实体"
+                    else:
+                        result[0] = False
+                        result[1] = "AI_Modeling 执行后未检测到新实体"
+                elif action == 'copy':
+                    if before < 0 or after > before:
+                        result[0] = True
+                        result[1] = "AI_Modeling 复制执行完成"
+                    else:
+                        result[0] = False
+                        result[1] = "AI_Modeling 复制后未检测到新实体"
+                elif action == 'delete':
+                    if before < 0 or after < before:
+                        result[0] = True
+                        result[1] = "AI_Modeling 删除执行完成"
+                    else:
+                        result[0] = False
+                        result[1] = "AI_Modeling 删除后实体数量未减少"
+                else:  # modify：不引起实体数变化，无异常即视为成功
                     result[0] = True
-                    result[1] = f"AI_Modeling 执行完成，新增 {after - before} 个实体"
-                else:
-                    result[0] = False
-                    result[1] = "AI_Modeling 执行后未检测到新实体"
+                    result[1] = "AI_Modeling 修改执行完成"
             except Exception as e:
                 result[0] = False
                 result[1] = f"AI_Modeling 执行失败: {e}"
-                _log(f"execute_parsed_command _do_exec error: {e}\n{traceback.format_exc()}")
+                _log(f"execute_modeling_action _do_exec error: {e}\n{traceback.format_exc()}")
             finally:
                 try:
                     window.accept()
@@ -140,26 +180,41 @@ def execute_parsed_command(parsed, original_text=""):
                     pass
 
         QTimer.singleShot(0, _do_exec)
-        _log("execute_parsed_command: entering AI window exec_()")
+        _log(f"execute_modeling_action[{action}]: entering AI window exec_()")
         window.exec_()
-        _log(f"execute_parsed_command: exec_() returned, result={result}")
+        _log(f"execute_modeling_action[{action}]: exec_() returned, result={result}")
         return result[0], result[1]
     except Exception as e:
         tb = traceback.format_exc()
-        _log(f"execute_parsed_command error: {e}\n{tb}")
+        _log(f"execute_modeling_action error: {e}\n{tb}")
         return False, f"AI_Modeling 代理执行失败: {e}"
+    finally:
+        # 恢复 CADBoard 的模块环境，避免 AI_Modeling 的同名模块污染画板同步链路
+        sys.path[:] = _saved_path
+        for _k, _v in _saved_mods.items():
+            if _v is None:
+                sys.modules.pop(_k, None)
+            else:
+                sys.modules[_k] = _v
+
+
+def execute_parsed_command(parsed, original_text=""):
+    """兼容入口：创建命令，委托给 execute_modeling_action。"""
+    return execute_modeling_action(parsed, original_text)
 
 
 def execute_text_command(text):
     """
     在 AI_Modeling 窗口的上下文中执行自然语言命令。
+    支持 create / copy / modify / delete 四种本地动作。
     返回: (success: bool, message: str)
     """
     try:
+        _load_ai_main()  # 确保 AI_Modeling 目录在 sys.path 且模块缓存干净
         from ai_modeling.command_parser import ModelingCommandParser
         parsed = ModelingCommandParser.parse(text)
-        if parsed and parsed.get('action') == 'create' and parsed.get('component_type'):
-            return execute_parsed_command(parsed, text)
+        if parsed and parsed.get('action') in _ACTION_METHODS:
+            return execute_modeling_action(parsed, text)
         return False, "无法解析为本地可执行命令"
     except Exception as e:
         return False, f"execute_text_command error: {e}"
@@ -179,6 +234,9 @@ def execute_callback_in_ai_window(callback, *args, **kwargs):
     _log(f"execute_callback_in_ai_window: callback={callback}")
 
     try:
+        # 快照模块环境（同 execute_modeling_action），执行后恢复，避免污染画板同步链路
+        _saved_path = list(sys.path)
+        _saved_mods = {k: sys.modules.get(k) for k in ('bimbase_sync', 'component_registry')}
         ai_main = _load_ai_main()
         try:
             from ai_modeling.ai_window import AIModelingWindow
@@ -186,9 +244,10 @@ def execute_callback_in_ai_window(callback, *args, **kwargs):
             _log(f"execute_callback_in_ai_window: cannot import AIModelingWindow: {e}")
             return False, f"无法导入 AIModelingWindow: {e}"
         window = AIModelingWindow()
+        # 隐藏执行：移到屏幕外再 show，不抢占用户焦点
+        # （pyp3d 的 place_to/_PlaceToDirect 需要窗口进入事件循环，但不能完全不用窗口）
+        window.move(-32000, -32000)
         window.show()
-        window.raise_()
-        window.activateWindow()
 
         result = [False, ""]
 
@@ -235,6 +294,14 @@ def execute_callback_in_ai_window(callback, *args, **kwargs):
         tb = traceback.format_exc()
         _log(f"execute_callback_in_ai_window error: {e}\n{tb}")
         return False, f"AI_Modeling 回调执行失败: {e}"
+    finally:
+        # 恢复 CADBoard 的模块环境，避免 AI_Modeling 的同名模块污染画板同步链路
+        sys.path[:] = _saved_path
+        for _k, _v in _saved_mods.items():
+            if _v is None:
+                sys.modules.pop(_k, None)
+            else:
+                sys.modules[_k] = _v
 
 
 def launch_ai_window():

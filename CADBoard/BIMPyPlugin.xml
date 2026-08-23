@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <BIMPyPlugin>
     <BfaLibName/>
-    <PluginVersion>1.1.0</PluginVersion>
+    <PluginVersion>1.2.0</PluginVersion>
     <LoadStatus>true</LoadStatus>
     <Category name="CADBoard">
         <Panel name="绘图面板">
@@ -12,10 +12,6 @@
             <Button name="自动配置环境">
                 <command>setup_env.py</command>
                 <iconPath>CAD画板.ico</iconPath>
-            </Button>
-            <Button name="AI智能建模">
-                <command>ai_modeling_launcher.py</command>
-                <iconPath>AI建模.ico</iconPath>
             </Button>
             <Button name="桥隧病害识别">
                 <command>bridge_disease_launcher.py</command>

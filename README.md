@@ -24,7 +24,7 @@ pythonplugin/
 | 插件文件 | 名称 | 功能 | 入口目录 |
 |---|---|---|---|
 | `AI建模.pyplugin` | AI建模（大语言模型） | 登录大模型账号，对话生成建模代码 | `AI建模/` |
-| （暂无） | AI_Modeling | 新版本地 AI 智能建模助手 | `AI_Modeling/` |
+| （已并入 CADBoard） | AI_Modeling | 本地 AI 智能建模，能力已并入 CADBoard 画板 AI 面板 | `AI_Modeling/` |
 | `CADBoard.pyplugin` | CADBoard | CAD 画板、AI 智能建模、桥隧病害识别、自动配置环境 | `CADBoard/` |
 | `建模.pyplugin` | 建模插件库 | 曲线建模、圆柱批量建模 | `建模/` |
 | `桥梁组件.pyplugin` | 桥梁组件库 | 桥梁参数化结构、清单工具、STL 工具 | `桥梁组件/` |

@@ -13,6 +13,7 @@ class 索塔锚块(Component):
         self['底柱半径'] = Attr(170, obvious = True)
         self['底柱高度'] = Attr(1000, obvious = True)
         self['索塔'] = Attr(None, show=True)
+        self['颜色'] = Attr(None, show=False)  # 整体颜色 (r,g,b,a)，None 表示不上色
         self.replace()
 
     @export
@@ -47,7 +48,17 @@ class 索塔锚块(Component):
         section = rotate(Vec3(1,0,0),0.5*pi) * MDP
         line = Line(Vec3(0,0,0),Vec3(0,W,0))
         MD = translate(0,-W/2,DH+CH)*Sweep(section, line)
-        self["索塔"] = alld + CT +MD
+        geom = alld + CT + MD
+        try:
+            # 整体上色（颜色为 "r,g,b[,a]" 字符串，pyp3d Attr 只能存标量/字符串）
+            c = self['颜色'] if '颜色' in self else None
+            if c:
+                vals = [float(x) for x in str(c).split(',') if x.strip()]
+                if len(vals) >= 3:
+                    geom = geom.color(*vals)
+        except Exception:
+            pass
+        self["索塔"] = geom
 if __name__ == "__main__":
     FinalGeometry = 索塔锚块()
     place(FinalGeometry)

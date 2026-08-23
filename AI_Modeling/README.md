@@ -26,7 +26,7 @@ AI_Modeling/
 │   ├── geometry_exporter.py # 几何导出（OBJ/IFC）
 │   └── voice_input.py    # 语音输入
 ├── main.py               # 独立运行入口
-├── bimbase_sync.py       # BIMBase 参数化组件定义
+├── aim_bimbase_sync.py       # BIMBase 参数化组件定义
 ├── test_place_to.py      # place_to 测试脚本
 ├── ai_modeling_config.json # API Key 配置
 └── docs/                 # 模块文档

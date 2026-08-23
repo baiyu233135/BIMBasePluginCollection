@@ -36,7 +36,7 @@ except ImportError:
 from ai_modeling.config import load_config, set_api_key, get_api_key, save_config, CONFIG_DIR, CONFIG_FILE
 from ai_modeling.chat_thread import AIChatThread, AIChatNonStreamThread
 from ai_modeling.command_parser import ModelingCommandParser
-from ai_modeling.component_factory import create_component, place_component_at, batch_place, _infer_component_type_from_comp
+from ai_modeling.component_factory import create_component, place_component_at, batch_place, _infer_component_type_from_comp, apply_component_color
 from ai_modeling.component_registry import ComponentRegistry, get_registry
 from ai_modeling.array_generator import linear_array, rectangular_array, polar_array
 from ai_modeling.route import Route, ArcRoute, sample_route_for_components
@@ -519,6 +519,14 @@ class AIModelingWindow(QDialog):
         pos = parsed.get('position', {'mode': 'absolute', 'x': 0, 'y': 0, 'z': 0})
         arr = parsed.get('array')
         route_info = parsed.get('route')
+        # 用户要求"不写入位置参数"时，放置坐标不烘焙进组件参数
+        write_pos = parsed.get('write_position', True)
+        # 整体上色（6面统一色）：颜色作为参数传入 create_component，
+        # 由组件类的 replace() 保持颜色，阵列/路线布置的子组件同样生效
+        color = parsed.get('color')
+        if color:
+            params = dict(params)
+            params['颜色'] = color
 
         # 处理沿组件路径布置（最高优先级）
         path_info = parsed.get('path')
@@ -613,17 +621,17 @@ class AIModelingWindow(QDialog):
         results = []
         if path_placements:
             for x, y, z, child_comp in path_placements:
-                ok, msg = place_component_at(child_comp, x, y, z)
+                ok, msg = place_component_at(child_comp, x, y, z, bake=write_pos)
                 results.append((ok, msg))
         elif route_placements:
             for x, y, z, child_comp in route_placements:
-                ok, msg = place_component_at(child_comp, x, y, z)
+                ok, msg = place_component_at(child_comp, x, y, z, bake=write_pos)
                 results.append((ok, msg))
         else:
             for x, y, z in coords:
                 ok, msg = place_component_at(
                     create_component(comp_type, params),
-                    x, y, z
+                    x, y, z, bake=write_pos
                 )
                 results.append((ok, msg))
 
@@ -724,7 +732,8 @@ class AIModelingWindow(QDialog):
                 return
             x, y, z = base_pos
 
-        ok, msg = place_component_at(create_component(comp_type, params), x, y, z)
+        ok, msg = place_component_at(create_component(comp_type, params), x, y, z,
+                                     bake=parsed.get('write_position', True))
         self._append_system(
             f"{'✅' if ok else '❌'} {msg}",
             "#2E7D32" if ok else "#d32f2f"

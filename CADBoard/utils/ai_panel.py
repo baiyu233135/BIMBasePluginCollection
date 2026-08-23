@@ -21,6 +21,7 @@ from datetime import datetime
 
 from utils.ai_executor import AICommandExecutor, AIResponseParser
 from utils.voice_input import VoiceRecorder, BaiduSpeechRecognizer
+from utils import ai_modeling_bridge
 import bimbase_sync
 
 try:
@@ -37,7 +38,7 @@ except ImportError:
         QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QLineEdit,
         QPushButton, QLabel, QDialog, QFormLayout, QMessageBox,
         QSplitter, QListWidget, QListWidgetItem, QSizePolicy, QComboBox,
-        QGroupBox
+        QGroupBox, QCheckBox
     )
     from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
     from PyQt6.QtGui import QColor, QFont
@@ -1134,6 +1135,11 @@ class AIPanel(QWidget):
         self.mode_indicator.setToolTip("AI会根据指令复杂度自动选择：简单指令→本地执行，复杂指令→调用API")
         title_layout.addWidget(self.mode_indicator)
 
+        # AI优先模式：所有输入先交给大模型理解语义（适合语音/模糊指令），本地解析作为兜底
+        self.ai_first_cb = QCheckBox("AI优先")
+        self.ai_first_cb.setToolTip("勾选后所有输入先调用大模型理解语义再执行（语音输入更稳定）；\n不勾选则简单指令走本地解析，响应更快、离线可用")
+        title_layout.addWidget(self.ai_first_cb)
+
         config_btn = QPushButton("配置")
         config_btn.setMaximumWidth(50)
         config_btn.clicked.connect(self._show_config)
@@ -1208,7 +1214,7 @@ class AIPanel(QWidget):
 
         # 快捷提示
         tips = QLabel(
-            "<small>快捷: '画圆 r50 @100,200' | '删除' | '怎么用拉伸'</small>"
+            "<small>快捷: '画圆 r50 @100,200' | '放一个半径2高5的圆柱' | '沿X轴每隔10放5个圆柱' | '删除选中的'</small>"
         )
         tips.setStyleSheet("QLabel { color: #888; }")
         layout.addWidget(tips)
@@ -1218,9 +1224,10 @@ class AIPanel(QWidget):
             "你好！我是CAD画板AI助手。\n"
             "你可以:\n"
             "1. 用自然语言画图，如'在100,200画一个半径50的圆'\n"
-            "2. 询问命令用法，如'怎么用拉伸'\n"
-            "3. 直接执行命令，如'删除选中的元素'\n"
-            "4. 点击'配置'按钮设置DeepSeek API Key\n"
+            "2. 3D智能建模，如'放一个半径2高5的圆柱'、'沿X轴每隔10放5个圆柱'、'把选中的圆柱半径改成400'\n"
+            "3. 询问命令用法，如'怎么用拉伸'\n"
+            "4. 直接执行命令，如'删除选中的元素'\n"
+            "5. 点击'配置'按钮设置DeepSeek API Key\n"
         )
 
     def _append_message(self, role, text):
@@ -1259,6 +1266,12 @@ class AIPanel(QWidget):
 
         # v1.5 P3: 自动路由判断
         try:
+            # AI优先模式：所有输入先交给大模型理解语义（语音/模糊指令更稳），失败再走本地
+            if getattr(self, 'ai_first_cb', None) and self.ai_first_cb.isChecked():
+                if self.api_key or self._api_config.get('coze_token'):
+                    self.mode_indicator.setText("☁️ AI优先")
+                    self._call_ai(text, fast_mode=True)
+                    return
             use_local = self._should_use_local(text)
             bimbase_sync._log(f"[AI_PANEL] _should_use_local={use_local} for: {text!r}")
         except Exception as e:
@@ -1269,16 +1282,21 @@ class AIPanel(QWidget):
 
         if use_local:
             # 本地执行路径
-            self.mode_indicator.setText("⚡ 本地")
             parsed = LocalCommandParser.parse(text)
             if parsed:
+                self.mode_indicator.setText("⚡ 本地")
                 self._execute_local_command(parsed, text)
             else:
-                self._append_message('system',
-                    "本地无法识别该指令，尝试调用AI..."
-                )
-                # 本地失败，fallback到API
-                self._try_api(text)
+                # 画板解析失败 → 尝试 AI_Modeling 建模解析器（3D 建模指令）
+                mparsed = ai_modeling_bridge.parse_modeling_command(text)
+                if ai_modeling_bridge.is_modeling_action(mparsed):
+                    self._execute_modeling_command(mparsed, text)
+                else:
+                    self._append_message('system',
+                        "本地无法识别该指令，尝试调用AI..."
+                    )
+                    # 本地失败，fallback到API
+                    self._try_api(text)
             return
 
         # API路径
@@ -1292,9 +1310,14 @@ class AIPanel(QWidget):
             if parsed:
                 self._execute_local_command(parsed, text)
             else:
-                self._append_message('system',
-                    "未配置API Key/Token，无法调用AI。请点击'配置'按钮设置DeepSeek或Coze。"
-                )
+                # 无 API 配置时仍尝试本地建模指令（3D 建模不依赖网络）
+                mparsed = ai_modeling_bridge.parse_modeling_command(text)
+                if ai_modeling_bridge.is_modeling_action(mparsed):
+                    self._execute_modeling_command(mparsed, text)
+                else:
+                    self._append_message('system',
+                        "未配置API Key/Token，无法调用AI。请点击'配置'按钮设置DeepSeek或Coze。"
+                    )
             return
         self._call_ai(text, fast_mode=True)
 
@@ -1325,6 +1348,11 @@ class AIPanel(QWidget):
             bimbase_sync._log(traceback.format_exc())
             return False
         if not parsed:
+            # 画板解析器不认识时，尝试 AI_Modeling 建模解析器（如"放一个圆柱"）
+            mparsed = ai_modeling_bridge.parse_modeling_command(text)
+            if ai_modeling_bridge.is_modeling_action(mparsed):
+                bimbase_sync._log(f"[AI_PANEL] _should_use_local: modeling command detected: {mparsed}")
+                return True
             bimbase_sync._log("[AI_PANEL] _should_use_local: parsed is None, use API")
             return False
 
@@ -1367,6 +1395,23 @@ class AIPanel(QWidget):
             bimbase_sync._log(traceback.format_exc())
             success, msg = False, f"执行异常: {e}"
         bimbase_sync._log(f"[AI_PANEL] executor result: success={success}, msg={msg}")
+        if success:
+            self._append_message('system', f"✅ {msg}")
+        else:
+            self._append_message('error', f"❌ {msg}")
+
+    def _execute_modeling_command(self, parsed, original_text):
+        """执行 AI_Modeling 建模指令（3D 组件创建/复制/修改/删除）"""
+        bimbase_sync._log(f"[AI_PANEL] _execute_modeling_command: text={original_text!r} parsed={parsed}")
+        self.mode_indicator.setText("🏗️ 建模")
+        self._append_message('system', f"正在执行建模指令: {original_text}")
+        try:
+            success, msg = ai_modeling_bridge.execute(parsed, original_text)
+        except Exception as e:
+            bimbase_sync._log(f"[AI_PANEL] modeling execute exception: {e}")
+            bimbase_sync._log(traceback.format_exc())
+            success, msg = False, f"建模执行异常: {e}"
+        bimbase_sync._log(f"[AI_PANEL] modeling result: success={success}, msg={msg}")
         if success:
             self._append_message('system', f"✅ {msg}")
         else:
@@ -1466,6 +1511,18 @@ class AIPanel(QWidget):
             "索缆锚锭: 锚块总长、锚块总高、锚块宽度、承台长度、承台宽度、承台高度、底柱半径、底柱高度、底柱数量、底柱排数\n"
             "示例: {\"commands\":[{\"action\":\"agent\",\"tool\":\"modify_component\",\"params\":{\"target\":{\"component_type\":\"引桥桥墩\",\"index\":0},\"changes\":{\"墩高\":1000},\"position\":{\"x\":500,\"y\":0,\"z\":0}}}] }\n\n"
             "歧义规则:未明确来源且画板+BIMBase都有同类型→追问;仅一方有→直接执行该方。\n\n"
+            "3D建模指令: 若用户意图是创建/复制/修改/删除BIMBase三维组件(圆柱/长方体/正方体/球体/圆锥/引桥桥墩/索缆锚锭)，"
+            "可直接输出单条JSON(不进确认队列，立即执行):\n"
+            "创建: {\"action\":\"create\",\"component_type\":\"cylinder|box|cube|sphere|cone|pier|anchor\",\"params\":{\"radius\":300,\"height\":800},"
+            "\"position\":{\"mode\":\"absolute\",\"x\":1000,\"y\":2000,\"z\":500},"
+            "\"array\":null或{\"mode\":\"linear\",\"axis\":\"x\",\"spacing\":1000,\"count\":5},"
+            "\"route\":null或{\"mode\":\"line\",\"start\":[0,0,0],\"end\":[100000,0,0],\"spacing\":20000}}\n"
+            "复制: {\"action\":\"copy\",\"target\":{\"mode\":\"selected\"},\"position\":{\"mode\":\"absolute\",\"x\":..,\"y\":..,\"z\":..}}\n"
+            "修改: {\"action\":\"modify\",\"target\":{\"mode\":\"selected\"},\"changes\":{\"radius\":400},\"preserve_position\":false}\n"
+            "删除: {\"action\":\"delete\",\"target\":{\"mode\":\"selected\"}}\n"
+            "仅在建模意图明确时使用该格式;画板2D操作或意图模糊时仍输出commands格式。\n"
+            "补充: 坐标/尺寸单位默认毫米(mm)，用户说米/厘米时换算为毫米; 可选 \"color\":[r,g,b] (0~1浮点，可加第4位透明度) 给组件整体上色;"
+            " 用户要求\"不写入位置参数\"时加 \"write_position\": false。\n\n"
             "画板状态:\n" + context + "\n\n"
             "BIMBase状态:\n" + bimbase_state + "\n"
         )
@@ -1666,6 +1723,15 @@ class AIPanel(QWidget):
         # 新模式处理
         if isinstance(parsed, dict):
             action = parsed.get('action', '')
+
+            # 0. 单条建模指令（AI_Modeling 兼容格式）直接执行，不进待确认队列
+            if 'commands' not in parsed and ai_modeling_bridge.is_modeling_action(parsed):
+                self._append_message('system', "🤖 AI输出建模指令，正在执行...")
+                self._execute_modeling_command(parsed, getattr(self, '_last_user_text', '') or "AI指令")
+                user_text = getattr(self, '_last_user_text', '')
+                self.chat_history.append({"role": "user", "content": user_text})
+                self.chat_history.append({"role": "assistant", "content": text})
+                return
 
             # 1. 追问模式
             if action == 'ask':

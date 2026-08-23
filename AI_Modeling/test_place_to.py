@@ -16,7 +16,7 @@ if plugin_dir not in sys.path:
 
 # 临时修改 sys.argv[0] 以便 place/place_to 能读取 DependentFile
 original_argv0 = sys.argv[0]
-sys.argv[0] = os.path.join(plugin_dir, 'bimbase_sync.py')
+sys.argv[0] = os.path.join(plugin_dir, 'aim_bimbase_sync.py')
 
 log_path = os.path.join(plugin_dir, 'test_place_to_output.txt')
 

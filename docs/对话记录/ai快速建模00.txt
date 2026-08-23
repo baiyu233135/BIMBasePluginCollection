@@ -1,0 +1,226 @@
+================================================================================
+ai快速建模00 —— 对话整理与技术交接文档
+日期: 2026-08-23
+主题: 将 AI_Modeling 智能建模能力并入 CADBoard 画板 AI 面板 + 多轮功能完善与修复
+用途: 新对话快速恢复上下文（配合 docs/01_项目总览.md、docs/02_插件清单与入口.md 阅读）
+================================================================================
+
+一、用户需求演进（按提出顺序）
+--------------------------------------------------------------------------------
+
+【需求0】项目咨询（仅讨论，未改代码）
+- 本地大模型部署方案（Ollama + Qwen2.5，OpenAI 兼容接口接入成本低）
+- 项目完善建议（IntentEngine/PluginRegistry 重构、补数据集、测试体系等）
+- 论文方向（LLM+桥梁参数化建模 benchmark、图纸识别、病害-BIM 闭环）
+
+【需求1】AI 智能建模并入画板 AI 面板（本轮核心）
+- 目标：不再弹独立 AI 建模窗口；画板 AI 面板原有功能不变，完全兼容
+  AI_Modeling（自动布置/阵列/沿路线/复制/修改/删除），识图功能保持现状。
+- 用户确认的四个决策：合并到画板AI面板 / 2D与3D指令自动判断 / 识图不动 /
+  API 配置统一为 CADBoard/ai_config.json。
+
+【需求2】执行体验修复（第一轮实测反馈）
+- 不跳 AI 智能建模弹窗 → 临时窗口移到屏幕外（window.move(-32000,-32000)）
+  再 show()，exec_() 保留事件循环；缺坐标时仍弹坐标输入框（用户选择保留）。
+- 坐标支持三种写法（单位 mm）：在(500,200,100) / 在500,200,100 /
+  在500.200.100（点号分隔为工程口语习惯）。
+- 放置坐标写入组件 偏移X/偏移Y/偏移Z 参数且属性面板可见，几何位置以
+  该参数为准（放置用恒等变换，避免双重偏移），所有组件类型统一。
+
+【需求3】四项功能完善（第二轮）
+- 单位：默认 mm，支持逐个后缀（50cm/2m/毫米/厘米/米）和整体声明
+  （"单位用米"/"单位m"/"单位：厘米"），内部统一换算成 mm；
+  数量（个数/排数）与角度不参与换算。
+- 不写入位置参数开关：指令含"不要位置参数/不写入/不写位置"等 →
+  write_position=False，改用 translate 放置、不烘焙偏移参数。
+- 组件整体上色（6 面统一色，BIMBase 默认方向）：创建+修改都支持；
+  颜色词：红/绿/蓝/黄/灰/白/黑/橙/紫/青/粉 + "半透明"（alpha=0.5）；
+  上色动词：涂成/染成/上色/刷成。
+- 画板坐标系与 BIMBase 相互独立：点"同步到BIMBase"每次弹出 X/Y/Z 基准
+  坐标输入框（默认 0,0,0，毫米），整体平移放置。
+
+【需求4】修复轮（第二轮实测反馈，含一次崩溃）
+- "不要位置参数"未生效 → 关键词正则漏匹配，改为
+  (不|别)(要|用|需)?(写入|记录|带|加)?(位置|坐标)。
+- "单位m"未换算 → 整体声明正则中"用/是/为"改为可选。
+- 上色未生效 → 两层根因（见三.关键技术坑 c）。
+- 手画组件同步失败 + BIMBase 崩溃 → 模块同名冲突（见三.关键技术坑 b）。
+
+【需求5】疑问解答与新增功能
+- 疑问：组件参数能否统一改成 m/cm 显示？→ 结论：不能也不必，BIMBase 内核
+  单位是 mm，参数值即真实几何尺寸；指令层已支持 m/cm 自动换算。
+- 需求：语音输入不规范时先调大模型理解语义 → 已实现面板标题栏"AI优先"
+  开关（勾选后所有输入先给 DeepSeek 理解，建模 JSON 直接执行；本地解析兜底）。
+
+【需求6】画板面编辑调整（第三轮）
+- 解答了 Z起始/Z终止/厚度/宽度/高度 的语义（见四.名词解释）。
+- 删除了左侧栏冗余的"三视图"下拉框（_face_mode_combo，创建后从未被读取）。
+- "生成面元素"对话框只保留两个模式：智能=3个标准投影面（俯视/主视/左视），
+  全部面=组件定义的所有面；引桥桥墩/索缆锚锭也统一弹对话框。
+
+二、当前进度（做到哪里）
+--------------------------------------------------------------------------------
+
+已完成（代码全部落地，离线测试通过）：
+- AI_Modeling 能力并入画板 AI 面板（三级路由，见三.a）
+- 无弹窗执行、坐标三种写法、偏移参数写入、单位换算、不写入开关、
+  整体上色、同步基准坐标弹窗、AI优先开关、面编辑两模式、冗余下拉删除
+- 离线测试：CADBoard/test_ai_modeling_bridge.py 27 个用例全过；
+  AI_Modeling 既有测试（test_pier_parse/test_delete_component/
+  test_component_registry）50 个全过；所有改动文件 py_compile 通过。
+
+待用户在 BIMBase 中实测（编写本文件时未验证）：
+1. 隐藏窗口执行后 3D 放置是否正常（pyp3d 依赖窗口事件循环）
+2. "不要位置参数" + 上色（绿色桥墩）是否同时生效
+3. "单位m" 后偏移参数是否为 200000/400000/500000
+4. 建模指令执行后再同步手画组件是否正常、不再崩溃
+5. 修改改色路径（"把选中的组件涂成灰色"，走 replace_noumenon 重建）
+6. 同步弹窗 + 偏移效果
+7. 面元素生成两模式对话框
+
+已知遗留问题：
+- "面参数总览"对话框中圆的半径显示异常值（12734649），未修。
+- 引桥桥墩/索缆锚锭面模板只有 3 面，"全部面"对它们效果同"智能"。
+- aim_bimbase_sync.py 改名后，改名前放置的 AI 组件在旧模型文件中
+  可能无法解析，需重新生成。
+- 对话记录/日志中的"新增 N 个实体"计数偶有偏差（桥墩计 5 或 1），
+  来自 pyp3d 计数 API 差异，不影响功能。
+
+三、技术栈与关键机制（最重要，新对话必读）
+--------------------------------------------------------------------------------
+
+技术栈：
+- BIMBase 2025 + Python 插件 SDK 1.6.2，内置 Python 3.7.9 embed
+- pyp3d v18446497937724801024（几何内核：Component/Attr/Sweep/Combine/
+  Cube/Cone/Sphere/create_geometry/place_to/_PlaceToDirect）
+- PyQt5 为主、PyQt6 兼容（所有 UI 文件都是 try PyQt5 except PyQt6 双写）
+- DeepSeek API（urllib 裸 POST，流式 SSE）、百度语音、DashScope（识图）
+- 离线测试用系统 Python 3.13（不依赖 pyp3d 的部分）
+
+【关键技术坑 a】三级指令路由（CADBoard/utils/ai_panel.py）
+用户输入 → ① 画板 LocalCommandParser（2D 指令，永远优先）
+        → ② AI_Modeling ModelingCommandParser（经 utils/ai_modeling_bridge.py
+            桥接；桥接用 importlib 按文件路径单独加载 command_parser.py
+            （该文件只依赖 re），不触发 ai_modeling 包初始化、不碰 sys.modules）
+        → ③ DeepSeek/Coze API（返回单条建模 JSON {"action":"create",...} 时
+            绕过确认队列直接执行；{"commands":[...]} 走原有确认流程）。
+- is_modeling_action() 门槛：action ∈ create/copy/modify/delete，
+  create 必须有 component_type，防止闲聊误判。
+- bridge.execute() 做 AI JSON 兼容：modify 的 changes→params、
+  color 字段归一化（中文词/0-255/0-1 均可）。
+- 面板 system prompt 已含 3D 建模 JSON 格式说明（支持
+  array/route/copy/modify/delete/color/write_position）。
+
+【关键技术坑 b】模块同名冲突（崩溃根因，已根除）
+- CADBoard/bimbase_sync.py 与 AI_Modeling 原 bimbase_sync.py 同名，
+  pyp3d 用"模块名.类名"（PARACMPT_KEYWORD_REPRESENTATION =
+  'bimbase_sync.ApproachPierComponent'）引用组件类，同名导致回调解析错乱：
+  轻则同步失败（'module' object is not callable），重则 BIMBase 崩溃。
+- 修复：AI_Modeling/bimbase_sync.py 改名为 aim_bimbase_sync.py，
+  同步更新 component_factory.py、test_place_to.py、ai_modeling_launcher.py。
+- CADBoard/ai_modeling_launcher.py 的 execute_modeling_action /
+  execute_callback_in_ai_window 仍保留 sys.path + sys.modules 的
+  快照/恢复（finally 中还原），防止 sys.path[0] 残留污染画板链路；
+  _load_ai_main 只清理 aim_bimbase_sync 和 ai_modeling*，绝不再清 bimbase_sync。
+- place/place_to 要求 sys.argv[0] 指向组件类定义文件
+  （component_factory.py 中 sys.argv[0] = aim_bimbase_sync.py 路径）。
+
+【关键技术坑 c】pyp3d Attr 只能存标量/字符串（颜色方案）
+- 把颜色元组 (r,g,b,a) 写进 Attr 会报"该类型尚未注册序列化方法"，放置失败。
+- 现行方案：颜色以 "r,g,b,a" 字符串写入组件 '颜色' 属性（show=False），
+  各组件类 replace() 末尾统一调 _apply_color_attr(self, geom) 解析上色
+  （AI_Modeling/aim_bimbase_sync.py 7 个类 + 组件测试/索缆锚锭.py 的索塔锚块，
+  几何键名：圆柱/长方体/正方体/球体/圆锥/直角三棱柱/引桥桥墩/索塔）。
+- 组件颜色存在几何 Symbology 上，可正常序列化；Combine.color() 会递归
+  覆盖所有零件（正好满足"整体统一色"）。
+- create_component 弹出 params['颜色'] → 写字符串属性 + 记录 _ai_color；
+  place_component_at 在 replace() 后用 _ai_color 兜底重染
+  （覆盖未接入'颜色'属性的组件类）。
+- 修改上色走 modify_instance_by_key → create_component 重建路径，颜色作为
+  '颜色' 参数穿透；颜色记入 _ai_modeling_params 元数据，复制时保留。
+
+【关键技术坑 d】放置与坐标烘焙（component_factory.place_component_at）
+- 首选 create_geometry(translate * comp)；烘焙开启（默认）时先把坐标写入
+  偏移X/Y/Z（show=True 可见）再 replace()，放置用恒等变换；
+  bake=False（"不写入位置参数"）时跳过烘焙、用 translate(x,y,z) 放置。
+- 兜底链：create_geometry → _PlaceToDirect → place_to → 烘焙+place_to →
+  文件导入 → 模拟点击 → 手动 place()。注意兜底 1c 的烘焙也受 bake 标志控制。
+
+【关键技术坑 e】单位归一化（command_parser.py）
+- parse() 开头先 _replace_chinese_numerals，再 _normalize_units：
+  整体声明（单位用米/单位m/单位：厘米/按米）从文本移除并返回系数；
+  点号三元组带单位（在5.4.2米）整体换算；数值+单位后缀逐个换算。
+- 提取完成后 _apply_unit_factor 只换算坐标/尺寸/间距/路线，
+  跳过数量（count/rows/cols/系梁根数/底柱数量/底柱排数）、角度、颜色。
+
+【关键技术坑 f】同步链路（CADBoard）
+- board._sync_to_bimbase → _ask_sync_origin() 弹窗（每次都弹，可取消）
+  → bimbase_sync.sync_to_bimbase(board, elements, origin=(x,y,z))
+  → BIMBaseSync._sync_element 首次放置时 x/y/z 加 origin 偏移；
+  PDF 识别元素有自己的锚点弹窗，不叠加 origin；已有实例的原地更新不受影响。
+
+【关键技术坑 g】面编辑
+- 生成面元素：FaceGenerateDialog 两选项（智能→内部'三视图'3面，
+  全部面→内部'完整'所有面），所有支持的组件（简单组件/引桥桥墩/索缆锚锭）
+  统一弹窗。模板面数（geometry/faces.py FACE_TEMPLATES）：
+  正方体/长方体 6 面，圆柱/直角三棱柱 5 面，引桥桥墩/索缆锚锭 3 面，
+  线/弧/多边形等 1 面。
+- 左侧面板原"三视图"下拉（_face_mode_combo）是创建后从未被读取的死代码，
+  已删除；"全部面"下拉是面过滤器（_face_filter_combo），保留。
+
+四、名词解释（属性面板字段）
+--------------------------------------------------------------------------------
+- 宽度/高度：2D 平面水平/竖直尺寸（矩形的宽高；圆显示包围盒尺寸）。
+  注意非矩形元素的"高度"显示的是 Z终止-Z起始（3D 高度），改它直接改 Z终止。
+- Z起始/Z终止：元素竖直方向起止标高（mm），同步时圆→圆柱的底/顶标高等。
+- 厚度：闭合图形拉伸成实体的厚度；线/弧 3D 化时作为管半径
+  （bimbase_sync.py 中 radius=thickness）。
+
+五、改动文件清单（本次会话）
+--------------------------------------------------------------------------------
+新增：
+- CADBoard/utils/ai_modeling_bridge.py     解析桥接层
+- CADBoard/test_ai_modeling_bridge.py      离线单元测试（27 用例）
+- AI_Modeling/aim_bimbase_sync.py          由 bimbase_sync.py 改名（7 组件类+颜色）
+- docs/对话记录/ai快速建模00.txt           本文件
+
+主要修改：
+- CADBoard/utils/ai_panel.py               三级路由+建模执行+AI优先开关+prompt
+- CADBoard/ai_modeling_launcher.py         execute_modeling_action 通用执行器、
+                                           屏外隐藏窗口、模块环境快照/恢复
+- AI_Modeling/ai_modeling/command_parser.py 坐标三写法/单位/write_position/颜色解析
+- AI_Modeling/ai_modeling/component_factory.py 烘焙开关/颜色/apply_component_color
+- AI_Modeling/ai_modeling/ai_window.py     执行方法接 write_position/color
+- CADBoard/board.py                        同步基准坐标弹窗、删冗余下拉、面编辑两模式
+- CADBoard/bimbase_sync.py                 sync_to_bimbase(origin=...)+放置偏移
+- 组件测试/索缆锚锭.py                     颜色属性支持
+- CADBoard.pyplugin / CADBoard/BIMPyPlugin.xml  移除"AI智能建模"按钮，v1.2.0
+- 文档：README.md、docs/02_插件清单与入口.md、CADBoard/README.md、
+  CADBoard/docs/AI智能建模说明.md（重写）、测试文档.md、报错处理记录.md（第8/9/10节）、
+  AI_Modeling/README.md、AI_Modeling/docs/功能说明.md
+
+六、测试方法
+--------------------------------------------------------------------------------
+离线（无需 BIMBase，系统 Python）：
+    python CADBoard/test_ai_modeling_bridge.py        # 桥接路由 27 用例
+    cd AI_Modeling && python -m unittest test_pier_parse test_delete_component test_component_registry
+
+BIMBase 内人工测试：按 CADBoard/docs/测试文档.md 第 5/5b/5c/5d 节执行。
+日志位置：CADBoard/ai_modeling_launcher.log（[AI_PANEL]/[AI_BRIDGE] 标记）、
+AI_Modeling/ai_modeling_debug.log、CADBoard/bimbase_sync_debug.log。
+
+七、版本管理
+--------------------------------------------------------------------------------
+本次会话改动已提交 git（见最新 commit）。仓库惯例：中文 conventional commits
+（feat/fix/docs/chore + scope），提交前跑离线测试。
+注意：数据参考源/ 目录下的图纸整理（DWG 删除+目录化）是用户自己的改动，
+未包含在本次提交中；CADBoard/component_registry.json 为运行时数据，未提交。
+
+八、后续方向（未做，供参考）
+--------------------------------------------------------------------------------
+- AI自动化扩展路线图.md 中的 IntentEngine/PluginRegistry 重构（skill 化）
+- 复杂构件（引桥桥墩/索缆锚锭）补 6 面模板
+- "面参数总览"半径显示异常修复
+- 本地大模型（Ollama + Qwen2.5）接入：chat_thread.py 改 base_url 即可
+- 图纸识别落地（docs/画板图纸识别技术方案.md 方案 A/B 均未实现）
+================================================================================

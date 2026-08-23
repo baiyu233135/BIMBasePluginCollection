@@ -86,6 +86,25 @@ def _circle_section(radius, segments=32):
     return Section(*points)
 
 
+def _apply_color_attr(comp, geom):
+    """若组件带 '颜色' 属性（"r,g,b[,a]" 字符串，0~1），对几何整体上色后返回；否则原样返回。
+    在 replace() 末尾调用，保证任何参数重建后颜色仍然保持（6面统一色）。
+    注意：pyp3d 的 Attr 只能存标量/字符串，颜色必须以字符串形式存储（元组无法序列化）。"""
+    try:
+        c = comp['颜色'] if '颜色' in comp else None
+        if not c:
+            return geom
+        if isinstance(c, str):
+            vals = [float(x) for x in c.split(',') if x.strip()]
+        else:
+            vals = [float(v) for v in c]
+        if len(vals) >= 3:
+            return geom.color(*vals)
+    except Exception as e:
+        _log(f"_apply_color_attr failed: {e}")
+    return geom
+
+
 class CylinderComponent(Component):
     """圆柱组件 - 几何体出生在原点，由 place_to 负责定位"""
     def __init__(self, radius=100, height=200, ox=0, oy=0, oz=0):
@@ -95,6 +114,7 @@ class CylinderComponent(Component):
         self['偏移X'] = Attr(float(ox), show=False)
         self['偏移Y'] = Attr(float(oy), show=False)
         self['偏移Z'] = Attr(float(oz), show=False)
+        self['颜色'] = Attr(None, show=False)  # 整体颜色 (r,g,b,a)，None 表示不上色
         self['圆柱'] = Attr(None, show=True)
         self.replace()
 
@@ -107,7 +127,7 @@ class CylinderComponent(Component):
         oz = float(self['偏移Z']) if '偏移Z' in self else 0.0
         section = _circle_section(r)
         path = Line(Vec3(ox, oy, oz), Vec3(ox, oy, oz + h))
-        self['圆柱'] = Sweep(section, path)
+        self['圆柱'] = _apply_color_attr(self, Sweep(section, path))
 
 
 class BoxComponent(Component):
@@ -120,6 +140,7 @@ class BoxComponent(Component):
         self['偏移X'] = Attr(float(ox), show=False)
         self['偏移Y'] = Attr(float(oy), show=False)
         self['偏移Z'] = Attr(float(oz), show=False)
+        self['颜色'] = Attr(None, show=False)  # 整体颜色 (r,g,b,a)，None 表示不上色
         self['长方体'] = Attr(None, show=True)
         self.replace()
 
@@ -133,7 +154,7 @@ class BoxComponent(Component):
         oz = float(self['偏移Z']) if '偏移Z' in self else 0.0
         section = Section(Vec2(ox, oy), Vec2(ox + L, oy), Vec2(ox + L, oy + W), Vec2(ox, oy + W))
         path = Line(Vec3(0, 0, oz), Vec3(0, 0, oz + H))
-        self['长方体'] = Sweep(section, path)
+        self['长方体'] = _apply_color_attr(self, Sweep(section, path))
 
 
 class CubeComponent(Component):
@@ -144,6 +165,7 @@ class CubeComponent(Component):
         self['偏移X'] = Attr(float(ox), show=False)
         self['偏移Y'] = Attr(float(oy), show=False)
         self['偏移Z'] = Attr(float(oz), show=False)
+        self['颜色'] = Attr(None, show=False)  # 整体颜色 (r,g,b,a)，None 表示不上色
         self['正方体'] = Attr(None, show=True)
         self.replace()
 
@@ -153,7 +175,7 @@ class CubeComponent(Component):
         ox = float(self['偏移X']) if '偏移X' in self else 0.0
         oy = float(self['偏移Y']) if '偏移Y' in self else 0.0
         oz = float(self['偏移Z']) if '偏移Z' in self else 0.0
-        self['正方体'] = translate(ox, oy, oz) * scale(a, a, a) * Cube()
+        self['正方体'] = _apply_color_attr(self, translate(ox, oy, oz) * scale(a, a, a) * Cube())
 
 
 class SphereComponent(Component):
@@ -164,6 +186,7 @@ class SphereComponent(Component):
         self['偏移X'] = Attr(float(ox), show=False)
         self['偏移Y'] = Attr(float(oy), show=False)
         self['偏移Z'] = Attr(float(oz), show=False)
+        self['颜色'] = Attr(None, show=False)  # 整体颜色 (r,g,b,a)，None 表示不上色
         self['球体'] = Attr(None, show=True)
         self.replace()
 
@@ -173,7 +196,7 @@ class SphereComponent(Component):
         ox = float(self['偏移X']) if '偏移X' in self else 0.0
         oy = float(self['偏移Y']) if '偏移Y' in self else 0.0
         oz = float(self['偏移Z']) if '偏移Z' in self else 0.0
-        self['球体'] = translate(ox, oy, oz) * scale(r, r, r) * Sphere()
+        self['球体'] = _apply_color_attr(self, translate(ox, oy, oz) * scale(r, r, r) * Sphere())
 
 
 class ConeComponent(Component):
@@ -185,6 +208,7 @@ class ConeComponent(Component):
         self['偏移X'] = Attr(float(ox), show=False)
         self['偏移Y'] = Attr(float(oy), show=False)
         self['偏移Z'] = Attr(float(oz), show=False)
+        self['颜色'] = Attr(None, show=False)  # 整体颜色 (r,g,b,a)，None 表示不上色
         self['圆锥'] = Attr(None, show=True)
         self.replace()
 
@@ -195,7 +219,7 @@ class ConeComponent(Component):
         ox = float(self['偏移X']) if '偏移X' in self else 0.0
         oy = float(self['偏移Y']) if '偏移Y' in self else 0.0
         oz = float(self['偏移Z']) if '偏移Z' in self else 0.0
-        self['圆锥'] = translate(ox, oy, oz) * scale(r, r, h) * Cone()
+        self['圆锥'] = _apply_color_attr(self, translate(ox, oy, oz) * scale(r, r, h) * Cone())
 
 
 class TriangularPrismComponent(Component):
@@ -208,6 +232,7 @@ class TriangularPrismComponent(Component):
         self['偏移X'] = Attr(float(ox), show=False)
         self['偏移Y'] = Attr(float(oy), show=False)
         self['偏移Z'] = Attr(float(oz), show=False)
+        self['颜色'] = Attr(None, show=False)  # 整体颜色 (r,g,b,a)，None 表示不上色
         self['直角三棱柱'] = Attr(None, show=True)
         self.replace()
 
@@ -221,7 +246,7 @@ class TriangularPrismComponent(Component):
         oz = float(self['偏移Z']) if '偏移Z' in self else 0.0
         section = Section(Vec2(ox, oy), Vec2(ox + a, oy), Vec2(ox, oy + b))
         path = Line(Vec3(0, 0, oz), Vec3(0, 0, oz + h))
-        self['直角三棱柱'] = Sweep(section, path)
+        self['直角三棱柱'] = _apply_color_attr(self, Sweep(section, path))
 
 
 class ApproachPierComponent(Component):
@@ -249,6 +274,8 @@ class ApproachPierComponent(Component):
         # 隐藏属性：坐标烘焙兜底时使用
         for k in ('偏移X', '偏移Y', '偏移Z'):
             self[k] = Attr(0.0, show=False)
+        # 整体颜色 (r,g,b,a)，None 表示不上色；replace() 末尾统一应用
+        self['颜色'] = Attr(None, show=False)
         # 允许外部传入参数覆盖默认值
         for k, v in kwargs.items():
             if k in self.DEFAULT_PARAMS or k in ('偏移X', '偏移Y', '偏移Z'):
@@ -335,7 +362,7 @@ class ApproachPierComponent(Component):
             parts = [cap, col1, col2]
             if ties is not None:
                 parts.append(ties)
-            self['引桥桥墩'] = Combine(*parts)
+            self['引桥桥墩'] = _apply_color_attr(self, Combine(*parts))
         except Exception as e:
             _log(f"  ApproachPierComponent.replace() error: {e}")
             self['引桥桥墩'] = Cube()

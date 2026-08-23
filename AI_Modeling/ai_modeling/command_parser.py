@@ -22,6 +22,7 @@ class ModelingCommandParser:
         '生成': 'create', '创建': 'create', '画': 'create', '绘制': 'create', '画一个': 'create',
         '布置': 'create', '放置': 'create', '摆': 'create',
         '修改': 'modify', '改': 'modify', '调整': 'modify', '更新': 'modify',
+        '上色': 'modify', '涂色': 'modify', '涂成': 'modify', '染成': 'modify', '刷成': 'modify',
         '删除': 'delete', '移除': 'delete', '删掉': 'delete',
         '复制': 'copy', '拷贝': 'copy',
     }
@@ -97,6 +98,9 @@ class ModelingCommandParser:
         text = text.strip().lower().replace('，', ',').replace('（', '(').replace('）', ')')
         # 汉字数字转阿拉伯数字（如“间隔二十米放置五个”→“间隔20米放置5个”）
         text = cls._replace_chinese_numerals(text)
+        # 单位归一化：显式后缀（mm/cm/m/毫米/厘米/米）换算为毫米；
+        # 整体声明（"单位用米"）返回换算系数，在提取完成后统一换算坐标与尺寸
+        text, unit_factor = cls._normalize_units(text)
 
         result = {
             'action': None,
@@ -108,7 +112,18 @@ class ModelingCommandParser:
             'path': None,
             'target': None,
             'preserve_position': False,
+            # 默认把放置坐标写入组件的 偏移X/Y/Z 参数；用户要求"不写入"时置 False
+            'write_position': True,
+            # 整体颜色 (r,g,b,a) 0~1 浮点；None 表示不上色
+            'color': None,
         }
+
+        # 不写入位置参数：如"不要写入位置参数"/"不写坐标"/"不要位置参数"
+        if re.search(r'(?:不|别)(?:要|用|需)?(?:写入|记录|带|加)?(?:位置|坐标)', text):
+            result['write_position'] = False
+
+        # 颜色提取：如"放一个红色的圆柱"/"涂成灰色"/"半透明蓝色"
+        color = cls._extract_color(text)
 
         # 1. 检测操作
         for cn, en in cls.ACTION_MAP.items():
@@ -141,13 +156,17 @@ class ModelingCommandParser:
                 # 尝试从目标推断
                 pass
             result['params'] = cls._extract_params(text)
+            if color:
+                result['params']['颜色'] = color
             result['preserve_position'] = cls._detect_preserve_position(text)
+            cls._apply_unit_factor(result, unit_factor)
             return result
 
         # 4b. 复制操作
         if result['action'] == 'copy':
             result['target'] = cls._parse_target(text)
             result['position'] = cls._extract_position(text)
+            cls._apply_unit_factor(result, unit_factor)
             return result
 
         # 4. 创建操作必须有组件类型
@@ -166,6 +185,12 @@ class ModelingCommandParser:
 
         # 8. 提取路线信息（沿路线布置）
         result['route'] = cls._extract_route(text)
+
+        # 9. 颜色（创建时整体上色）
+        result['color'] = color
+
+        # 10. 整体单位声明的换算（如"单位用米"）
+        cls._apply_unit_factor(result, unit_factor)
 
         return result
 
@@ -337,6 +362,103 @@ class ModelingCommandParser:
 
         return params
 
+    # 单位换算（内部统一为毫米）
+    _UNIT_FACTORS = {'毫米': 1.0, 'mm': 1.0, '厘米': 10.0, 'cm': 10.0, '米': 1000.0, 'm': 1000.0}
+
+    # 整体单位换算时跳过的键（数量/角度/标志位/颜色不换算）
+    _UNIT_SKIP_KEYS = {'count', 'rows', 'cols', '系梁根数', '底柱数量', '底柱排数',
+                       'angle', 'start_angle', 'end_angle', 'preserve_position', '颜色'}
+
+    # 颜色映射（0~1 浮点 RGB）
+    _COLOR_MAP = {
+        '粉红': (1.0, 0.75, 0.8), '粉': (1.0, 0.75, 0.8),
+        '红': (1.0, 0.0, 0.0), '绿': (0.0, 0.8, 0.0), '蓝': (0.0, 0.0, 1.0),
+        '黄': (1.0, 1.0, 0.0), '灰': (0.5, 0.5, 0.5), '白': (1.0, 1.0, 1.0),
+        '黑': (0.0, 0.0, 0.0), '橙': (1.0, 0.65, 0.0), '紫': (0.5, 0.0, 0.5),
+        '青': (0.0, 1.0, 1.0),
+    }
+
+    @staticmethod
+    def _fmt_num(v):
+        """整数值的 float 格式化为整数字符串，避免 '500.0' 这种残留"""
+        return str(int(v)) if float(v) == int(v) else str(v)
+
+    @classmethod
+    def _normalize_units(cls, text):
+        """
+        单位归一化（在 parse 主流程之前调用）：
+        1. 整体声明"单位用米/厘米/毫米" → 从文本中移除并返回换算系数，
+           由 _apply_unit_factor 在提取完成后统一换算（数量、角度不换算）；
+        2. 显式后缀（500mm / 50cm / 2米）→ 直接在文本中换算成毫米数值。
+        返回: (处理后的文本, 整体换算系数)
+        """
+        factor = 1.0
+        # 1. 整体单位声明（"单位用米"/"单位m"/"单位：厘米"/"按米"）
+        m = re.search(r'(?:单位\s*(?:用|是|为)?\s*[：:]?|按)\s*(毫米|厘米|米|mm|cm|m)', text)
+        if m:
+            factor = cls._UNIT_FACTORS[m.group(1)]
+            text = text[:m.start()] + text[m.end():]
+
+        # 2. 点号分隔坐标三元组带单位: 在5.4.2米 → 在5000,4000,2000（毫米）
+        def _dot_triple_repl(mo):
+            f = cls._UNIT_FACTORS[mo.group(4)]
+            vals = [float(mo.group(i)) * f for i in (1, 2, 3)]
+            return ','.join(cls._fmt_num(v) for v in vals)
+        text = re.sub(r'(-?\d+)\.(-?\d+)\.(-?\d+)\s*(毫米|厘米|米|mm|cm|m)',
+                      _dot_triple_repl, text)
+
+        # 3. 数值+单位后缀 → 毫米数值（长单位写在前面优先匹配，避免"500毫米"被"米"截断）
+        def _suffix_repl(mo):
+            return cls._fmt_num(float(mo.group(1)) * cls._UNIT_FACTORS[mo.group(2)])
+        text = re.sub(r'(-?\d+\.?\d*)\s*(毫米|厘米|米|mm|cm|m)', _suffix_repl, text)
+        return text, factor
+
+    @classmethod
+    def _apply_unit_factor(cls, result, factor):
+        """整体单位声明（如"单位用米"）→ 坐标与尺寸统一换算，数量/角度/颜色除外"""
+        if not factor or factor == 1.0:
+            return
+
+        def _scale(v):
+            try:
+                return float(v) * factor
+            except (TypeError, ValueError):
+                return v
+
+        pos = result.get('position') or {}
+        for k in ('x', 'y', 'z', 'distance'):
+            if k in pos:
+                pos[k] = _scale(pos[k])
+        for k, v in list((result.get('params') or {}).items()):
+            if k in cls._UNIT_SKIP_KEYS:
+                continue
+            if isinstance(v, (int, float)):
+                result['params'][k] = v * factor
+        arr = result.get('array') or {}
+        for k in ('spacing', 'row_spacing', 'col_spacing'):
+            if k in arr:
+                arr[k] = _scale(arr[k])
+        route = result.get('route') or {}
+        for k in ('spacing', 'radius', 'length'):
+            if k in route:
+                route[k] = _scale(route[k])
+        for k in ('start', 'end', 'center'):
+            if isinstance(route.get(k), (list, tuple)):
+                route[k] = [_scale(v) for v in route[k]]
+        path = result.get('path') or {}
+        if path.get('spacing') is not None:
+            path['spacing'] = _scale(path['spacing'])
+
+    @classmethod
+    def _extract_color(cls, text):
+        """提取整体颜色，如"红色的圆柱"/"涂成灰色"/"半透明蓝色"。返回 (r,g,b,a) 0~1 浮点或 None"""
+        m = re.search(r'(粉红|红|绿|蓝|黄|灰|白|黑|橙|紫|青|粉)\s*色?', text)
+        if not m:
+            return None
+        r, g, b = cls._COLOR_MAP[m.group(1)]
+        a = 0.5 if '半透明' in text else 1.0
+        return (r, g, b, a)
+
     @classmethod
     def _extract_position(cls, text):
         """提取位置信息。若用户未指定任何位置，返回 'manual' 模式，由调用方弹窗询问。"""
@@ -346,6 +468,10 @@ class ModelingCommandParser:
         abs_3d_patterns = [
             r'在?\s*\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)',
             r'坐标\s*\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)',
+            # 无括号逗号分隔: 在500,200,100
+            r'在\s*(-?\d+\.?\d*)\s*[,，]\s*(-?\d+\.?\d*)\s*[,，]\s*(-?\d+\.?\d*)',
+            # 点号分隔（工程口语习惯）: 在500.200.100 → X=500, Y=200, Z=100
+            r'在\s*(-?\d+)\.(-?\d+)\.(-?\d+)',
         ]
         for pat in abs_3d_patterns:
             m = re.search(pat, text)
@@ -360,6 +486,8 @@ class ModelingCommandParser:
         abs_2d_patterns = [
             r'在?\s*\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)',
             r'坐标\s*\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)',
+            # 无括号2D: 在500,200（z 默认为 0；3D 模式已在上方优先匹配）
+            r'在\s*(-?\d+\.?\d*)\s*[,，]\s*(-?\d+\.?\d*)',
         ]
         for pat in abs_2d_patterns:
             m = re.search(pat, text)

@@ -1838,6 +1838,13 @@ class BIMBaseSync:
             else:
                 # 非实体组件（线、矩形、多边形等）：坐标已 baked 进组件参数，用 identity 自动放置
                 x, y, z = 0, 0, 0
+            # 同步基准坐标偏移（由同步弹窗输入，画板与BIMBase坐标系相互独立）；
+            # PDF识别元素已有用户输入的锚点坐标，不再叠加
+            _origin = getattr(self, 'origin', None)
+            if _origin and not getattr(elem, 'pdf_recognized', False):
+                x += _origin[0]
+                y += _origin[1]
+                z += _origin[2]
             ok, pmsg = place_component_at(comp, x, y, z, auto_only=True)
             _log(f"  auto place result: ok={ok}, msg={pmsg}")
             if not ok:
@@ -2586,14 +2593,17 @@ def is_bimbase_available():
     return _pyp3d_ok
 
 
-def sync_to_bimbase(board, elements=None):
+def sync_to_bimbase(board, elements=None, origin=None):
     """
     兼容board.py的调用接口。
     board: 画板对象 (含 elements 属性)
     elements: 可选，指定要同步的元素列表；None 时同步所有非面元素
+    origin: 可选，(x, y, z) 放置基准坐标（毫米，由同步弹窗输入）；
+            画板坐标系与 BIMBase 相互独立，同步时整体平移到该基准位置
     返回: (success_count, error_list, replaced_bimbase_origins, manual_placed, skip_count)
     """
     sync = BIMBaseSync(board)
+    sync.origin = origin
     sync.sync_all(elements)
     replaced = getattr(sync, 'replaced_bimbase_origins', [])
     manual = getattr(sync, 'manual_placed', [])

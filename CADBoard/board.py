@@ -1229,12 +1229,6 @@ class CADBoardWindow(QMainWindow):
         self._exit_face_btn.setVisible(False)
         self.toolbar.addWidget(self._exit_face_btn)
 
-        self._face_mode_combo = QComboBox()
-        self._face_mode_combo.setMinimumWidth(70)
-        self._face_mode_combo.addItems(["三视图", "完整", "智能"])
-        self._face_mode_combo.setToolTip("面生成模式：三视图=3个投影面，完整=所有面，智能=按组件类型自动决定")
-        self.toolbar.addWidget(self._face_mode_combo)
-
         apply_face_btn = QPushButton("应用面修改")
         apply_face_btn.setToolTip("将面元素的变化应用到组件参数并重新生成")
         apply_face_btn.setMinimumWidth(90)
@@ -2129,6 +2123,33 @@ class CADBoardWindow(QMainWindow):
             QMessageBox.warning(self, "清除缓存失败", f"清除缓存时出错：{e}")
             self.status_bar.showMessage("清除缓存失败")
 
+    def _ask_sync_origin(self):
+        """同步到BIMBase前弹出手动输入放置基准坐标（画板坐标系与BIMBase相互独立）。
+        返回 (x, y, z) 毫米；用户取消返回 None。"""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("同步到BIMBase - 输入放置基准坐标")
+        dlg.setWindowModality(Qt.ApplicationModal)
+        layout = QFormLayout(dlg)
+        x_edit = QLineEdit("0")
+        y_edit = QLineEdit("0")
+        z_edit = QLineEdit("0")
+        layout.addRow("X (mm):", x_edit)
+        layout.addRow("Y (mm):", y_edit)
+        layout.addRow("Z (mm):", z_edit)
+        layout.addRow(QLabel("<small>画板内容将以该坐标为基准放置到 BIMBase</small>"))
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        layout.addRow(btns)
+        exec_method = getattr(dlg, 'exec_', getattr(dlg, 'exec', None))
+        if exec_method and exec_method() == QDialog.Accepted:
+            try:
+                return (float(x_edit.text()), float(y_edit.text()), float(z_edit.text()))
+            except (TypeError, ValueError):
+                QMessageBox.warning(self, "坐标无效", "请输入数字坐标")
+                return None
+        return None
+
     def _sync_to_bimbase(self):
         if not bimbase_sync.is_bimbase_available():
             QMessageBox.warning(self, "同步失败",
@@ -2138,6 +2159,11 @@ class CADBoardWindow(QMainWindow):
             QMessageBox.information(self, "同步", "画板为空，没有可同步的内容。")
             return
         try:
+            # 画板坐标系与 BIMBase 坐标系相互独立：同步前手动输入放置基准坐标
+            origin = self._ask_sync_origin()
+            if origin is None:
+                self.status_bar.showMessage("已取消同步")
+                return
             # 如果用户选中了面元素，自动找到对应的源组件进行同步
             selected = [e for e in self.elements if getattr(e, 'selected', False)]
             if selected:
@@ -2155,9 +2181,9 @@ class CADBoardWindow(QMainWindow):
                         if e.id not in seen_ids:
                             elements_to_sync.append(e)
                             seen_ids.add(e.id)
-                count, errors, replaced, manual, skip_count = bimbase_sync.sync_to_bimbase(self, elements_to_sync)
+                count, errors, replaced, manual, skip_count = bimbase_sync.sync_to_bimbase(self, elements_to_sync, origin=origin)
             else:
-                count, errors, replaced, manual, skip_count = bimbase_sync.sync_to_bimbase(self)
+                count, errors, replaced, manual, skip_count = bimbase_sync.sync_to_bimbase(self, origin=origin)
         except Exception as e:
             import traceback
             err_detail = traceback.format_exc()
@@ -2401,32 +2427,23 @@ class CADBoardWindow(QMainWindow):
             if self._face_group is None:
                 self._face_group = ComponentFaceGroup(self)
 
-            if source.component_type in ('引桥桥墩', '索缆锚锭'):
-                # 复杂构件：生成三视图模板面并进入面编辑模式
-                _log_face("complex component: generate three-view faces from template")
-                faces = self._face_group.generate_faces_for_element(source, mode='三视图')
-                if not faces:
-                    QMessageBox.warning(self, "面编辑", "无法为该复杂构件生成三视图面元素。")
-                    return
-                self._face_group.replace_faces(source.id, faces)
-                mode_label = "三视图"
-            else:
-                # 其他构件：弹出模式选择对话框并生成所有面
-                dialog = FaceGenerateDialog(self, source.component_type)
-                if dialog.exec_() != QDialog.Accepted:
-                    return
-                chosen_mode = dialog.get_selected_mode()
+            # 所有支持的组件（简单组件/引桥桥墩/索缆锚锭）统一弹出模式选择对话框：
+            # 智能=三视图3个投影面，全部面=组件定义的所有面（正方体/长方体为6面）
+            dialog = FaceGenerateDialog(self, source.component_type)
+            if dialog.exec_() != QDialog.Accepted:
+                return
+            chosen_mode = dialog.get_selected_mode()
 
-                source.component_params['_face_mode'] = chosen_mode
-                _log_face(f"calling generate_faces_for_element mode={chosen_mode}")
-                faces = self._face_group.generate_faces_for_element(source, mode=chosen_mode)
-                _log_face(f"generate_faces_for_element returned {len(faces) if faces else 0} faces")
-                if not faces:
-                    QMessageBox.warning(self, "面编辑", "无法为该组件生成面元素。")
-                    return
+            source.component_params['_face_mode'] = chosen_mode
+            _log_face(f"calling generate_faces_for_element mode={chosen_mode} type={source.component_type}")
+            faces = self._face_group.generate_faces_for_element(source, mode=chosen_mode)
+            _log_face(f"generate_faces_for_element returned {len(faces) if faces else 0} faces")
+            if not faces:
+                QMessageBox.warning(self, "面编辑", "无法为该组件生成面元素。")
+                return
 
-                self._face_group.replace_faces(source.id, faces)
-                mode_label = {"三视图": "三视图", "完整": "完整面", "智能": "智能"}.get(chosen_mode, chosen_mode)
+            self._face_group.replace_faces(source.id, faces)
+            mode_label = {"三视图": "智能（三视图）", "完整": "全部面"}.get(chosen_mode, chosen_mode)
 
             # 隐藏原始源元素，只显示生成的面元素
             source.visible = False
@@ -4035,7 +4052,7 @@ class EnvConfigDialog(QDialog):
 # ============================================================
 
 class FaceGenerateDialog(QDialog):
-    """面生成模式选择对话框 —— 让用户明确选择生成三视图还是完整面"""
+    """面生成模式选择对话框 —— 智能（三视图3个投影面）或 全部面（组件所有面，正方体/长方体为6面）"""
 
     def __init__(self, parent=None, component_type: str = ""):
         super().__init__(parent)
@@ -4055,12 +4072,11 @@ class FaceGenerateDialog(QDialog):
         info.setWordWrap(True)
         layout.addWidget(info)
 
-        # 模式选择按钮组
+        # 模式选择按钮组（智能=三视图3个投影面；全部面=组件的所有面，正方体/长方体为6面）
         self._btn_group = []
         modes = [
-            ("三视图", "生成3个标准投影面（俯视图/主视图/左视图）", "三视图"),
-            ("完整", "生成组件的所有面（可能包含底面/后视图/斜面等）", "完整"),
-            ("智能", "根据组件类型自动选择最合适的模式", "智能"),
+            ("智能", "生成3个标准投影面（俯视图/主视图/左视图）", "三视图"),
+            ("全部面", "生成组件的所有面（正方体/长方体为6个面，含底面/后视图/斜面等）", "完整"),
         ]
         for label, desc, mode_val in modes:
             btn = QPushButton(f"<b>{label}</b><br><small>{desc}</small>")
@@ -4074,7 +4090,7 @@ class FaceGenerateDialog(QDialog):
             self._btn_group.append(btn)
             layout.addWidget(btn)
 
-        # 默认选中三视图
+        # 默认选中智能
         if self._btn_group:
             self._btn_group[0].setChecked(True)
             self._selected_mode = "三视图"

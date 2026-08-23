@@ -17,9 +17,9 @@
 
 ### 2. AI 智能建模
 
-在 CAD 画板内嵌 AI 助手面板，或将自然语言指令转发到 `AI_Modeling` 执行。
+CAD 画板右侧内嵌 AI 助手面板，同时具备 2D 绘图指令和 AI_Modeling 的 3D 智能建模能力（创建/复制/修改/删除组件、阵列、沿路线布置），指令自动路由；DeepSeek 对话与 API 配置统一在面板内完成。
 
-入口：`ai_modeling_launcher.py`
+入口：画板工具栏"AI助手"按钮 → `utils/ai_panel.py`（`utils/ai_modeling_bridge.py` 桥接 AI_Modeling 解析，`ai_modeling_launcher.py` 负责 3D 命令执行）
 
 ### 3. 桥隧病害识别
 
@@ -47,7 +47,7 @@ CADBoard/
 ├── Picture/              # 图标资源
 ├── main.py               # CAD画板入口
 ├── setup_env.py          # 自动配置环境入口
-├── ai_modeling_launcher.py # AI智能建模入口
+├── ai_modeling_launcher.py # AI_Modeling 命令执行载体（供 AI 面板调用）
 ├── bridge_disease_launcher.py # 桥隧病害识别入口
 └── docs/                 # 模块文档
 ```

@@ -14,9 +14,9 @@ _plugin_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _plugin_dir in sys.path:
     sys.path.remove(_plugin_dir)
 sys.path.insert(0, _plugin_dir)
-# place/place_to 需要 sys.argv[0] 指向包含组件类定义的 bimbase_sync.py
+# place/place_to 需要 sys.argv[0] 指向包含组件类定义的 aim_bimbase_sync.py
 # BIMBase 通过 DependentFile 读取该文件来定位组件类
-_bimbase_sync_path = os.path.join(_plugin_dir, 'bimbase_sync.py')
+_aim_bimbase_sync_path = os.path.join(_plugin_dir, 'aim_bimbase_sync.py')
 
 _pyp3d_ok = False
 Component = Attr = Line = Section = Sweep = Cube = Sphere = Cone = None
@@ -132,7 +132,7 @@ except ImportError:
 def _set_argv_for_place():
     """place/place_to 依赖 sys.argv[0] 读取 DependentFile"""
     original = sys.argv[0]
-    sys.argv[0] = _bimbase_sync_path
+    sys.argv[0] = _aim_bimbase_sync_path
     return original
 
 
@@ -151,17 +151,17 @@ def _circle_section(radius, segments=32):
 # ============================================================
 # 参数化组件定义
 # ============================================================
-# 关键：从 bimbase_sync 导入组件类，这样 create_component 会记录
-# PARACMPT_KEYWORD_REPRESENTATION = 'bimbase_sync.CylinderComponent'
+# 关键：从 aim_bimbase_sync 导入组件类，这样 create_component 会记录
+# PARACMPT_KEYWORD_REPRESENTATION = 'aim_bimbase_sync.CylinderComponent'
 # python_transformation_operation 执行时就能正确找到模块
 
 _CylinderComponent = _BoxComponent = _CubeComponent = _SphereComponent = _ConeComponent = _TriangularPrismComponent = None
 _ApproachPierComponent = None
 
-# 无论 pyp3d 是否可用都尝试导入（bimbase_sync 自带占位回退，可离线导入），
+# 无论 pyp3d 是否可用都尝试导入（aim_bimbase_sync 自带占位回退，可离线导入），
 # 保证 COMPONENT_CLASSES/COMPONENT_DEFAULTS 注册完整，便于离线测试与诊断。
 try:
-    from bimbase_sync import (
+    from aim_bimbase_sync import (
         CylinderComponent as _CylinderComponent,
         BoxComponent as _BoxComponent,
         CubeComponent as _CubeComponent,
@@ -170,11 +170,11 @@ try:
         TriangularPrismComponent as _TriangularPrismComponent,
         ApproachPierComponent as _ApproachPierComponent,
     )
-    _log("component_factory: imported classes from bimbase_sync")
+    _log("component_factory: imported classes from aim_bimbase_sync")
 except Exception as e:
-    _log(f"component_factory: failed to import from bimbase_sync: {e}")
+    _log(f"component_factory: failed to import from aim_bimbase_sync: {e}")
 
-# 兜底：如果 bimbase_sync 导入失败且 pyp3d 可用，使用本地定义
+# 兜底：如果 aim_bimbase_sync 导入失败且 pyp3d 可用，使用本地定义
 if _CylinderComponent is None and Component is not None:
     class CylinderComponent(Component):
         def __init__(self, radius=100, height=200, ox=0, oy=0, oz=0):
@@ -310,7 +310,7 @@ COMPONENT_CLASSES = {
     'sphere': _SphereComponent,
     'cone': _ConeComponent,
     'triangular_prism': _TriangularPrismComponent,
-    # 引桥桥墩：类定义在 bimbase_sync.py（DependentFile），BIMBase 才能序列化/放置
+    # 引桥桥墩：类定义在 aim_bimbase_sync.py（DependentFile），BIMBase 才能序列化/放置
     'pier': _ApproachPierComponent,
 }
 
@@ -404,7 +404,7 @@ def _load_complex_component(file_path, class_name, component_key):
 
 
 # 尝试加载复杂组件（失败不影响基础几何体）
-# 注意：引桥桥墩（pier）已改为在 bimbase_sync.py 中定义（BIMBase 序列化要求），
+# 注意：引桥桥墩（pier）已改为在 aim_bimbase_sync.py 中定义（BIMBase 序列化要求），
 # 不再走动态加载；索缆锚锭（anchor）暂未迁移，保持原动态加载路径。
 _load_complex_component(
     os.path.join(_PROJECT_ROOT, '组件测试', '索缆锚锭.py'),
@@ -447,7 +447,11 @@ def create_component(component_type, params=None):
     if not cls:
         return None
     defaults = COMPONENT_DEFAULTS.get(component_type, {}).copy()
+    color = None
     if params:
+        params = dict(params)
+        # 颜色不是组件构造参数，单独取出在建模完成后整体上色
+        color = params.pop('颜色', None)
         defaults.update(_filter_component_params(component_type, params))
 
     try:
@@ -469,12 +473,30 @@ def create_component(component_type, params=None):
             defaults = _get_valid_kwargs(cls, defaults)
             comp = cls(**defaults)
 
-        # 记录 AI 建模使用的参数和类型，供注册表/复制使用
+        # 记录 AI 建模使用的参数和类型，供注册表/复制使用（含颜色，复制时保留颜色）
         try:
             comp._ai_modeling_component_type = component_type
-            comp._ai_modeling_params = dict(defaults)
+            meta = dict(defaults)
+            if color:
+                meta['颜色'] = color
+            comp._ai_modeling_params = meta
         except Exception as e2:
             _log(f"create_component store metadata failed: {e2}")
+        # 整体上色（6面统一色）：pyp3d Attr 只能存标量/字符串，
+        # 颜色以 "r,g,b,a" 字符串写入 '颜色' 属性，由组件 replace() 解析上色并保持；
+        # 同时记录 _ai_color 供放置阶段兜底重染，写入失败则直接染几何
+        if color:
+            try:
+                comp._ai_color = color
+            except Exception:
+                pass
+            try:
+                comp['颜色'] = ','.join(str(float(v)) for v in color)
+                if hasattr(comp, 'replace'):
+                    comp.replace()
+            except Exception as e:
+                _log(f"create_component set 颜色 attr failed: {e}")
+                apply_component_color(comp, color, component_type)
         return comp
     except Exception as e:
         _log(f"create_component error: {e}")
@@ -599,9 +621,85 @@ def _verify_new_entity(before_count):
     return eid_valid
 
 
-def place_component_at(comp, x, y, z):
+# 组件类型 → 几何属性键名（上色时定位几何体用）
+_GEOMETRY_KEY_MAP = {
+    'cylinder': '圆柱', 'box': '长方体', 'cube': '正方体', 'sphere': '球体',
+    'cone': '圆锥', 'triangular_prism': '直角三棱柱', 'pier': '引桥桥墩',
+    'anchor': '索塔',
+}
+
+
+def apply_component_color(comp, rgba, comp_type=None):
+    """
+    给组件几何整体上色（现阶段为6面统一色，BIMBase默认方向）。
+    rgba: 0~1 浮点 (r, g, b[, a])。返回是否成功。
+    """
+    if comp is None or not rgba:
+        return False
+    try:
+        key = _GEOMETRY_KEY_MAP.get(comp_type or _infer_component_type_from_comp(comp))
+        if not key or key not in comp:
+            # 兜底：扫描组件属性，找到带 .color() 方法的几何值（如动态加载的锚锭）
+            key = None
+            for k in _read_component_keys(comp):
+                try:
+                    v = comp[k]
+                except Exception:
+                    continue
+                if v is not None and hasattr(v, 'color'):
+                    key = k
+                    break
+        if not key:
+            return False
+        geom = comp[key]
+        if geom is None or not hasattr(geom, 'color'):
+            return False
+        vals = [float(v) for v in rgba]
+        comp[key] = geom.color(*vals)
+        _log(f"apply_component_color: {key} colored rgba={vals}")
+        return True
+    except Exception as e:
+        _log(f"apply_component_color error: {e}")
+        return False
+
+
+def _bake_offset_attrs(comp, x, y, z):
+    """
+    把放置坐标写入组件的 偏移X/Y/Z 参数，并设为属性面板可见。
+    写入后几何位置以组件参数为准，调用方应使用恒等变换放置，避免双重偏移。
+    返回 True 表示烘焙成功。
+    """
+    if comp is None or Attr is None:
+        return False
+    try:
+        keys = set(_read_component_keys(comp))
+    except Exception:
+        return False
+    if '偏移X' not in keys:
+        return False
+    ok = True
+    for k, v in (('偏移X', x), ('偏移Y', y), ('偏移Z', z)):
+        try:
+            comp[k] = Attr(float(v), show=True, obvious=True)
+        except Exception as e:
+            _log(f"_bake_offset_attrs: assign Attr {k} failed: {e}")
+            try:
+                comp[k] = float(v)
+            except Exception as e2:
+                _log(f"_bake_offset_attrs: assign {k} failed: {e2}")
+                ok = False
+    if ok:
+        _log(f"_bake_offset_attrs: baked ({x},{y},{z}) into 偏移X/Y/Z (visible)")
+    return ok
+
+
+def place_component_at(comp, x, y, z, bake=True):
     """
     将组件自动布置到指定三维坐标（官方 create_geometry 优先）
+
+    放置坐标会先烘焙进组件的 偏移X/偏移Y/偏移Z 参数（属性面板可见），
+    几何位置以该参数为准，放置变换使用恒等矩阵，避免双重偏移；
+    若组件没有偏移参数（烘焙失败），仍按原方式用 translate(x,y,z) 放置。
 
     官方推荐的原地创建方式：
       create_geometry(translate(x,y,z) * comp)
@@ -627,13 +725,24 @@ def place_component_at(comp, x, y, z):
     # 方案0（官方首选）：create_geometry + 平移变换
     try:
         _log(f"place_component_at: trying create_geometry at ({x},{y},{z})")
+        # 先把放置坐标烘焙进组件的 偏移X/Y/Z 参数（属性面板可见），
+        # 几何位置以组件参数为准，放置变换用恒等矩阵，避免双重偏移；
+        # bake=False（用户要求"不写入位置参数"）时跳过烘焙，用 translate 放置
+        baked = _bake_offset_attrs(comp, x, y, z) if bake else False
         if hasattr(comp, 'replace'):
             try:
                 comp.replace()
                 _log("place_component_at: comp.replace() done")
             except Exception as e:
                 _log(f"place_component_at: comp.replace() warning: {e}")
-        eid = create_geometry(translate(float(x), float(y), float(z)) * comp)
+        # 若组件带颜色但 replace 未保持（未支持'颜色'属性的组件类），重新染色兜底
+        ai_color = getattr(comp, '_ai_color', None)
+        if ai_color:
+            apply_component_color(comp, ai_color)
+        if baked:
+            eid = create_geometry(translate(0.0, 0.0, 0.0) * comp)
+        else:
+            eid = create_geometry(translate(float(x), float(y), float(z)) * comp)
         is_valid = entityid_isvaid(eid) if eid is not None else False
         _log(f"place_component_at: create_geometry eid={eid}, valid={is_valid}")
         if is_valid:
@@ -678,21 +787,23 @@ def place_component_at(comp, x, y, z):
                 _log(f"place_component_at: place_to failed: {e}")
 
         # 方案1c：把坐标烘焙到组件内部偏移参数，再走 place_to（identity）
-        try:
-            _log(f"place_component_at: baking offset ({x},{y},{z}) into component")
-            comp['偏移X'] = float(x)
-            comp['偏移Y'] = float(y)
-            comp['偏移Z'] = float(z)
-            if hasattr(comp, 'replace'):
-                comp.replace()
-                _log("place_component_at: component replace() done with offset")
-        except Exception as e:
-            _log(f"place_component_at: bake offset failed: {e}")
+        # （bake=False 表示用户要求"不写入位置参数"，跳过烘焙，直接用原坐标放置）
+        if bake:
+            try:
+                _log(f"place_component_at: baking offset ({x},{y},{z}) into component")
+                comp['偏移X'] = float(x)
+                comp['偏移Y'] = float(y)
+                comp['偏移Z'] = float(z)
+                if hasattr(comp, 'replace'):
+                    comp.replace()
+                    _log("place_component_at: component replace() done with offset")
+            except Exception as e:
+                _log(f"place_component_at: bake offset failed: {e}")
 
         if place_to is not None:
             try:
                 _log("place_component_at: trying place_to with baked offset")
-                place_to(comp, translate(0.0, 0.0, 0.0))
+                place_to(comp, translate(0.0, 0.0, 0.0) if bake else translate(float(x), float(y), float(z)))
                 _log("place_component_at: place_to with baked offset SUCCESS")
                 _record_placement(comp, x, y, z)
                 return True, f"✅ 已自动布置到 ({x}, {y}, {z})"
