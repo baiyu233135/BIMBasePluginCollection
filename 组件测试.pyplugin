@@ -38,24 +38,6 @@
                 <iconPath>承台及桩基.ico</iconPath>
             </Button>
         </Panel>
-        <Panel name="桥隧投影测试">
-            <Button name="投影测试T梁">
-                <command>投影测试T梁.py</command>
-                <iconPath>投影测试T梁.ico</iconPath>
-            </Button>
-            <Button name="投影测试横隔板">
-                <command>投影测试横隔板.py</command>
-                <iconPath>投影测试横隔板.ico</iconPath>
-            </Button>
-            <Button name="投影测试湿接缝">
-                <command>投影测试湿接缝.py</command>
-                <iconPath>投影测试湿接缝.ico</iconPath>
-            </Button>
-            <Button name="投影测试墩柱">
-                <command>投影测试墩柱.py</command>
-                <iconPath>投影测试墩柱.ico</iconPath>
-            </Button>
-        </Panel>
     </Category>
     <Name>组件测试</Name>
     <PluginModule>C:\ProgramData\PKPM\BIMBase\Plugins\Pro\V1.6\pythonplugin\组件测试\</PluginModule>
