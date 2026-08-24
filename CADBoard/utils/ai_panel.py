@@ -65,8 +65,12 @@ class LocalCommandParser:
         '长方体': '长方体', '拉伸体': '长方体',
         '球体': '球体', 'sphere': '球体', '球': '球体',
         '直角三棱柱': '直角三棱柱', '三棱柱': '直角三棱柱',
+        # 注意顺序: '门式桥墩'必须排在'桥墩'之前，避免被'桥墩'→引桥桥墩抢先匹配
+        '门式桥墩': '门式桥墩', '门式墩': '门式桥墩',
         '引桥桥墩': '引桥桥墩', '桥墩': '引桥桥墩',
         '索缆锚锭': '索缆锚锭', '锚锭': '索缆锚锭',
+        # '承台及桩基'排在'索缆锚锭'之后，避免"索缆锚锭的承台高度"被误判类型
+        '承台及桩基': '承台及桩基', '承台': '承台及桩基', '桩基': '承台及桩基',
     }
 
     # 操作映射
@@ -107,7 +111,7 @@ class LocalCommandParser:
     }
 
     # 支持的3D实体类型
-    SOLID_TYPES = {'圆柱', '正方体', '长方体', '球体', '直角三棱柱', '引桥桥墩', '索缆锚锭'}
+    SOLID_TYPES = {'圆柱', '正方体', '长方体', '球体', '直角三棱柱', '引桥桥墩', '索缆锚锭', '门式桥墩', '承台及桩基'}
 
     # 中文数字映射（支持"改为一"、"改为二"等）
     _CN_NUMBERS = {
@@ -146,10 +150,11 @@ class LocalCommandParser:
         if axis_cmd:
             return axis_cmd
 
-        # 1. 检测操作
+        # 1. 检测操作（"画板"含"画"字，先剔除避免"删除画板组件"误判为画图）
         action = None
+        action_text = text.replace('画板', '')
         for cn, en in cls.ACTION_MAP.items():
-            if cn.lower() in text:
+            if cn.lower() in action_text:
                 action = en
                 break
 
@@ -159,7 +164,11 @@ class LocalCommandParser:
 
         # 2. 删除操作
         if action == 'delete':
-            target = cls._parse_target(text)
+            # 删除目标优先取“选中的”（“组件”关键词在 _parse_target_text 中优先级更高，
+            # 但删除选中元素是更高频的意图）
+            if '选中' in text:
+                return {'action': 'delete', 'target': {'index': 'selected'}}
+            target = cls._parse_target_text(text)
             return {'action': 'delete', 'target': target}
 
         # 3. 同步操作
@@ -217,6 +226,9 @@ class LocalCommandParser:
             '锚块总长', '锚块总高', '锚块宽度', '承台长度', '承台宽度', '承台高度',
             '底柱半径', '底柱高度', '底柱数量', '底柱排数', '低柱半径', '低柱高度', '低柱数量', '低柱排数',
             '底柱',
+            # 门式桥墩/承台及桩基专用参数
+            '柱顶宽', '柱底宽', '柱顶厚', '柱底厚',
+            '承台长', '承台宽', '承台高', '桩径', '桩长', '桩间距', '桩列数', '桩排数',
         ]
         for prop in sorted(cn_props, key=len, reverse=True):
             if combined_text.endswith(prop):
@@ -313,7 +325,7 @@ class LocalCommandParser:
             prop = cls._parse_property_text(prop_text)
             target = {'element_type': elem_type} if elem_type else {'index': 'all'}
             changes = {prop: float(val_str)}
-            if elem_type and elem_type in ('圆柱', '正方体', '长方体', '直角三棱柱', '引桥桥墩', '索缆锚锭'):
+            if elem_type and elem_type in ('圆柱', '正方体', '长方体', '直角三棱柱', '引桥桥墩', '索缆锚锭', '门式桥墩', '承台及桩基'):
                 agent_params = {'target': {'component_type': elem_type}, 'changes': changes, 'path': 'auto'}
                 if position:
                     agent_params['position'] = position
@@ -346,7 +358,7 @@ class LocalCommandParser:
             else:
                 # 3. 纯属性修改（无主语）："高度改成100"、"盖梁宽改成500"、"底柱排数改为一"
                 # 优先匹配，避免被下面的通用 fallback 拆错（如把"盖梁宽"拆成 target="盖梁" prop="宽"）
-                prop_only_pat = rf'(高度|宽度|半径|长度|大小|深度|厚度|边长|直角边1|直角边2|h|a|b|r|墩高|盖梁总长|盖梁总高|盖梁宽|墩柱直径|墩柱间距|系梁根数|系梁数量|锚块总长|锚块总高|锚块宽度|承台长度|承台宽度|承台高度|底柱半径|底柱高度|底柱数量|底柱排数|底柱|低柱半径|低柱高度|低柱数量|低柱排数)\s*(?:改成|变成|设为|改为|增加|加长|加宽|加高|加大|减少|缩短|减小)\s*{_VAL}'
+                prop_only_pat = rf'(高度|宽度|半径|长度|大小|深度|厚度|边长|直角边1|直角边2|h|a|b|r|墩高|盖梁总长|盖梁总高|盖梁宽|墩柱直径|墩柱间距|系梁根数|系梁数量|锚块总长|锚块总高|锚块宽度|承台长度|承台宽度|承台高度|底柱半径|底柱高度|底柱数量|底柱排数|底柱|低柱半径|低柱高度|低柱数量|低柱排数|柱顶宽|柱底宽|柱顶厚|柱底厚|承台长|承台宽|承台高|桩径|桩长|桩间距|桩列数|桩排数)\s*(?:改成|变成|设为|改为|增加|加长|加宽|加高|加大|减少|缩短|减小)\s*{_VAL}'
                 m = re.search(prop_only_pat, text)
                 if m:
                     target_text = ''
@@ -398,6 +410,9 @@ class LocalCommandParser:
             '墩高', '盖梁总长', '盖梁总高', '盖梁宽', '墩柱直径', '墩柱间距', '系梁根数',
             '锚块总长', '锚块总高', '锚块宽度', '承台长度', '承台宽度', '承台高度',
             '底柱半径', '底柱高度', '底柱数量', '底柱排数', '系梁数量',
+            # 门式桥墩/承台及桩基专用参数
+            '柱顶宽', '柱底宽', '柱顶厚', '柱底厚',
+            '承台长', '承台宽', '承台高', '桩径', '桩长', '桩间距', '桩列数', '桩排数',
         }
         if prop in COMPLEX_PARAMS:
             agent_params = {'target': {'component': True}, 'changes': changes, 'path': 'auto'}
@@ -444,7 +459,7 @@ class LocalCommandParser:
                     break
             if elem_type:
                 # 如果是参数化组件，用 component_type 定位以便走 Agent 路径
-                if elem_type in ('圆柱', '正方体', '长方体', '直角三棱柱', '引桥桥墩', '索缆锚锭'):
+                if elem_type in ('圆柱', '正方体', '长方体', '直角三棱柱', '引桥桥墩', '索缆锚锭', '门式桥墩', '承台及桩基'):
                     return {'component_type': elem_type, 'index': idx}
                 return {'element_type': elem_type, 'index': idx}
             return {'index': idx}
@@ -464,10 +479,16 @@ class LocalCommandParser:
             '多边形': 'Polygon3DComponent',
             '圆弧': 'Arc3DComponent',
             '椭圆': 'Ellipse3DComponent',
+            # 注意顺序: '门式桥墩'必须排在'桥墩'之前；'承台'排在'锚锭'之后避免抢占索缆锚锭目标
+            '门式桥墩': '门式桥墩',
+            '门式墩': '门式桥墩',
             '引桥桥墩': '引桥桥墩',
             '桥墩': '引桥桥墩',
             '索缆锚锭': '索缆锚锭',
             '锚锭': '索缆锚锭',
+            '承台及桩基': '承台及桩基',
+            '承台': '承台及桩基',
+            '桩基': '承台及桩基',
         }
         for cn, ct in component_type_map.items():
             if cn in text:
@@ -506,6 +527,12 @@ class LocalCommandParser:
             '低柱数量': '底柱数量', '低柱排数': '底柱排数',
             # "底柱"单独出现时，通常指"底柱排数"
             '底柱': '底柱排数',
+            # 门式桥墩/承台及桩基专用参数
+            '柱顶宽': '柱顶宽', '柱底宽': '柱底宽',
+            '柱顶厚': '柱顶厚', '柱底厚': '柱底厚',
+            '承台长': '承台长', '承台宽': '承台宽', '承台高': '承台高',
+            '桩径': '桩径', '桩长': '桩长', '桩间距': '桩间距',
+            '桩列数': '桩列数', '桩排数': '桩排数',
         }
         for cn in sorted(complex_params.keys(), key=len, reverse=True):
             if cn in text:
@@ -613,6 +640,35 @@ class LocalCommandParser:
                 params['angle'] = float(m.group(1))
                 break
 
+        # 引桥桥墩/门式桥墩/承台及桩基专用参数
+        pier_param_patterns = {
+            '盖梁总长': r'盖梁总长\s*(\d+\.?\d*)',
+            '盖梁总高': r'盖梁总高\s*(\d+\.?\d*)',
+            '盖梁宽': r'盖梁宽\s*(\d+\.?\d*)',
+            '墩柱直径': r'墩柱直径\s*(\d+\.?\d*)',
+            '墩柱间距': r'墩柱间距\s*(\d+\.?\d*)',
+            '墩高': r'墩高\s*(\d+\.?\d*)',
+            '系梁根数': r'系梁根数\s*(\d+)',
+            # 门式桥墩专用参数
+            '柱顶宽': r'柱顶宽\s*(\d+\.?\d*)',
+            '柱底宽': r'柱底宽\s*(\d+\.?\d*)',
+            '柱顶厚': r'柱顶厚\s*(\d+\.?\d*)',
+            '柱底厚': r'柱底厚\s*(\d+\.?\d*)',
+            # 承台及桩基专用参数
+            '承台长': r'承台长\s*(\d+\.?\d*)',
+            '承台宽': r'承台宽\s*(\d+\.?\d*)',
+            '承台高': r'承台高\s*(\d+\.?\d*)',
+            '桩径': r'桩径\s*(\d+\.?\d*)',
+            '桩长': r'桩长\s*(\d+\.?\d*)',
+            '桩间距': r'桩间距\s*(\d+\.?\d*)',
+            '桩列数': r'桩列数\s*(\d+)',
+            '桩排数': r'桩排数\s*(\d+)',
+        }
+        for pname, pat in pier_param_patterns.items():
+            m = re.search(pat, text)
+            if m:
+                params[pname] = int(m.group(1)) if pname in ('系梁根数', '桩列数', '桩排数') else float(m.group(1))
+
         return params
 
     @classmethod
@@ -702,21 +758,6 @@ class LocalCommandParser:
             if m:
                 params['thickness'] = float(m.group(1))
                 break
-
-        # 引桥桥墩专用参数（精简参数版）
-        pier_param_patterns = {
-            '盖梁总长': r'盖梁总长\s*(\d+\.?\d*)',
-            '盖梁总高': r'盖梁总高\s*(\d+\.?\d*)',
-            '盖梁宽': r'盖梁宽\s*(\d+\.?\d*)',
-            '墩柱直径': r'墩柱直径\s*(\d+\.?\d*)',
-            '墩柱间距': r'墩柱间距\s*(\d+\.?\d*)',
-            '墩高': r'墩高\s*(\d+\.?\d*)',
-            '系梁根数': r'系梁根数\s*(\d+)',
-        }
-        for pname, pat in pier_param_patterns.items():
-            m = re.search(pat, text)
-            if m:
-                params[pname] = float(m.group(1)) if pname != '系梁根数' else int(m.group(1))
 
         return params
 
@@ -1268,6 +1309,29 @@ class AIPanel(QWidget):
         try:
             # AI优先模式：所有输入先交给大模型理解语义（语音/模糊指令更稳），失败再走本地
             if getattr(self, 'ai_first_cb', None) and self.ai_first_cb.isChecked():
+                # 明确的 3D 建模/布置指令（含“沿选中组件布置”“沿轴阵列”等）优先本地解析执行：
+                # 结果确定、不消耗 API；理解不了的模糊指令仍交给大模型
+                try:
+                    mp = ai_modeling_bridge.parse_modeling_command(text)
+                except Exception:
+                    mp = None
+                if ai_modeling_bridge.is_modeling_action(mp):
+                    act = mp.get('action')
+                    # create/copy 只涉及 BIMBase 3D 组件，可直接本地接管；
+                    # modify/delete 可能指向画板 2D 元素，仅当明确提到 BIMBase/软件 时才本地接管
+                    if act in ('create', 'copy') or 'bimbase' in text.lower() or '软件' in text:
+                        bimbase_sync._log(f"[AI_PANEL] AI优先 fast-path local modeling: {mp}")
+                        self.mode_indicator.setText("⚡ 本地")
+                        self._execute_modeling_command(mp, text)
+                        return
+                    # 明确说“画板”的删除/修改：走画板本地 2D 链路
+                    if '画板' in text:
+                        bp = LocalCommandParser.parse(text)
+                        if bp:
+                            bimbase_sync._log(f"[AI_PANEL] AI优先 fast-path board local: {bp}")
+                            self.mode_indicator.setText("⚡ 本地")
+                            self._execute_local_command(bp, text)
+                            return
                 if self.api_key or self._api_config.get('coze_token'):
                     self.mode_indicator.setText("☁️ AI优先")
                     self._call_ai(text, fast_mode=True)
@@ -1405,6 +1469,36 @@ class AIPanel(QWidget):
         bimbase_sync._log(f"[AI_PANEL] _execute_modeling_command: text={original_text!r} parsed={parsed}")
         self.mode_indicator.setText("🏗️ 建模")
         self._append_message('system', f"正在执行建模指令: {original_text}")
+        # 复制指令：若画板中有选中的可识别组件（含识别后的缓存视图线），
+        # 走画板侧复制（以画板组件为源，支持相对位置/沿轴阵列并逐个同步到 BIMBase）；
+        # 否则委托 AI_Modeling 复制 BIMBase 中选中的组件
+        if isinstance(parsed, dict) and parsed.get('action') == 'copy':
+            try:
+                # 画板中选中的任意元素（参数化组件、缓存视图线、普通图形，排除纯面元素）
+                board_sel = [e for e in getattr(self.board, 'elements', [])
+                             if getattr(e, 'selected', False)
+                             and not getattr(e, 'face_info', None)]
+            except Exception:
+                board_sel = []
+            if board_sel:
+                try:
+                    from utils.bimbase_agent import BIMBaseAgent
+                    agent = BIMBaseAgent(self.board)
+                    success, msg = agent.execute_tool('copy_component', {
+                        'target': {'mode': 'selected'},
+                        'position': parsed.get('position'),
+                        'array': parsed.get('array'),
+                        'write_position': parsed.get('write_position', True),
+                    })
+                except Exception as e:
+                    bimbase_sync._log(f"[AI_PANEL] board copy exception: {e}")
+                    success, msg = False, f"画板复制执行异常: {e}"
+                bimbase_sync._log(f"[AI_PANEL] board copy result: success={success}, msg={msg}")
+                if success:
+                    self._append_message('system', f"✅ {msg}")
+                else:
+                    self._append_message('error', f"❌ {msg}")
+                return
         try:
             success, msg = ai_modeling_bridge.execute(parsed, original_text)
         except Exception as e:
@@ -1496,9 +1590,11 @@ class AIPanel(QWidget):
             "你是CAD画板AI助手，将用户指令转为JSON操作。只输出JSON，不要解释。\n\n"
             "输出格式:{\"commands\":[...],\"summary\":\"描述\"}\n"
             "commands每项含action+参数:\n"
-            "create:element类型(circle/rectangle/line/arc/point/polyline/polygon/ellipse/圆柱/正方体/长方体/直角三棱柱/引桥桥墩/索缆锚锭)+params坐标尺寸\n"
+            "create:element类型(circle/rectangle/line/arc/point/polyline/polygon/ellipse/圆柱/正方体/长方体/直角三棱柱/引桥桥墩/索缆锚锭/门式桥墩/承台及桩基)+params坐标尺寸\n"
             "modify:target必须是字典{\"index\":\"selected\"}或{\"index\":N}或{\"element_type\":\"circle\"}+changes属性键值(支持+50/*2)\n"
-            "agent:tool(modify_component/sync_to_bimbase/query_state/regenerate_faces)+params; modify_component支持target/changes/path以及可选position{x,y,z}\n"
+            "agent:tool(modify_component/sync_to_bimbase/sync_from_bimbase/delete_bimbase_component/query_state/regenerate_faces)+params; modify_component支持target/changes/path以及可选position{x,y,z}\n"
+            "sync_to_bimbase的params必须带target:{\"mode\":\"selected\"}(同步选中)或{\"component\":true}(同步当前组件)，可选position{x,y,z}和write_position;只有用户明确要求同步全部时才省略target\n"
+            "sync_from_bimbase:把BIMBase中选中的组件同步回画板(可识别元素),params为{}; delete_bimbase_component:删除BIMBase中选中的组件,params为{}\n"
             "transform:transform_type(translate/rotate/scale/mirror)+target字典+params\n"
             "delete:target字典\n"
             "set_property:target字典+properties(z_start/z_end/height/is_3d/thickness)\n"
@@ -1509,15 +1605,18 @@ class AIPanel(QWidget):
             "可改参的组件及参数名:\n"
             "引桥桥墩: 盖梁总长、盖梁总高、盖梁宽、墩柱直径、墩柱间距、墩高、系梁根数\n"
             "索缆锚锭: 锚块总长、锚块总高、锚块宽度、承台长度、承台宽度、承台高度、底柱半径、底柱高度、底柱数量、底柱排数\n"
+            "门式桥墩: 盖梁总长、盖梁总高、盖梁宽、墩高、墩柱间距、柱顶宽、柱底宽、柱顶厚、柱底厚、系梁根数\n"
+            "承台及桩基: 承台长、承台宽、承台高、桩径、桩长、桩间距、桩列数、桩排数\n"
             "示例: {\"commands\":[{\"action\":\"agent\",\"tool\":\"modify_component\",\"params\":{\"target\":{\"component_type\":\"引桥桥墩\",\"index\":0},\"changes\":{\"墩高\":1000},\"position\":{\"x\":500,\"y\":0,\"z\":0}}}] }\n\n"
             "歧义规则:未明确来源且画板+BIMBase都有同类型→追问;仅一方有→直接执行该方。\n\n"
-            "3D建模指令: 若用户意图是创建/复制/修改/删除BIMBase三维组件(圆柱/长方体/正方体/球体/圆锥/引桥桥墩/索缆锚锭)，"
+            "3D建模指令: 若用户意图是创建/复制/修改/删除BIMBase三维组件(圆柱/长方体/正方体/球体/圆锥/引桥桥墩/索缆锚锭/门式桥墩/承台及桩基)，"
             "可直接输出单条JSON(不进确认队列，立即执行):\n"
             "创建: {\"action\":\"create\",\"component_type\":\"cylinder|box|cube|sphere|cone|pier|anchor\",\"params\":{\"radius\":300,\"height\":800},"
             "\"position\":{\"mode\":\"absolute\",\"x\":1000,\"y\":2000,\"z\":500},"
             "\"array\":null或{\"mode\":\"linear\",\"axis\":\"x\",\"spacing\":1000,\"count\":5},"
             "\"route\":null或{\"mode\":\"line\",\"start\":[0,0,0],\"end\":[100000,0,0],\"spacing\":20000}}\n"
             "复制: {\"action\":\"copy\",\"target\":{\"mode\":\"selected\"},\"position\":{\"mode\":\"absolute\",\"x\":..,\"y\":..,\"z\":..}}\n"
+            "复制也支持相对位置(position:{\"mode\":\"relative\",\"axis\":\"x|y|z\",\"distance\":毫米})和阵列(array:{\"mode\":\"linear\",\"axis\":\"x\",\"spacing\":5000,\"count\":10})\n"
             "修改: {\"action\":\"modify\",\"target\":{\"mode\":\"selected\"},\"changes\":{\"radius\":400},\"preserve_position\":false}\n"
             "删除: {\"action\":\"delete\",\"target\":{\"mode\":\"selected\"}}\n"
             "仅在建模意图明确时使用该格式;画板2D操作或意图模糊时仍输出commands格式。\n"

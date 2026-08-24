@@ -133,11 +133,13 @@ def get_selected_instance_keys():
 
 
 def get_instance_params(instance_key):
-    """获取指定实例的参数字典"""
-    if not _pyp3d_ok or get_noumKV_from_instancekey is None:
+    """获取指定实例的参数字典（展开 ParaCmptProperty 并从 Placement 提取世界坐标）"""
+    if not _pyp3d_ok:
         return None
     try:
-        return get_noumKV_from_instancekey(instance_key)
+        # 直接复用完整读取链路：get_noumKV 原始字典不含真实参数，
+        # 必须经 _read_params_from_instancekey 展开 ParaCmptProperty 才能识别组件类型
+        return _read_params_from_instancekey(instance_key)
     except Exception as e:
         _log(f"get_instance_params error: {e}")
         return None
@@ -148,11 +150,18 @@ def infer_component_type_from_params(params):
     if not params:
         return None
     keys = set(params.keys())
-    # 复杂组件（引桥桥墩 / 索缆锚锭）
+    # 复杂组件（门式桥墩 / 承台及桩基 / 引桥桥墩 / 索缆锚锭）
+    # 注意：gate_pier 与 pier 共享 盖梁总长/墩柱间距/系梁根数，必须用独有键先判别
+    if '柱顶宽' in keys or '柱底宽' in keys:
+        return 'gate_pier'
+    if '桩列数' in keys or '桩排数' in keys or '承台长' in keys:
+        return 'pile_foundation'
     if '盖梁总长' in keys or '墩柱间距' in keys or '系梁根数' in keys:
         return 'pier'
     if '锚块总长' in keys or '底柱半径' in keys or '承台长度' in keys:
         return 'anchor'
+    if '直角边1' in keys and '直角边2' in keys:
+        return 'triangular_prism'
     if '半径' in keys and '高度' in keys and '边长' not in keys:
         return 'cylinder'
     if '长度' in keys and '宽度' in keys and '高度' in keys:
@@ -284,6 +293,74 @@ def get_selected_component_info():
             'type': comp_type,
             'params': params,
         })
+    if infos and any(i.get('params') for i in infos):
+        return infos
+    # 面板选中的“参数化组件代理”实体，其 datakey 的 noumKV 为空（docs/05 实测定论）：
+    # 全扫 instance key，用 get_allbinding_entity_from_data 按绑定实体匹配选中实体
+    bound = _find_params_by_binding_scan()
+    if bound:
+        return bound
+    if not infos:
+        # 回退：instance key 为空时，直接从选中实体读参数
+        for eid in get_selected_entity_ids():
+            try:
+                params = _read_params_from_entity(eid)
+            except Exception as e:
+                _log(f"get_selected_component_info entity fallback error: {e}")
+                params = None
+            if params:
+                infos.append({
+                    'instance_key': None,
+                    'type': infer_component_type_from_params(params),
+                    'params': params,
+                })
+    return infos
+
+
+def _find_params_by_binding_scan():
+    """按绑定实体全扫 instance key，匹配当前选中实体对应的参数化组件实例（docs/05 方案）。"""
+    if get_all_instancekey is None or get_allbinding_entity_from_data is None:
+        return []
+    entity_ids = get_selected_entity_ids()
+    if not entity_ids:
+        return []
+    infos = []
+    scanned = 0
+    try:
+        all_keys = get_all_instancekey() or []
+    except Exception as e:
+        _log(f"_find_params_by_binding_scan: get_all_instancekey error: {e}")
+        return []
+    _log(f"_find_params_by_binding_scan: scanning {len(all_keys)} instance keys for {len(entity_ids)} selected entities")
+    for ik in all_keys:
+        scanned += 1
+        if scanned > 300:
+            _log("_find_params_by_binding_scan: reached limit 300")
+            break
+        try:
+            bound_entities = get_allbinding_entity_from_data(ik)
+            if not bound_entities:
+                continue
+            hit = None
+            for eid in entity_ids:
+                if _entity_id_in_list(eid, bound_entities):
+                    hit = eid
+                    break
+            if hit is None:
+                continue
+            params = _read_params_from_instancekey(ik)
+            _log(f"_find_params_by_binding_scan: matched instance, params keys={_safe_keys(params)}")
+            if params:
+                infos.append({
+                    'instance_key': ik,
+                    'type': infer_component_type_from_params(params),
+                    'params': params,
+                })
+                # 命中数量覆盖选中实体数即停（全扫 RPC 慢，docs/05 实测分钟级）
+                if len(infos) >= len(entity_ids):
+                    break
+        except Exception as e:
+            _log(f"_find_params_by_binding_scan item error: {e}")
     return infos
 
 

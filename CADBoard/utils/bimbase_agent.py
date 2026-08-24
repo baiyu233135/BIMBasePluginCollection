@@ -38,6 +38,9 @@ class BIMBaseAgent:
             'regenerate_faces': self._tool_regenerate_faces,
             'apply_face_changes': self._tool_apply_face_changes,
             'exit_face_edit': self._tool_exit_face_edit,
+            'sync_from_bimbase': self._tool_sync_from_bimbase,
+            'delete_bimbase_component': self._tool_delete_bimbase_component,
+            'copy_component': self._tool_copy_component,
         }
 
     def execute_tool(self, tool_name, params):
@@ -229,10 +232,31 @@ class BIMBaseAgent:
                     '低柱半径': '底柱半径', '低柱高度': '底柱高度',
                     '低柱数量': '底柱数量', '低柱排数': '底柱排数',
                 },
+                '门式桥墩': {
+                    'height': '墩高', 'h': '墩高',
+                    'width': '盖梁总长', 'length': '盖梁总长', 'l': '盖梁总长',
+                    'depth': '盖梁宽', 'w': '盖梁宽',
+                    '墩高': '墩高', '盖梁总长': '盖梁总长', '盖梁总高': '盖梁总高',
+                    '盖梁宽': '盖梁宽', '墩柱间距': '墩柱间距',
+                    '柱顶宽': '柱顶宽', '柱底宽': '柱底宽', '柱顶厚': '柱顶厚', '柱底厚': '柱底厚',
+                    '系梁根数': '系梁根数', '系梁数量': '系梁根数',
+                },
+                '承台及桩基': {
+                    'length': '承台长', 'l': '承台长',
+                    'width': '承台宽', 'w': '承台宽',
+                    'height': '承台高', 'h': '承台高',
+                    '承台长': '承台长', '承台宽': '承台宽', '承台高': '承台高',
+                    '桩径': '桩径', '桩长': '桩长', '桩间距': '桩间距',
+                    '桩列数': '桩列数', '桩排数': '桩排数',
+                },
             }.get(comp_type, {})
             normalized = {}
             for key, val in changes.items():
                 mk = mapping.get(key, key)
+                # 颜色等非数值参数原样透传
+                if mk in ('颜色', 'color', 'colour'):
+                    normalized['颜色'] = val
+                    continue
                 # 相对值表达式
                 if isinstance(val, str):
                     val = val.strip()
@@ -251,7 +275,7 @@ class BIMBaseAgent:
                     else:
                         val = float(val)
                 # 计数类参数保持 int
-                if mk in ('系梁根数', '系梁数量', '底柱数量', '底柱排数'):
+                if mk in ('系梁根数', '系梁数量', '底柱数量', '底柱排数', '桩列数', '桩排数'):
                     val = int(round(float(val)))
                 else:
                     val = float(val)
@@ -307,14 +331,33 @@ class BIMBaseAgent:
     def _tool_sync_to_bimbase(self, params):
         """将选中的或指定元素同步到 BIMBase"""
         target = params.get('target', None)
+        position = params.get('position', None)
+        write_position = params.get('write_position', True)
+        # 未显式给 target 时：给了放置位置说明用户想同步"当前组件"，优先取选中元素/组件，
+        # 避免误走 board._sync_to_bimbase() 全量同步（那会弹出基准坐标对话框）
+        if not target and position is not None:
+            target = {'component': True}
         if target:
             elems = self._resolve_target(target)
+            if not elems and target.get('component'):
+                # 没有可识别的组件时回退到选中元素
+                elems = self._resolve_target({'mode': 'selected'})
             if elems:
-                # 只同步指定元素
+                # 只同步指定元素（_resolve_target 已把缓存组件的多个视图归并为持有者）
                 count = 0
                 errors = []
                 for elem in elems:
                     try:
+                        # 指定了放置位置：写入元素锚点与 component_params
+                        if position is not None:
+                            self._apply_position_to_element(elem, position)
+                            # 坐标已由 AI 明确给出，清除 PDF 首次同步标记，避免弹出坐标输入对话框
+                            if getattr(elem, 'pdf_recognized', False):
+                                elem.pdf_recognized = False
+                        # 用户要求"不写入位置参数"：放置仍用锚点坐标，但生成脚本中组件位置参数保持 0
+                        if not write_position and getattr(elem, 'component_params', None):
+                            for pk in ('x', 'y', 'z_bottom'):
+                                elem.component_params.pop(pk, None)
                         from bimbase_sync import BIMBaseSync
                         sync = BIMBaseSync(self.board)
                         if sync._sync_element(elem):
@@ -396,6 +439,211 @@ class BIMBaseAgent:
             return False, "画板不支持面编辑模式"
         except Exception as e:
             return False, f"退出面编辑模式失败: {e}"
+
+    def _tool_sync_from_bimbase(self, params):
+        """从 BIMBase 同步回画板：选中实体导入为可识别的画板组件元素"""
+        try:
+            if hasattr(self.board, '_sync_from_bimbase'):
+                self.board._sync_from_bimbase()
+                return True, "已从 BIMBase 同步回画板"
+            return False, "画板不支持从 BIMBase 更新"
+        except Exception as e:
+            return False, f"从 BIMBase 同步失败: {e}"
+
+    def _tool_delete_bimbase_component(self, params):
+        """删除 BIMBase 中选中的组件（经 AI_Modeling 删除链路）"""
+        try:
+            from utils import ai_modeling_bridge
+            parsed = {
+                'action': 'delete',
+                'component_type': None,
+                'params': {},
+                'position': {'mode': 'absolute', 'x': 0, 'y': 0, 'z': 0},
+                'array': None,
+                'route': None,
+                'path': None,
+                'target': {'mode': 'selected'},
+            }
+            return ai_modeling_bridge.execute(parsed, "AI删除选中BIMBase组件")
+        except Exception as e:
+            return False, f"删除 BIMBase 选中组件失败: {e}"
+
+    def _tool_copy_component(self, params):
+        """复制画板中选中的组件（含识别后转成普通线条的缓存组件）：
+        支持相对位置（position.mode=relative/absolute）与沿轴线性阵列（array）。
+        每个副本创建为画板可识别元素并同步到 BIMBase。"""
+        from bimbase_sync import BIMBaseSync
+        target = params.get('target') or {'component': True}
+        elems = self._resolve_target(target)
+        if not elems:
+            elems = self._resolve_target({'mode': 'selected'})
+        if not elems:
+            return False, "画板中没有选中的组件，也未找到可识别的组件"
+        holder = elems[0]
+        comp_type = getattr(holder, 'component_type', '') or getattr(holder, '_cached_component_type', '')
+        base_params = dict(getattr(holder, 'component_params', None)
+                           or getattr(holder, '_cached_component_params', {}) or {})
+        if not comp_type or not base_params:
+            # 普通画板元素（圆/矩形/线等非参数化元素）：深拷贝平移 + 直接放置
+            return self._copy_plain_elements(holder, params)
+
+        # 基准位置：优先放置锚点，其次参数里的 x/y/z_bottom
+        bx = float(getattr(holder, 'pdf_anchor_x', base_params.get('x', 0.0) or 0.0) or 0.0)
+        by = float(getattr(holder, 'pdf_anchor_y', base_params.get('y', 0.0) or 0.0) or 0.0)
+        bz = float(getattr(holder, 'pdf_anchor_z', base_params.get('z_bottom', 0.0) or 0.0) or 0.0)
+
+        # 计算放置点列表
+        position = params.get('position') or {}
+        array = params.get('array') or None
+        placements = []
+        if array and str(array.get('mode', 'linear')) == 'linear' and int(array.get('count', 1) or 1) > 0:
+            count = int(array.get('count', 1) or 1)
+            spacing = float(array.get('spacing', 0.0) or 0.0)
+            axis = str(array.get('axis', 'x')).lower()
+            d = {'x': (1, 0, 0), 'y': (0, 1, 0), 'z': (0, 0, 1)}.get(axis, (1, 0, 0))
+            placements = [(bx + d[0] * i * spacing, by + d[1] * i * spacing, bz + d[2] * i * spacing)
+                          for i in range(count)]
+        else:
+            mode = position.get('mode', 'absolute')
+            if mode == 'relative':
+                axis = position.get('axis', 'z')
+                dist = float(position.get('distance', 0.0) or 0.0)
+                px, py, pz = bx, by, bz
+                if axis == 'x':
+                    px += dist
+                elif axis == 'y':
+                    py += dist
+                else:
+                    pz += dist
+                placements = [(px, py, pz)]
+            elif mode == 'absolute':
+                placements = [(float(position.get('x', bx)), float(position.get('y', by)),
+                               float(position.get('z', bz)))]
+            else:  # selected/manual：原位复制
+                placements = [(bx, by, bz)]
+
+        from utils.component_registry import create_element_from_params
+        sync = BIMBaseSync(self.board)
+        ok_count = 0
+        errors = []
+        for px, py, pz in placements:
+            try:
+                p = dict(base_params)
+                p['x'], p['y'], p['z_bottom'] = px, py, pz
+                new_elem = create_element_from_params(p, comp_type)
+                if new_elem is None:
+                    errors.append('创建画板元素失败')
+                    continue
+                new_elem.component_type = comp_type
+                new_elem.component_params = p
+                new_elem.is_3d = True
+                for attr, val in (('pdf_anchor_x', px), ('pdf_anchor_y', py), ('pdf_anchor_z', pz)):
+                    setattr(new_elem, attr, val)
+                try:
+                    self.board.apply_current_layer_style(new_elem)
+                except Exception:
+                    pass
+                self.board.add_element(new_elem)
+                if sync._sync_element(new_elem):
+                    ok_count += 1
+            except Exception as e:
+                errors.append(str(e))
+        try:
+            self.board.viewport.update()
+        except Exception:
+            pass
+        msg = f"已复制布置 {ok_count}/{len(placements)} 个 {comp_type}"
+        if errors:
+            msg += f"（错误: {errors[:2]}）"
+        return ok_count > 0, msg
+
+    @staticmethod
+    def _compute_placements(bx, by, bz, position, array):
+        """由基准点 + position/array 计算放置点列表（mm）"""
+        position = position or {}
+        if array and str(array.get('mode', 'linear')) == 'linear' and int(array.get('count', 1) or 1) > 0:
+            count = int(array.get('count', 1) or 1)
+            spacing = float(array.get('spacing', 0.0) or 0.0)
+            axis = str(array.get('axis', 'x')).lower()
+            d = {'x': (1, 0, 0), 'y': (0, 1, 0), 'z': (0, 0, 1)}.get(axis, (1, 0, 0))
+            return [(bx + d[0] * i * spacing, by + d[1] * i * spacing, bz + d[2] * i * spacing)
+                    for i in range(count)]
+        mode = position.get('mode', 'absolute')
+        if mode == 'relative':
+            axis = position.get('axis', 'z')
+            dist = float(position.get('distance', 0.0) or 0.0)
+            px, py, pz = bx, by, bz
+            if axis == 'x':
+                px += dist
+            elif axis == 'y':
+                py += dist
+            else:
+                pz += dist
+            return [(px, py, pz)]
+        if mode == 'absolute':
+            return [(float(position.get('x', bx)), float(position.get('y', by)),
+                     float(position.get('z', bz)))]
+        return [(bx, by, bz)]  # selected/manual：原位
+
+    def _copy_plain_elements(self, elem, params):
+        """普通画板元素（圆/矩形/线等，非参数化组件）的复制布置：
+        深拷贝元素、按目标点平移、逐个直接放置到 BIMBase。"""
+        import copy as _copy_mod
+        import uuid
+        from bimbase_sync import place_element_to_bimbase
+
+        bx = float(getattr(elem, 'pdf_anchor_x',
+                           getattr(elem, 'x', getattr(elem, 'cx', getattr(elem, 'x1', 0.0)))) or 0.0)
+        by = float(getattr(elem, 'pdf_anchor_y',
+                           getattr(elem, 'y', getattr(elem, 'cy', getattr(elem, 'y1', 0.0)))) or 0.0)
+        bz = float(getattr(elem, 'pdf_anchor_z', getattr(elem, 'z_start', 0.0)) or 0.0)
+        placements = self._compute_placements(bx, by, bz,
+                                              params.get('position'), params.get('array'))
+
+        self.board._save_undo_state()
+        ok_count = 0
+        errors = []
+        for px, py, pz in placements:
+            try:
+                new_elem = _copy_mod.deepcopy(elem)
+                new_elem.id = str(uuid.uuid4())
+                new_elem.selected = False
+                dx, dy, dz = px - bx, py - by, pz - bz
+                if hasattr(new_elem, 'translate') and callable(new_elem.translate):
+                    new_elem.translate(dx, dy)
+                else:
+                    if hasattr(new_elem, 'x'):
+                        new_elem.x = px
+                    elif hasattr(new_elem, 'cx'):
+                        new_elem.cx = px
+                    if hasattr(new_elem, 'y'):
+                        new_elem.y = py
+                    elif hasattr(new_elem, 'cy'):
+                        new_elem.cy = py
+                if hasattr(new_elem, 'z_start'):
+                    new_elem.z_start = pz
+                if hasattr(new_elem, 'z_end'):
+                    new_elem.z_end = float(getattr(new_elem, 'z_end', 0.0) or 0.0) + dz
+                try:
+                    self.board.apply_current_layer_style(new_elem)
+                except Exception:
+                    pass
+                self.board.add_element(new_elem)
+                ok, pmsg = place_element_to_bimbase(new_elem)
+                if ok:
+                    ok_count += 1
+                else:
+                    errors.append(pmsg)
+            except Exception as e:
+                errors.append(str(e))
+        try:
+            self.board.viewport.update()
+        except Exception:
+            pass
+        msg = f"已复制布置 {ok_count}/{len(placements)} 个画板元素到 BIMBase"
+        if errors:
+            msg += f"（错误: {errors[:2]}）"
+        return ok_count > 0, msg
 
     # ========== 内部辅助方法 ==========
 
@@ -479,6 +727,11 @@ class BIMBaseAgent:
         elems = getattr(self.board, 'elements', [])
         result = list(elems)
 
+        # {'mode': 'selected'}：只取当前选中元素（含缓存组件的视图线，归并到持有者）
+        if isinstance(target, dict) and target.get('mode') == 'selected':
+            selected = [e for e in elems if getattr(e, 'selected', False)]
+            return self._canonicalize_cached(selected)
+
         # 通用"组件"关键词：优先处理当前面编辑的源组件，再取选中/最近操作的组件
         if target.get('component'):
             # 1) 面编辑模式下的源组件
@@ -488,18 +741,19 @@ class BIMBaseAgent:
                                if e.id == face_cid and not getattr(e, 'face_info', {})), None)
                 if source:
                     return [source]
-            # 2) 当前选中的参数化组件（排除面元素）
+            # 2) 当前选中的参数化组件（排除面元素；含缓存组件身份的视图线）
             selected = [e for e in elems
                         if getattr(e, 'selected', False)
-                        and getattr(e, 'component_type', '')
+                        and (getattr(e, 'component_type', '') or getattr(e, '_cached_component_type', None))
                         and not getattr(e, 'face_info', {})]
             if selected:
-                return selected
-            # 3) 任意参数化组件
+                return self._canonicalize_cached(selected)
+            # 3) 任意参数化组件（含缓存组件身份的视图线）
             comps = [e for e in elems
-                     if getattr(e, 'component_type', '') and not getattr(e, 'face_info', {})]
+                     if (getattr(e, 'component_type', '') or getattr(e, '_cached_component_type', None))
+                     and not getattr(e, 'face_info', {})]
             if comps:
-                return [comps[0]]
+                return self._canonicalize_cached([comps[0]])
             return []
 
         # 先按 component_type 过滤
@@ -521,7 +775,55 @@ class BIMBaseAgent:
             elif isinstance(idx, int):
                 result = []  # 索引越界
 
-        return result
+        return self._canonicalize_cached(result)
+
+    def _canonicalize_cached(self, elems):
+        """把"退出面编辑后转成普通线条的复杂构件视图"归并到缓存持有者：
+        - 持有者（带 _cached_component_type）保留并恢复组件身份；
+        - 兄弟面（id 出现在持有者的 _cached_sibling_ids）替换为持有者；
+        - 按 id 去重，保持顺序。
+        """
+        board_elems = getattr(self.board, 'elements', [])
+        out = []
+        seen = set()
+        for e in elems:
+            holder = None
+            if getattr(e, '_cached_component_type', None):
+                holder = e
+            else:
+                for cand in board_elems:
+                    if cand is e:
+                        continue
+                    if e.id in (getattr(cand, '_cached_sibling_ids', None) or []):
+                        holder = cand
+                        break
+            target = holder if holder is not None else e
+            if target is not e and getattr(target, '_cached_component_type', None):
+                self._rehydrate_cached(target)
+            elif holder is e:
+                self._rehydrate_cached(e)
+            if target.id not in seen:
+                seen.add(target.id)
+                out.append(target)
+        return out
+
+    @staticmethod
+    def _rehydrate_cached(elem):
+        """恢复缓存组件身份：component_type/component_params/pdf_anchor。"""
+        cached_type = getattr(elem, '_cached_component_type', None)
+        if not cached_type:
+            return
+        if not getattr(elem, 'component_type', ''):
+            elem.component_type = cached_type
+        if not getattr(elem, 'component_params', None):
+            elem.component_params = dict(getattr(elem, '_cached_component_params', {}) or {})
+        params = elem.component_params or {}
+        for attr, key in (('pdf_anchor_x', 'x'), ('pdf_anchor_y', 'y'), ('pdf_anchor_z', 'z_bottom')):
+            if not hasattr(elem, attr):
+                try:
+                    setattr(elem, attr, float(params.get(key, 0.0) or 0.0))
+                except Exception:
+                    setattr(elem, attr, 0.0)
 
     def _modify_board_then_sync(self, elem, changes, position=None):
         """路径 A: 修改 board 元素参数，然后 sync 到 BIMBase。
@@ -541,7 +843,7 @@ class BIMBaseAgent:
         apply_component_params_to_element(elem, params, comp_type)
 
         # 复杂构件：重新生成源元素主视图，确保 2D 轮廓与参数一致
-        if comp_type in ('引桥桥墩', '索缆锚锭') and hasattr(self.board, '_regenerate_source_front_view'):
+        if comp_type in ('引桥桥墩', '索缆锚锭', '门式桥墩', '承台及桩基') and hasattr(self.board, '_regenerate_source_front_view'):
             try:
                 _log(f"[_modify_board_then_sync] regenerating front view for {comp_type}")
                 self.board._regenerate_source_front_view(elem, comp_type, params)
@@ -663,6 +965,11 @@ class BIMBaseAgent:
             elif new_type == '引桥桥墩':
                 pier_h = float(new_params.get('墩高', 1200)) + float(new_params.get('盖梁总高', 300))
                 elem.z_end = elem.z_start + pier_h
+            elif new_type == '门式桥墩':
+                pier_h = float(new_params.get('墩高', 5000)) + float(new_params.get('盖梁总高', 400)) + 80
+                elem.z_end = elem.z_start + pier_h
+            elif new_type == '承台及桩基':
+                elem.z_end = elem.z_start + float(new_params.get('承台高', 500))
             else:
                 z_bottom = new_params.get('z_bottom') or new_params.get('z1') or new_params.get('z', 0)
                 z_top = new_params.get('z_top') or new_params.get('z2') or new_params.get('z', 0)

@@ -373,6 +373,27 @@ class AICommandExecutor:
                 '底柱数量': '底柱数量', '底柱排数': '底柱排数',
                 '系梁数量': '系梁数量',
             },
+            '门式桥墩': {
+                # 几何别名
+                'height': '墩高', 'h': '墩高',
+                'width': '盖梁总长', 'length': '盖梁总长', 'l': '盖梁总长',
+                'depth': '盖梁宽', 'w': '盖梁宽',
+                # 中文参数名（自身映射）
+                '墩高': '墩高', '盖梁总长': '盖梁总长', '盖梁总高': '盖梁总高', '盖梁宽': '盖梁宽',
+                '墩柱间距': '墩柱间距',
+                '柱顶宽': '柱顶宽', '柱底宽': '柱底宽', '柱顶厚': '柱顶厚', '柱底厚': '柱底厚',
+                '系梁根数': '系梁根数', '系梁数量': '系梁根数',
+            },
+            '承台及桩基': {
+                # 几何别名
+                'length': '承台长', 'l': '承台长',
+                'width': '承台宽', 'w': '承台宽',
+                'height': '承台高', 'h': '承台高',
+                # 中文参数名（自身映射）
+                '承台长': '承台长', '承台宽': '承台宽', '承台高': '承台高',
+                '桩径': '桩径', '桩长': '桩长', '桩间距': '桩间距',
+                '桩列数': '桩列数', '桩排数': '桩排数',
+            },
         }
         return mapping.get(comp_type, {}).get(key)
 
@@ -528,10 +549,46 @@ class AICommandExecutor:
             elem = create_element_from_params(comp_params, '索缆锚锭')
             if elem is None:
                 return None
+        elif elem_type == '门式桥墩':
+            from utils.component_registry import create_element_from_params
+            comp_params = {
+                'x': float(x), 'y': float(y), 'z_bottom': float(z),
+                '盖梁总长': float(params.get('盖梁总长', 4700)),
+                '盖梁总高': float(params.get('盖梁总高', 400)),
+                '盖梁宽': float(params.get('盖梁宽', 1000)),
+                '墩高': float(params.get('墩高', 5000)),
+                '墩柱间距': float(params.get('墩柱间距', 3500)),
+                '柱顶宽': float(params.get('柱顶宽', 1200)),
+                '柱底宽': float(params.get('柱底宽', 1400)),
+                '柱顶厚': float(params.get('柱顶厚', 1000)),
+                '柱底厚': float(params.get('柱底厚', 1200)),
+                '系梁根数': int(params.get('系梁根数', params.get('系梁数量', 1))),
+            }
+            elem = create_element_from_params(comp_params, '门式桥墩')
+            if elem is None:
+                return None
+        elif elem_type == '承台及桩基':
+            from utils.component_registry import create_element_from_params
+            pile_len = float(params.get('桩长', 5000))
+            comp_params = {
+                # 桩自承台底向下伸桩长，z_bottom = 放置面 - 桩长
+                'x': float(x), 'y': float(y), 'z_bottom': float(z) - pile_len,
+                '承台长': float(params.get('承台长', 5500)),
+                '承台宽': float(params.get('承台宽', 2350)),
+                '承台高': float(params.get('承台高', 500)),
+                '桩径': float(params.get('桩径', 250)),
+                '桩长': pile_len,
+                '桩间距': float(params.get('桩间距', 630)),
+                '桩列数': int(params.get('桩列数', 9)),
+                '桩排数': int(params.get('桩排数', 4)),
+            }
+            elem = create_element_from_params(comp_params, '承台及桩基')
+            if elem is None:
+                return None
         if elem is None:
             return None
         # 复杂构件已在 create_element_from_params 中按 x,y 中心定位，不再覆盖
-        if elem_type not in ('引桥桥墩', '索缆锚锭'):
+        if elem_type not in ('引桥桥墩', '索缆锚锭', '门式桥墩', '承台及桩基'):
             elem.x = x
             elem.y = y
         elem.component_type = elem_type
@@ -645,7 +702,7 @@ class AICommandExecutor:
             EllipseElement, PointElement
         )
 
-        SOLID_TYPES = {'圆柱', '正方体', '长方体', '球体', '直角三棱柱', '引桥桥墩', '索缆锚锭'}
+        SOLID_TYPES = {'圆柱', '正方体', '长方体', '球体', '直角三棱柱', '引桥桥墩', '索缆锚锭', '门式桥墩', '承台及桩基'}
 
         # 沿轴批量布置（兼容 AI 返回的 direction 字段）
         # 某些 AI 会把 axis/count/spacing/position 放在 params 里

@@ -13,8 +13,12 @@ class ModelingCommandParser:
         '正方体': 'cube', '立方体': 'cube', '正方形': 'cube',
         '球体': 'sphere', '球': 'sphere', '圆球': 'sphere',
         '圆锥': 'cone', '圆锥体': 'cone', '锥体': 'cone',
+        '直角三棱柱': 'triangular_prism', '三棱柱': 'triangular_prism',
+        '门式桥墩': 'gate_pier', '门式墩': 'gate_pier', '门架墩': 'gate_pier',
         '引桥桥墩': 'pier', '桥墩': 'pier', '墩': 'pier',
         '索缆锚锭': 'anchor', '索塔锚块': 'anchor', '锚锭': 'anchor', '锚块': 'anchor',
+        '承台及桩基': 'pile_foundation', '桩基础': 'pile_foundation',
+        '承台': 'pile_foundation', '桩基': 'pile_foundation',
     }
 
     # 操作映射
@@ -125,9 +129,10 @@ class ModelingCommandParser:
         # 颜色提取：如"放一个红色的圆柱"/"涂成灰色"/"半透明蓝色"
         color = cls._extract_color(text)
 
-        # 1. 检测操作
+        # 1. 检测操作（"画板"含"画"字，先从动作检测文本中剔除，避免"删除画板组件"误判为创建）
+        action_text = text.replace('画板', '')
         for cn, en in cls.ACTION_MAP.items():
-            if cn.lower() in text:
+            if cn.lower() in action_text:
                 result['action'] = en
                 break
         if not result['action']:
@@ -171,6 +176,11 @@ class ModelingCommandParser:
 
         # 4. 创建操作必须有组件类型
         if result['action'] == 'create' and not result['component_type']:
+            # “布置这个/该组件”“沿X轴每隔5米布置10个组件”等未指明类型的布置：
+            # 语义上等价于复制当前选中组件（继承其类型与参数）
+            fb = cls._fallback_copy_selected(text, result, unit_factor)
+            if fb is not None:
+                return fb
             # 可能是纯阵列或位置描述，但没有说是什么组件
             return None
 
@@ -192,6 +202,28 @@ class ModelingCommandParser:
         # 10. 整体单位声明的换算（如"单位用米"）
         cls._apply_unit_factor(result, unit_factor)
 
+        return result
+
+    @classmethod
+    def _fallback_copy_selected(cls, text, result, unit_factor):
+        """无组件类型的“布置/放置这个组件”→ 复制选中组件（可带相对位置/阵列）。
+
+        仅当存在有效放置信息（相对/选中位置，或阵列）时接管，否则返回 None。
+        """
+        if '组件' not in text and '构件' not in text:
+            return None
+        position = cls._extract_position(text)
+        array = cls._extract_array(text)
+        has_rel = position.get('mode') in ('relative', 'selected')
+        if not has_rel and not array:
+            return None
+        result['action'] = 'copy'
+        result['target'] = {'mode': 'selected'}
+        result['position'] = position
+        result['array'] = array
+        result['path'] = None
+        result['route'] = None
+        cls._apply_unit_factor(result, unit_factor)
         return result
 
     @classmethod
@@ -227,6 +259,10 @@ class ModelingCommandParser:
         # 排除被“沿直线/曲线/圆弧/路线”或显式几何参数（圆心/半径/起点/终点等）误匹配的情况
         route_keywords = ('直线', '曲线', '圆弧', '路线', '圆心', '半径', '起点', '终点', '角度', '坐标', '轴')
         if path_desc in ('直线', '曲线', '圆弧', '路线') or any(kw in path_desc for kw in route_keywords):
+            return None
+
+        # “沿当前选中组件5000布置...”这类“距离型”描述不是路径：path_desc 含数字时排除
+        if re.search(r'\d', path_desc):
             return None
 
         spacing, count = cls._extract_route_spacing(text)
@@ -281,6 +317,8 @@ class ModelingCommandParser:
     COMPLEX_PARAM_NAMES = [
         '盖梁总长', '盖梁总高', '盖梁宽', '墩柱直径', '墩柱间距', '墩高', '系梁根数',
         '锚块总长', '锚块总高', '锚块宽度', '承台长度', '承台宽度', '承台高度', '底柱半径', '底柱高度',
+        '柱顶宽', '柱底宽', '柱顶厚', '柱底厚',
+        '承台长', '承台宽', '承台高', '桩径', '桩长', '桩间距', '桩列数', '桩排数',
     ]
 
     @classmethod
@@ -367,6 +405,7 @@ class ModelingCommandParser:
 
     # 整体单位换算时跳过的键（数量/角度/标志位/颜色不换算）
     _UNIT_SKIP_KEYS = {'count', 'rows', 'cols', '系梁根数', '底柱数量', '底柱排数',
+                       '桩列数', '桩排数',
                        'angle', 'start_angle', 'end_angle', 'preserve_position', '颜色'}
 
     # 颜色映射（0~1 浮点 RGB）
@@ -498,8 +537,9 @@ class ModelingCommandParser:
                 pos['z'] = 0
                 return pos
 
-        # 相对坐标: "在选中的实体上方500mm" / "在当前位置前方1000"
-        rel_pattern = r'在?(?:选中|当前|它|该组件)?(?:的)?\s*(上|下|左|右|前|后|上方|下方|左边|右边|前方|后方|之上|之下)\s*(\d+\.?\d*)\s*(?:mm)?'
+        # 相对坐标: "在选中的实体上方500mm" / "在当前位置前方1000" / "上方，500毫米的地方"
+        # (?<!当) 防止把"当前"中的"前"误判为方向词
+        rel_pattern = r'在?(?:选中|当前|它|该组件)?(?:的)?\s*(?<!当)(上|下|左|右|上方|下方|左边|右边|前方|后方|前|后|之上|之下)[^\d]{0,4}(\d+\.?\d*)\s*(?:mm)?'
         m = re.search(rel_pattern, text)
         if m:
             dir_text = m.group(1)
@@ -508,6 +548,14 @@ class ModelingCommandParser:
             pos['mode'] = 'relative'
             pos['axis'] = axis
             pos['distance'] = distance * sign
+            return pos
+
+        # "沿当前选中组件5000布置..."：无方向词时默认沿 X 正方向偏移（数字已统一换算为 mm）
+        m = re.search(r'(?:沿|顺).{0,12}?(?:选中|当前|该|此).{0,4}?组件.{0,6}?(\d+\.?\d*)(?!\s*个)', text)
+        if m:
+            pos['mode'] = 'relative'
+            pos['axis'] = 'x'
+            pos['distance'] = float(m.group(1))
             return pos
 
         # 检测"选中"关键词（位置模式为 selected，坐标后续从选中实体读取）

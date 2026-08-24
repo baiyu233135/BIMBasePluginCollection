@@ -156,7 +156,7 @@ def _circle_section(radius, segments=32):
 # python_transformation_operation 执行时就能正确找到模块
 
 _CylinderComponent = _BoxComponent = _CubeComponent = _SphereComponent = _ConeComponent = _TriangularPrismComponent = None
-_ApproachPierComponent = None
+_ApproachPierComponent = _GatePierComponent = _PileFoundationComponent = None
 
 # 无论 pyp3d 是否可用都尝试导入（aim_bimbase_sync 自带占位回退，可离线导入），
 # 保证 COMPONENT_CLASSES/COMPONENT_DEFAULTS 注册完整，便于离线测试与诊断。
@@ -169,6 +169,8 @@ try:
         ConeComponent as _ConeComponent,
         TriangularPrismComponent as _TriangularPrismComponent,
         ApproachPierComponent as _ApproachPierComponent,
+        GatePierComponent as _GatePierComponent,
+        PileFoundationComponent as _PileFoundationComponent,
     )
     _log("component_factory: imported classes from aim_bimbase_sync")
 except Exception as e:
@@ -312,6 +314,8 @@ COMPONENT_CLASSES = {
     'triangular_prism': _TriangularPrismComponent,
     # 引桥桥墩：类定义在 aim_bimbase_sync.py（DependentFile），BIMBase 才能序列化/放置
     'pier': _ApproachPierComponent,
+    'gate_pier': _GatePierComponent,
+    'pile_foundation': _PileFoundationComponent,
 }
 
 COMPONENT_DEFAULTS = {
@@ -325,11 +329,22 @@ COMPONENT_DEFAULTS = {
         '盖梁总长': 1930.0, '盖梁总高': 300.0, '盖梁宽': 300.0,
         '墩柱直径': 250.0, '墩柱间距': 1140.0, '墩高': 1200.0, '系梁根数': 2,
     },
+    'gate_pier': dict(_GatePierComponent.DEFAULT_PARAMS) if _GatePierComponent is not None else {
+        '盖梁总长': 4700.0, '盖梁总高': 400.0, '盖梁宽': 1000.0, '墩高': 5000.0,
+        '墩柱间距': 3500.0, '柱顶宽': 1200.0, '柱底宽': 1400.0,
+        '柱顶厚': 1000.0, '柱底厚': 1200.0, '系梁根数': 1,
+    },
+    'pile_foundation': dict(_PileFoundationComponent.DEFAULT_PARAMS) if _PileFoundationComponent is not None else {
+        '承台长': 5500.0, '承台宽': 2350.0, '承台高': 500.0,
+        '桩径': 250.0, '桩长': 5000.0, '桩间距': 630.0, '桩列数': 9, '桩排数': 4,
+    },
 }
 
 # 各组件允许写入的参数键（用于过滤解析器/注册表带入的伪参数与内部键）
 _COMPONENT_ALLOWED_KEYS = {
     'pier': set(COMPONENT_DEFAULTS['pier'].keys()) | {'偏移X', '偏移Y', '偏移Z'},
+    'gate_pier': set(COMPONENT_DEFAULTS['gate_pier'].keys()) | {'偏移X', '偏移Y', '偏移Z'},
+    'pile_foundation': set(COMPONENT_DEFAULTS['pile_foundation'].keys()) | {'偏移X', '偏移Y', '偏移Z'},
 }
 
 # 复杂组件（__init__ 不接受参数，参数通过 Attr 设置）
@@ -525,6 +540,10 @@ def _infer_component_type_from_comp(comp):
         'TriangularPrismComponent': 'triangular_prism',
         'ApproachPierComponent': 'pier',
         '引桥桥墩': 'pier',
+        'GatePierComponent': 'gate_pier',
+        '门式桥墩': 'gate_pier',
+        'PileFoundationComponent': 'pile_foundation',
+        '承台及桩基': 'pile_foundation',
         '索塔锚块': 'anchor',
     }
     if type_name in name_map:
@@ -625,6 +644,7 @@ def _verify_new_entity(before_count):
 _GEOMETRY_KEY_MAP = {
     'cylinder': '圆柱', 'box': '长方体', 'cube': '正方体', 'sphere': '球体',
     'cone': '圆锥', 'triangular_prism': '直角三棱柱', 'pier': '引桥桥墩',
+    'gate_pier': '门式桥墩', 'pile_foundation': '承台及桩基',
     'anchor': '索塔',
 }
 

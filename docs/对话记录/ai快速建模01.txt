@@ -1,0 +1,159 @@
+================================================================================
+ai快速建模01 —— 对话整理与技术交接文档
+日期: 2026-08-24
+主题: 门式桥墩/承台及桩基接入画板 AI 全链路 + 画板 AI 操作链路多轮修复
+用途: 新对话快速恢复上下文（建议先读 docs/01_项目总览.md、docs/02_插件清单与入口.md、
+      docs/画板图纸识别技术方案.md、docs/05_pyp3d交互放置工具与坐标回写.md）
+================================================================================
+
+一、用户需求（按提出顺序）
+--------------------------------------------------------------------------------
+
+【需求1】数据参考源/门式桥墩.dwg、承台及桩基.dwg 两个构件，让画板 AI 也能兼容，
+        就像引桥桥墩一样（识别→三视图→参数面板→AI 对话布置→BIMBase 同步全链路）。
+
+【需求2】识别成功后画板 AI 无法操作该组件（自动布置/相对布置/上色/写入位置参数），
+        同步报"同步 0/3 个元素到 BIMBase"。
+
+【需求3】AI 指定位置同步时仍弹手动坐标对话框。
+
+【需求4】四项新能力：
+        ① 沿当前选中组件多少米布置（相对布置，画板选中和 BIMBase 选中都要支持）
+        ② 沿某轴间隔多少米布置多少个组件（沿轴阵列）
+        ③ AI 对话删除指定画板元素 + 删除 BIMBase 选中元素
+        ④ 组件从 BIMBase 同步回画板并可识别
+
+【需求5】改名：桥隧病害识别→桥梁病害识别（只改显示名，目录不动）；
+        CADBoard→速构智维（功能区选项卡 + 插件名）。
+
+【需求6】三轮实测 bug 反馈修复（见三.问题与修复）。
+
+二、当前进度
+--------------------------------------------------------------------------------
+
+全部完成，实测确认通过：
+- 门式桥墩/承台及桩基：识别三视图 ✓、AI 改参（桩列数改3）✓、指定位置同步
+  （500.400.300米）✓、相对布置（上方500毫米）✓、沿轴阵列（500米×5）✓、
+  删除画板元素 ✓、删除 BIMBase 选中组件 ✓。
+- 改名已生效（选项卡显示"速构智维"）。
+
+注意：500米×5 的阵列"看不见"不是失败——5 个圆片横跨 2000 米，需全图缩放查看
+（日志证实 5 个 entityId 全部 valid）。用户已确认"上方500毫米"语义为
+原件放置基准点 z + 距离（底部起算，不从顶面算）。
+
+三、技术栈与关键要点（务必记住）
+--------------------------------------------------------------------------------
+
+【技术栈】
+- BIMBase Python SDK 1.6.2 / pyp3d v18446497937724801024（BIMBase 在 D:\BIMBASE\）
+- 组件模式：class X(Component) + Attr 参数 + @export replace() + place()；
+  自动放置用 AI_Modeling 的 _PlaceToDirect（BPParametricComponentManager）
+- 画板：PyQt5 自绘 2D 画布 + FaceManager 三视图模板（faces.py FACE_TEMPLATES）
+- AI 链路：画板 ai_panel（本地解析 LocalCommandParser + DeepSeek API）→
+  ai_modeling_bridge → AI_Modeling command_parser / component_factory
+
+【关键实现】
+a) 新组件参数（单位 cm，图纸 mm÷10）：
+   - 门式桥墩 gate_pier：盖梁总长4700/盖梁总高400/盖梁宽1000/墩高5000/
+     墩柱间距3500(中心距)/柱顶宽1200/柱底宽1400/柱顶厚1000/柱底厚1200/系梁根数1
+     固定细部：垫石400×400×80、空心柱壁厚300、八边形倒角300、系梁400×400贴盖梁底
+   - 承台及桩基 pile_foundation：承台长5500/承台宽2350/承台高500/桩径250/
+     桩长5000(向下为负)/桩间距630/桩列数9/桩排数4
+   - 组件源文件：组件测试/门式桥墩.py、承台及桩基.py（几何权威实现）
+   - 集成点约 15 处：faces.py 三视图模板、component_matcher、drawing_recognizer、
+     face_overview_dialog、component_registry、generated_component_cache、
+     board.py 全部分支、bimbase_sync.py（GatePierComponent/PileFoundationComponent）、
+     AI_Modeling 的 aim_bimbase_sync（同名类，序列化要求类在 DependentFile）、
+     command_parser、component_factory、ai_panel/ai_executor/bimbase_agent
+
+b) 退出面编辑后组件身份丢失（需求2根因）：_exit_face_edit_mode 把三视图模板面
+   转成普通多段线（component_type=''），只有主线缓存 _cached_component_type/
+   _cached_component_params/_cached_sibling_ids。
+   修复：bimbase_sync._sync_element 开头恢复缓存身份（兄弟面委托持有者）；
+   bimbase_agent._resolve_target 加 _canonicalize_cached 归并去重；
+   _tool_sync_to_bimbase 补上 position/write_position 消费（write_position=False
+   时移除 params 的 x/y/z_bottom，放置仍走 pdf_anchor 坐标）。
+
+c) 弹窗根因（需求3）：AI 只传 position 不传 target 时 _tool_sync_to_bimbase
+   走了全量同步 board._sync_to_bimbase()（弹基准坐标框）。修复：无 target 有
+   position → target={'component':True}；position 明确给出时清除 pdf_recognized
+   标记避免首次同步坐标框（bimbase_sync.py:2041 的弹窗点）。
+
+d) 复制链路三层坑（需求6核心，docs/05 实测定论命中）：
+   ① 面板选中的"参数化组件代理"实体 datakey 的 noumKV 恒为空 → 必须
+      get_all_instancekey() 全扫 + get_allbinding_entity_from_data() 按绑定实体
+      匹配（_entity_id_tuple 元组比较 _ModelId/_ElementId，不可 str()！）；
+      实现在 bimbase_modifier._find_params_by_binding_scan，命中即停（上限300）。
+   ② get_noumKV 顶层字典不含真实参数 → 必须展开 ParaCmptProperty 子节点
+      （_read_params_from_instancekey/_merge_para_cmpt_property）；
+      位置从 '\x07_transformation' 的 GeTransform._mat 3x4 行主序矩阵 [i][3] 提取。
+   ③ infer_component_type_from_params 漏了直角三棱柱（直角边1+直角边2）→
+      已补 triangular_prism；command_parser COMPONENT_MAP 同步补 直角三棱柱/三棱柱。
+
+e) "画板"含"画"字陷阱：双解析器（AI_Modeling command_parser + 画板
+   LocalCommandParser）的动作检测都会把"删除画板组件"误判为画图→创建→复制。
+   修复：动作检测在 text.replace('画板','') 上进行。
+   另修复画板解析器潜伏 bug：删除分支调用不存在的 _parse_target（应为
+   _parse_target_text），删除目标优先取"选中的"。
+
+f) 普通画板元素复制/阵列：bimbase_agent._tool_copy_component 新增
+   _copy_plain_elements —— deepcopy 元素 + translate 平移 + z 偏移 +
+   place_element_to_bimbase 直接放置（不经 _sync_element，因为普通线条无
+   component_type 会被 SKIP）。参数化组件仍走 create_element_from_params +
+   生成代码缓存路径（cad组件缓存/*.py，类名 门式桥墩_{id} 前缀）。
+
+g) AI 优先模式快速通道（ai_panel._send_message）：建模指令先本地解析执行
+   （create/copy 直接接管；modify/delete 仅当含 bimbase/软件 关键词才接管；
+   含"画板"关键词的删除/修改走画板本地链路），理解不了才调 API。
+
+h) 删除误报：execute_modeling_action 对 delete 改为"无异常且实体数未增加即成功"
+   （BIMBase 代理实体计数删除后不立刻减少）；bimbase_modifier
+   .delete_selected_components 内部早有同款防误报注释。
+
+i) 上色链路补齐：bimbase_sync 的 GatePier/PileFoundation 组件类 +
+   generated_component_cache 两个生成模板都加了 颜色 属性（"r,g,b[,a]"字符串
+   或元组均可）；bimbase_agent._normalize_changes 对颜色键原样透传（不再被
+   float() 崩掉）。
+
+四、版本管理
+--------------------------------------------------------------------------------
+
+本对话结束时做一次 git 提交，提交信息：
+
+feat(组件测试+CADBoard+AI_Modeling): 门式桥墩/承台及桩基全链路接入画板AI
+
+- 新增参数化组件 组件测试/门式桥墩.py、承台及桩基.py 及图纸生成脚本/预览图
+- faces.py 三视图模板与参数反推；识别/匹配/参数面板/注册表/生成代码缓存集成
+- board.py 复杂构件分支扩展；bimbase_sync/aim_bimbase_sync 同步类
+- 修复：缓存组件身份丢失致同步0/3、AI指定位置同步弹窗、画板"画"字误解析、
+  复制链路代理实体 noumKV 空（绑定扫描）、triangular_prism 类型推断缺失、
+  删除误报、普通画板元素复制阵列、上色链路
+- 改名：桥隧病害识别→桥梁病害识别（显示名）、CADBoard→速构智维（选项卡/插件名）
+- 测试：新增 test_new_components_parse.py、test_cached_component_ops.py，
+  全部离线测试通过（解析 40 + 画板 47 + 复制工具 11 等）
+
+五、遗留问题 / 待办
+--------------------------------------------------------------------------------
+
+1. 引桥桥墩/索缆锚锭的生成代码模板仍无 颜色 支持（老问题，本次只补了新组件）。
+2. 组件测试/Picture/门式桥墩.ico、承台及桩基.ico 是引桥桥墩的占位图标。
+3. 桥梁组件.pyplugin 的"导入Lumion"按钮入口 model.py 缺失（已知，保持不动）。
+4. 画板窗口标题仍为"CAD画板 - BIMBase插件 v1.5"（board.py 内字符串，未改）。
+5. BIMBase 实机回归建议：门式桥墩空心柱布尔减（不稳会退化实心柱）、
+   三视图参数面板改参联动、AI 全指令矩阵（创建/复制/阵列/相对/删除/上色/同步回）。
+6. 阵列第一个副本在源位置（与"生成N个"语义一致）；如需"从源之后开始排"改一行。
+
+六、测试与日志速查
+--------------------------------------------------------------------------------
+
+离线测试（无需 BIMBase）：
+- python AI_Modeling/test_pier_parse.py            # 20 条
+- python AI_Modeling/test_new_components_parse.py  # 17 条（新组件+相对/阵列/复制兜底）
+- python AI_Modeling/test_component_registry.py    # 10 条
+- cd CADBoard && python -m unittest test_cached_component_ops test_ai_modeling_bridge
+                                                   # 11 + 25 条（缓存组件/复制工具/桥接解析）
+
+实机日志：
+- CADBoard/bimbase_sync_debug.log    # 画板/AI_PANEL/同步全链路
+- CADBoard/ai_modeling_launcher.log  # 转发执行与实体计数
+- AI_Modeling/ai_modeling_debug.log  # 放置/绑定扫描/参数读取埋点

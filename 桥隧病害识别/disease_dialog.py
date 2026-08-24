@@ -50,7 +50,7 @@ class DiseaseDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("桥隧病害识别 — 手动录入")
+        self.setWindowTitle("桥梁病害识别 — 手动录入")
         self.setMinimumSize(1100, 750)
 
         # 状态

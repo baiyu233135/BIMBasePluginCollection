@@ -348,6 +348,74 @@ def _cable_anchor_left_update(elem, old, params):
     return params
 
 
+# ========== 门式桥墩面更新函数 ==========
+
+def _portal_pier_top_update(elem, old, params):
+    """门式桥墩俯视图: width→盖梁总长, height→盖梁宽"""
+    b = elem.get_bounds()
+    params['盖梁总长'] = b[2] - b[0]
+    params['盖梁宽'] = b[3] - b[1]
+    return params
+
+
+def _portal_pier_front_update(elem, old, params):
+    """门式桥墩主视图: width→盖梁总长, 总高→墩高+盖梁总高（含垫石固定高度80，拆回时扣除）"""
+    b = elem.get_bounds()
+    new_w = b[2] - b[0]
+    new_total_h = b[3] - b[1]
+    params['盖梁总长'] = new_w
+    cap_h = params.get('盖梁总高', 400)
+    new_col_h = max(0, new_total_h - cap_h - 80.0)
+    params['墩高'] = new_col_h
+    return params
+
+
+def _portal_pier_left_update(elem, old, params):
+    """门式桥墩左视图: width→盖梁宽, 总高→墩高+盖梁总高"""
+    b = elem.get_bounds()
+    new_w = b[2] - b[0]
+    new_total_h = b[3] - b[1]
+    params['盖梁宽'] = new_w
+    cap_h = params.get('盖梁总高', 400)
+    new_col_h = max(0, new_total_h - cap_h)
+    params['墩高'] = new_col_h
+    return params
+
+
+# ========== 承台及桩基面更新函数 ==========
+
+def _pile_cap_top_update(elem, old, params):
+    """承台及桩基俯视图: width→承台长, height→承台宽"""
+    b = elem.get_bounds()
+    params['承台长'] = b[2] - b[0]
+    params['承台宽'] = b[3] - b[1]
+    return params
+
+
+def _pile_cap_front_update(elem, old, params):
+    """承台及桩基主视图: width→承台长, 总高→承台高+桩长 拆回 桩长=总高-承台高"""
+    b = elem.get_bounds()
+    new_w = b[2] - b[0]
+    new_total_h = b[3] - b[1]
+    params['承台长'] = new_w
+    cap_h = params.get('承台高', 500)
+    new_pile_l = max(0, new_total_h - cap_h)
+    params['桩长'] = new_pile_l
+    return params
+
+
+def _pile_cap_left_update(elem, old, params):
+    """承台及桩基左视图: width→承台宽, 总高→承台高+桩长 拆回 桩长=总高-承台高"""
+    b = elem.get_bounds()
+    new_w = b[2] - b[0]
+    new_total_h = b[3] - b[1]
+    params['承台宽'] = new_w
+    cap_h = params.get('承台高', 500)
+    new_pile_l = max(0, new_total_h - cap_h)
+    params['桩长'] = new_pile_l
+    return params
+
+
 # ========== 动态面生成器 ==========
 
 def _polygon_dynamic_faces(params, component_id):
@@ -864,6 +932,256 @@ def _make_cable_anchor_left(p):
     return PolylineElement(pts, closed=False)
 
 
+def _make_portal_pier_top(p):
+    """门式桥墩俯视图：盖梁顶面矩形 + 双柱顶八边形（倒角300）+ 双垫石矩形。"""
+    from geometry.elements import PolylineElement
+    L = float(p.get('盖梁总长', 4700))
+    W = float(p.get('盖梁宽', 1000))
+    col_s = float(p.get('墩柱间距', 3500))
+    top_w = float(p.get('柱顶宽', 1200))
+    top_d = float(p.get('柱顶厚', 1000))
+    chamfer = 300.0   # 八边形倒角（固定细部）
+    pad_l = 400.0     # 垫石平面边长（固定细部）
+
+    # 主轮廓：盖梁矩形
+    pts = [(-L / 2, -W / 2), (L / 2, -W / 2), (L / 2, W / 2), (-L / 2, W / 2), (-L / 2, -W / 2)]
+
+    # 双柱顶八边形（宽=柱顶宽, 深=柱顶厚）
+    hw, hd = top_w / 2.0, top_d / 2.0
+    c = min(chamfer, hw, hd)
+    for cx in (-col_s / 2, col_s / 2):
+        pts.append(None)
+        pts.extend([
+            (cx - hw + c, -hd), (cx + hw - c, -hd),
+            (cx + hw, -hd + c), (cx + hw, hd - c),
+            (cx + hw - c, hd), (cx - hw + c, hd),
+            (cx - hw, hd - c), (cx - hw, -hd + c),
+            (cx - hw + c, -hd),
+        ])
+
+    # 双垫石矩形（400×400，中心同柱）
+    ph = pad_l / 2.0
+    for cx in (-col_s / 2, col_s / 2):
+        pts.append(None)
+        pts.extend([
+            (cx - ph, -ph), (cx + ph, -ph),
+            (cx + ph, ph), (cx - ph, ph),
+            (cx - ph, -ph),
+        ])
+
+    return PolylineElement(pts, closed=False)
+
+
+def _make_portal_pier_front(p):
+    """门式桥墩主视图：盖梁 + 双垫石 + 双梯形柱 + 系梁（贴盖梁底向下均布）。"""
+    from geometry.elements import PolylineElement
+    L = float(p.get('盖梁总长', 4700))
+    H_cap = float(p.get('盖梁总高', 400))
+    col_h = float(p.get('墩高', 5000))
+    col_s = float(p.get('墩柱间距', 3500))
+    top_w = float(p.get('柱顶宽', 1200))
+    bot_w = float(p.get('柱底宽', 1400))
+    tie_n = int(p.get('系梁根数', 1))
+    pad_l = 400.0     # 垫石平面边长（固定细部）
+    pad_h = 80.0      # 垫石高（固定细部）
+    tie_h = 400.0     # 系梁高（固定细部）
+    tie_step = 1000.0 # 多根系梁时的竖向间距（顶到顶，固定细部）
+
+    z_bottom = float(p.get('z_bottom', 0))
+    z_col_top = z_bottom + col_h
+    z_cap_top = z_col_top + H_cap
+
+    pts = []
+
+    # 盖梁（独立闭合矩形）
+    pts.extend([
+        (-L / 2, z_col_top), (L / 2, z_col_top),
+        (L / 2, z_cap_top), (-L / 2, z_cap_top),
+        (-L / 2, z_col_top),
+    ])
+
+    # 双垫石（宽400、高80，位于柱顶中心的盖梁顶面）
+    for cx in (-col_s / 2, col_s / 2):
+        pts.append(None)
+        pts.extend([
+            (cx - pad_l / 2, z_cap_top), (cx + pad_l / 2, z_cap_top),
+            (cx + pad_l / 2, z_cap_top + pad_h), (cx - pad_l / 2, z_cap_top + pad_h),
+            (cx - pad_l / 2, z_cap_top),
+        ])
+
+    # 双梯形柱（底宽柱底宽、顶宽柱顶宽、高墩高）
+    for cx in (-col_s / 2, col_s / 2):
+        pts.append(None)
+        pts.extend([
+            (cx - bot_w / 2, z_bottom), (cx + bot_w / 2, z_bottom),
+            (cx + top_w / 2, z_col_top), (cx - top_w / 2, z_col_top),
+            (cx - bot_w / 2, z_bottom),
+        ])
+
+    # 系梁（柱间，高400贴盖梁底，长度≈墩柱间距-柱顶宽）
+    tie_l = max(col_s - top_w, 100.0)
+    for i in range(tie_n):
+        z_top = z_col_top - i * tie_step
+        if z_top - tie_h < z_bottom:
+            z_top = z_bottom + tie_h
+        pts.append(None)
+        pts.extend([
+            (-tie_l / 2, z_top - tie_h), (tie_l / 2, z_top - tie_h),
+            (tie_l / 2, z_top), (-tie_l / 2, z_top),
+            (-tie_l / 2, z_top - tie_h),
+        ])
+
+    return PolylineElement(pts, closed=False)
+
+
+def _make_portal_pier_left(p):
+    """门式桥墩左视图：盖梁 + 单柱梯形投影（底厚柱底厚、顶厚柱顶厚）+ 系梁（深400）。"""
+    from geometry.elements import PolylineElement
+    W = float(p.get('盖梁宽', 1000))
+    H_cap = float(p.get('盖梁总高', 400))
+    col_h = float(p.get('墩高', 5000))
+    top_d = float(p.get('柱顶厚', 1000))
+    bot_d = float(p.get('柱底厚', 1200))
+    tie_n = int(p.get('系梁根数', 1))
+    tie_h = 400.0     # 系梁高（固定细部）
+    tie_d = 400.0     # 系梁深（固定细部）
+    tie_step = 1000.0 # 多根系梁时的竖向间距（顶到顶，固定细部）
+
+    z_bottom = float(p.get('z_bottom', 0))
+    z_col_top = z_bottom + col_h
+    z_cap_top = z_col_top + H_cap
+
+    pts = []
+
+    # 盖梁侧面（独立矩形，宽=盖梁宽）
+    pts.extend([
+        (-W / 2, z_col_top), (W / 2, z_col_top),
+        (W / 2, z_cap_top), (-W / 2, z_cap_top),
+        (-W / 2, z_col_top),
+    ])
+
+    # 墩柱梯形投影（底厚柱底厚、顶厚柱顶厚）
+    pts.append(None)
+    pts.extend([
+        (-bot_d / 2, z_bottom), (bot_d / 2, z_bottom),
+        (top_d / 2, z_col_top), (-top_d / 2, z_col_top),
+        (-bot_d / 2, z_bottom),
+    ])
+
+    # 系梁（深400，贴盖梁底向下均布）
+    for i in range(tie_n):
+        z_top = z_col_top - i * tie_step
+        if z_top - tie_h < z_bottom:
+            z_top = z_bottom + tie_h
+        pts.append(None)
+        pts.extend([
+            (-tie_d / 2, z_top - tie_h), (tie_d / 2, z_top - tie_h),
+            (tie_d / 2, z_top), (-tie_d / 2, z_top),
+            (-tie_d / 2, z_top - tie_h),
+        ])
+
+    return PolylineElement(pts, closed=False)
+
+
+def _make_pile_cap_top(p):
+    """承台及桩基俯视图：承台矩形 + 桩网格（桩列数×桩排数个圆轮廓，32段近似）。"""
+    from geometry.elements import PolylineElement
+    import math
+    CL = float(p.get('承台长', 5500))
+    CW = float(p.get('承台宽', 2350))
+    pile_d = float(p.get('桩径', 250))
+    spacing = float(p.get('桩间距', 630))
+    n_col = max(int(p.get('桩列数', 9)), 1)
+    n_row = max(int(p.get('桩排数', 4)), 1)
+
+    # 主轮廓：承台矩形
+    pts = [(-CL / 2, -CW / 2), (CL / 2, -CW / 2), (CL / 2, CW / 2), (-CL / 2, CW / 2), (-CL / 2, -CW / 2)]
+
+    # 桩网格（X 向列数 × Y 向排数）
+    r = pile_d / 2.0
+    x0 = -(n_col - 1) * spacing / 2.0
+    y0 = -(n_row - 1) * spacing / 2.0
+    segments = 32
+    for i in range(n_col):
+        for j in range(n_row):
+            cx = x0 + i * spacing
+            cy = y0 + j * spacing
+            pts.append(None)
+            for k in range(segments + 1):
+                ang = 2 * math.pi * k / segments
+                pts.append((cx + r * math.cos(ang), cy + r * math.sin(ang)))
+
+    return PolylineElement(pts, closed=False)
+
+
+def _make_pile_cap_front(p):
+    """承台及桩基主视图：承台矩形（宽=承台长）+ 桩列数根桩（宽桩径，桩顶伸入承台底）。"""
+    from geometry.elements import PolylineElement
+    CL = float(p.get('承台长', 5500))
+    CH = float(p.get('承台高', 500))
+    pile_d = float(p.get('桩径', 250))
+    pile_l = float(p.get('桩长', 5000))
+    spacing = float(p.get('桩间距', 630))
+    n_col = max(int(p.get('桩列数', 9)), 1)
+
+    z0 = float(p.get('z_bottom', 0))
+
+    # 承台外轮廓（z0 .. z0+承台高）
+    pts = [
+        (-CL / 2, z0), (CL / 2, z0),
+        (CL / 2, z0 + CH), (-CL / 2, z0 + CH),
+        (-CL / 2, z0),
+    ]
+
+    # 桩（z0-桩长 .. z0，X 向网格均布）
+    r = pile_d / 2.0
+    x0 = -(n_col - 1) * spacing / 2.0
+    for i in range(n_col):
+        cx = x0 + i * spacing
+        pts.append(None)
+        pts.extend([
+            (cx - r, z0 - pile_l), (cx + r, z0 - pile_l),
+            (cx + r, z0), (cx - r, z0),
+            (cx - r, z0 - pile_l),
+        ])
+
+    return PolylineElement(pts, closed=False)
+
+
+def _make_pile_cap_left(p):
+    """承台及桩基左视图：承台矩形（宽=承台宽）+ 桩排数根桩。"""
+    from geometry.elements import PolylineElement
+    CW = float(p.get('承台宽', 2350))
+    CH = float(p.get('承台高', 500))
+    pile_d = float(p.get('桩径', 250))
+    pile_l = float(p.get('桩长', 5000))
+    spacing = float(p.get('桩间距', 630))
+    n_row = max(int(p.get('桩排数', 4)), 1)
+
+    z0 = float(p.get('z_bottom', 0))
+
+    # 承台外轮廓（z0 .. z0+承台高）
+    pts = [
+        (-CW / 2, z0), (CW / 2, z0),
+        (CW / 2, z0 + CH), (-CW / 2, z0 + CH),
+        (-CW / 2, z0),
+    ]
+
+    # 桩（z0-桩长 .. z0，Y 向网格均布）
+    r = pile_d / 2.0
+    y0 = -(n_row - 1) * spacing / 2.0
+    for j in range(n_row):
+        cy = y0 + j * spacing
+        pts.append(None)
+        pts.extend([
+            (cy - r, z0 - pile_l), (cy + r, z0 - pile_l),
+            (cy + r, z0), (cy - r, z0),
+            (cy - r, z0 - pile_l),
+        ])
+
+    return PolylineElement(pts, closed=False)
+
+
 def _make_circle(cx, cy, r):
     from geometry.elements import CircleElement
     return CircleElement(float(cx), float(cy), float(r))
@@ -1219,6 +1537,54 @@ FACE_TEMPLATES = {
             'description': '左视图 (锚块宽×总高)',
             'generator': _make_cable_anchor_left,
             'update_params': _cable_anchor_left_update,
+            'snap_plane': 'yz',
+        },
+    },
+    '门式桥墩': {
+        # 三视图：俯视图 + 主视图 + 左视图
+        'top': {
+            'plane': 'xy',
+            'description': '俯视图 (盖梁顶面 + 柱顶八边形 + 垫石)',
+            'generator': _make_portal_pier_top,
+            'update_params': _portal_pier_top_update,
+            'snap_plane': 'xy',
+        },
+        'front': {
+            'plane': 'xz',
+            'description': '主视图 (盖梁 + 双垫石 + 双梯形柱 + 系梁)',
+            'generator': _make_portal_pier_front,
+            'update_params': _portal_pier_front_update,
+            'snap_plane': 'xz',
+        },
+        'left': {
+            'plane': 'yz',
+            'description': '左视图 (盖梁 + 墩柱梯形投影 + 系梁)',
+            'generator': _make_portal_pier_left,
+            'update_params': _portal_pier_left_update,
+            'snap_plane': 'yz',
+        },
+    },
+    '承台及桩基': {
+        # 三视图：俯视图 + 主视图 + 左视图
+        'top': {
+            'plane': 'xy',
+            'description': '俯视图 (承台顶面 + 桩网格)',
+            'generator': _make_pile_cap_top,
+            'update_params': _pile_cap_top_update,
+            'snap_plane': 'xy',
+        },
+        'front': {
+            'plane': 'xz',
+            'description': '主视图 (承台 + 桩列)',
+            'generator': _make_pile_cap_front,
+            'update_params': _pile_cap_front_update,
+            'snap_plane': 'xz',
+        },
+        'left': {
+            'plane': 'yz',
+            'description': '左视图 (承台 + 桩排)',
+            'generator': _make_pile_cap_left,
+            'update_params': _pile_cap_left_update,
             'snap_plane': 'yz',
         },
     },

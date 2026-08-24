@@ -278,7 +278,7 @@ def main_gui():
     class AnnotatorWindow(QMainWindow):
         def __init__(self):
             super().__init__()
-            self.setWindowTitle("桥隧病害照片标注工具")
+            self.setWindowTitle("桥梁病害照片标注工具")
             self.setGeometry(100, 100, 1200, 800)
 
             self.images_dir = None

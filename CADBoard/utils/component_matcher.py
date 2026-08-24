@@ -34,6 +34,32 @@ CABLE_ANCHOR_DEFAULTS = {
     '系梁数量': 0.0,
 }
 
+# 门式桥墩默认参数（与 组件测试/门式桥墩.py 保持一致）
+GATE_PIER_DEFAULTS = {
+    '盖梁总长': 4700.0,
+    '盖梁总高': 400.0,
+    '盖梁宽': 1000.0,
+    '墩高': 5000.0,
+    '墩柱间距': 3500.0,
+    '柱顶宽': 1200.0,
+    '柱底宽': 1400.0,
+    '柱顶厚': 1000.0,
+    '柱底厚': 1200.0,
+    '系梁根数': 1,
+}
+
+# 承台及桩基默认参数（与 组件测试/承台及桩基.py 保持一致）
+PILE_FOUNDATION_DEFAULTS = {
+    '承台长': 5500.0,
+    '承台宽': 2350.0,
+    '承台高': 500.0,
+    '桩径': 250.0,
+    '桩长': 5000.0,
+    '桩间距': 630.0,
+    '桩列数': 9,
+    '桩排数': 4,
+}
+
 
 COMPONENT_TEMPLATES = {
     '引桥桥墩': {
@@ -47,6 +73,18 @@ COMPONENT_TEMPLATES = {
         'default_params': dict(CABLE_ANCHOR_DEFAULTS),
         'required': ['锚块总长', '锚块总高', '锚块宽度', '承台长度', '承台宽度'],
         'optional': list(CABLE_ANCHOR_DEFAULTS.keys()),
+    },
+    '门式桥墩': {
+        'display_name': '门式桥墩',
+        'default_params': dict(GATE_PIER_DEFAULTS),
+        'required': ['盖梁总长', '盖梁总高', '盖梁宽', '墩高', '墩柱间距'],
+        'optional': list(GATE_PIER_DEFAULTS.keys()),
+    },
+    '承台及桩基': {
+        'display_name': '承台及桩基',
+        'default_params': dict(PILE_FOUNDATION_DEFAULTS),
+        'required': ['承台长', '承台宽', '承台高', '桩径', '桩长'],
+        'optional': list(PILE_FOUNDATION_DEFAULTS.keys()),
     },
 }
 
@@ -101,9 +139,14 @@ def match_recognized_result(recognized: Dict, component_hint: str = None) -> Tup
     comp_type = recognized.get('component_type', '') or component_hint or ''
     comp_type = comp_type.strip()
 
-    # 名称归一化
-    if '桥墩' in comp_type or comp_type.lower() in ('pier', 'approach pier'):
+    # 名称归一化（注意顺序：先判门式，避免 '门式桥墩' 落入 '桥墩'→引桥桥墩；
+    # 承台/桩基分支排除含 '锚' 的名称，避免影响 '锚'→索缆锚锭）
+    if '门式' in comp_type or comp_type.lower() in ('gate pier', 'portal pier'):
+        comp_type = '门式桥墩'
+    elif '桥墩' in comp_type or comp_type.lower() in ('pier', 'approach pier'):
         comp_type = '引桥桥墩'
+    if ('承台' in comp_type or '桩基' in comp_type) and '锚' not in comp_type:
+        comp_type = '承台及桩基'
     if '锚锭' in comp_type or '锚' in comp_type or comp_type.lower() in ('anchor', 'cable anchor'):
         comp_type = '索缆锚锭'
 

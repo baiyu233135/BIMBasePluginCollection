@@ -1,6 +1,6 @@
 # CADBoard - CAD 画板与智能建模平台
 
-本模块是功能最复杂的插件集合，集成 **CAD 画板、AI 智能建模、桥隧病害识别、自动配置环境** 四大方向。
+本模块是功能最复杂的插件集合，集成 **CAD 画板、AI 智能建模、桥梁病害识别、自动配置环境** 四大方向。
 
 ## 四大功能方向
 
@@ -21,7 +21,7 @@ CAD 画板右侧内嵌 AI 助手面板，同时具备 2D 绘图指令和 AI_Mode
 
 入口：画板工具栏"AI助手"按钮 → `utils/ai_panel.py`（`utils/ai_modeling_bridge.py` 桥接 AI_Modeling 解析，`ai_modeling_launcher.py` 负责 3D 命令执行）
 
-### 3. 桥隧病害识别
+### 3. 桥梁病害识别
 
 基于 YOLOv8 检测无人机照片中的桥梁/隧道病害，生成 Word 诊断报告，并将病害投影到 BIMBase 模型。
 
@@ -48,7 +48,7 @@ CADBoard/
 ├── main.py               # CAD画板入口
 ├── setup_env.py          # 自动配置环境入口
 ├── ai_modeling_launcher.py # AI_Modeling 命令执行载体（供 AI 面板调用）
-├── bridge_disease_launcher.py # 桥隧病害识别入口
+├── bridge_disease_launcher.py # 桥梁病害识别入口
 └── docs/                 # 模块文档
 ```
 

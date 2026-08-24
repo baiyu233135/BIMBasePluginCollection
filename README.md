@@ -1,6 +1,6 @@
 # BIMBase Python 插件集合
 
-本项目是基于 **BIMBase Python SDK** 开发的一系列插件，用于参数化建模、CAD 绘图、AI 智能建模、桥隧病害识别等工程场景。
+本项目是基于 **BIMBase Python SDK** 开发的一系列插件，用于参数化建模、CAD 绘图、AI 智能建模、桥梁病害识别等工程场景。
 
 ## 📁 项目结构
 
@@ -9,8 +9,8 @@ pythonplugin/
 ├── AI_Modeling/          # 新版 AI 智能建模（DeepSeek + 本地解析 + 自动放置）
 ├── AI建模/               # 早期 AI 建模入口（ChatGLM 网页 + 剪贴板代码运行）
 ├── CADBoard/             # CAD 画板 / AI 智能建模 / 自动配置环境
-│   └── bridge_disease_launcher.py  # 桥隧病害识别转发入口
-├── 桥隧病害识别/         # 桥隧病害识别独立模块（由 CADBoard 按钮调用）
+│   └── bridge_disease_launcher.py  # 桥梁病害识别转发入口
+├── 桥隧病害识别/         # 桥梁病害识别独立模块（由 CADBoard 按钮调用）
 ├── 建模/                 # 曲线建模 + 圆柱批量建模（读取 Excel 参数）
 ├── 桥梁组件/             # 桥梁参数化组件库 + 清单工具 + STL/Lumion/3D打印
 ├── 组件测试/             # 基础几何体测试组件
@@ -25,19 +25,19 @@ pythonplugin/
 |---|---|---|---|
 | `AI建模.pyplugin` | AI建模（大语言模型） | 登录大模型账号，对话生成建模代码 | `AI建模/` |
 | （已并入 CADBoard） | AI_Modeling | 本地 AI 智能建模，能力已并入 CADBoard 画板 AI 面板 | `AI_Modeling/` |
-| `CADBoard.pyplugin` | CADBoard | CAD 画板、AI 智能建模、桥隧病害识别、自动配置环境 | `CADBoard/` |
+| `CADBoard.pyplugin` | CADBoard | CAD 画板、AI 智能建模、桥梁病害识别、自动配置环境 | `CADBoard/` |
 | `建模.pyplugin` | 建模插件库 | 曲线建模、圆柱批量建模 | `建模/` |
 | `桥梁组件.pyplugin` | 桥梁组件库 | 桥梁参数化结构、清单工具、STL 工具 | `桥梁组件/` |
 | `组件测试.pyplugin` | 组件测试 | 基础几何体与组合梁测试 | `组件测试/` |
 
 > 注意：`.pyplugin` 文件必须保留在根目录，BIMBase 才能正确加载插件。
 
-### 桥隧病害识别入口说明
+### 桥梁病害识别入口说明
 
-桥隧病害识别功能已独立到 `桥隧病害识别/` 目录，不单独注册 `.pyplugin`：
+桥梁病害识别功能已独立到 `桥隧病害识别/` 目录，不单独注册 `.pyplugin`：
 
 ```text
-CADBoard 面板 → 桥隧病害识别 → CADBoard/bridge_disease_launcher.py（转发）
+CADBoard 面板 → 桥梁病害识别 → CADBoard/bridge_disease_launcher.py（转发）
     → 桥隧病害识别/bridge_disease_launcher.py → disease_dialog.py
 ```
 

@@ -344,6 +344,16 @@ PARAM_MAP_RULES = {
         '承台宽度': ('height', 'direct'),
         'z_bottom': ('z_start', 'direct'),
     },
+    '门式桥墩': {
+        '盖梁总长': ('width', 'direct'),
+        '盖梁宽': ('height', 'direct'),
+        'z_bottom': ('z_start', 'direct'),
+    },
+    '承台及桩基': {
+        '承台长': ('width', 'direct'),
+        '承台宽': ('height', 'direct'),
+        'z_bottom': ('z_start', 'direct'),
+    },
 }
 
 
@@ -489,6 +499,51 @@ def apply_component_params_to_element(elem, params, component_type):
             elem.z_start = z_bottom
         if hasattr(elem, 'z_end'):
             elem.z_end = z_bottom + dh + ch + ah
+        if hasattr(elem, 'x'):
+            elem.x = float(params.get('x', elem.x))
+        if hasattr(elem, 'y'):
+            elem.y = float(params.get('y', elem.y))
+        applied += 1
+
+    # 门式桥墩 特殊处理：盖梁总长/盖梁宽/墩高/盖梁总高 + 位置
+    # 总高 = 墩高 + 盖梁总高 + 垫石高(80)，原点在两柱中间地面（柱底）
+    if component_type == '门式桥墩':
+        L = float(params.get('盖梁总长', 4700))
+        W = float(params.get('盖梁宽', 1000))
+        col_h = float(params.get('墩高', 5000))
+        cap_h = float(params.get('盖梁总高', 400))
+        pad_h = 80.0
+        if hasattr(elem, 'width'):
+            elem.width = L
+        if hasattr(elem, 'height'):
+            elem.height = W
+        z_bottom = float(params.get('z_bottom', 0))
+        if hasattr(elem, 'z_start'):
+            elem.z_start = z_bottom
+        if hasattr(elem, 'z_end'):
+            elem.z_end = z_bottom + col_h + cap_h + pad_h
+        if hasattr(elem, 'x'):
+            elem.x = float(params.get('x', elem.x))
+        if hasattr(elem, 'y'):
+            elem.y = float(params.get('y', elem.y))
+        applied += 1
+
+    # 承台及桩基 特殊处理：承台长/承台宽/桩长/承台高 + 位置
+    # 原点在承台底面中心：z_start = z_bottom - 桩长，z_end = z_bottom + 承台高
+    if component_type == '承台及桩基':
+        CL = float(params.get('承台长', 5500))
+        CW = float(params.get('承台宽', 2350))
+        ch = float(params.get('承台高', 500))
+        pile_l = float(params.get('桩长', 5000))
+        if hasattr(elem, 'width'):
+            elem.width = CL
+        if hasattr(elem, 'height'):
+            elem.height = CW
+        z_bottom = float(params.get('z_bottom', 0))
+        if hasattr(elem, 'z_start'):
+            elem.z_start = z_bottom - pile_l
+        if hasattr(elem, 'z_end'):
+            elem.z_end = z_bottom + ch
         if hasattr(elem, 'x'):
             elem.x = float(params.get('x', elem.x))
         if hasattr(elem, 'y'):
@@ -715,6 +770,60 @@ def create_element_from_params(params, component_type):
             elem = RectangleElement(cx - CL / 2, cy - CW / 2, CL, CW)
             elem.z_start = float(params.get('z_bottom', 0))
             elem.z_end = elem.z_start + float(params.get('底柱高度', 1000)) + float(params.get('承台高度', 400)) + float(params.get('锚块总高', 2039))
+            return elem
+
+        elif component_type == '门式桥墩':
+            # 用主视图轮廓作为源元素，避免只显示一个占位矩形
+            from geometry.faces import FaceManager
+            elem = FaceManager.generate_face_element('门式桥墩', 'front', params)
+            total_h = float(params.get('墩高', 5000)) + float(params.get('盖梁总高', 400)) + 80.0  # 含垫石高
+            if elem:
+                elem.face_info = {}  # 源元素本身不是面
+                elem.component_type = '门式桥墩'
+                elem.component_params = dict(params)
+                elem.style.color = (255, 255, 255)
+                elem.style.line_type = 'solid'
+                elem.is_3d = True
+                elem.z_start = float(params.get('z_bottom', 0))
+                elem.z_end = elem.z_start + total_h
+                return elem
+            # fallback
+            from geometry.elements import RectangleElement
+            cx = float(params.get('x', 0))
+            cy = float(params.get('y', 0))
+            L = float(params.get('盖梁总长', 4700))
+            W = float(params.get('盖梁宽', 1000))
+            elem = RectangleElement(cx - L / 2, cy - W / 2, L, W)
+            elem.z_start = float(params.get('z_bottom', 0))
+            elem.z_end = elem.z_start + total_h
+            return elem
+
+        elif component_type == '承台及桩基':
+            # 用主视图轮廓作为源元素，避免只显示一个占位矩形
+            from geometry.faces import FaceManager
+            elem = FaceManager.generate_face_element('承台及桩基', 'front', params)
+            cap_h = float(params.get('承台高', 500))
+            pile_l = float(params.get('桩长', 5000))
+            if elem:
+                elem.face_info = {}  # 源元素本身不是面
+                elem.component_type = '承台及桩基'
+                elem.component_params = dict(params)
+                elem.style.color = (255, 255, 255)
+                elem.style.line_type = 'solid'
+                elem.is_3d = True
+                # 原点在承台底面中心：桩在 z_bottom 之下，承台在 z_bottom 之上
+                elem.z_start = float(params.get('z_bottom', 0)) - pile_l
+                elem.z_end = float(params.get('z_bottom', 0)) + cap_h
+                return elem
+            # fallback
+            from geometry.elements import RectangleElement
+            cx = float(params.get('x', 0))
+            cy = float(params.get('y', 0))
+            CL = float(params.get('承台长', 5500))
+            CW = float(params.get('承台宽', 2350))
+            elem = RectangleElement(cx - CL / 2, cy - CW / 2, CL, CW)
+            elem.z_start = float(params.get('z_bottom', 0)) - pile_l
+            elem.z_end = float(params.get('z_bottom', 0)) + cap_h
             return elem
 
     except Exception:

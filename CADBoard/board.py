@@ -890,7 +890,7 @@ class CADBoardWindow(QMainWindow):
 
         elem = selected[0]
         self._current_prop_element = elem
-        is_face = (hasattr(elem, 'face_info') and bool(elem.face_info)) or elem.component_type in ('引桥桥墩', '索缆锚锭')
+        is_face = (hasattr(elem, 'face_info') and bool(elem.face_info)) or elem.component_type in ('引桥桥墩', '索缆锚锭', '门式桥墩', '承台及桩基')
 
         self.prop_inputs['type'].setText(elem.element_type.value)
         self.prop_inputs['layer'].setText(elem.style.layer_name)
@@ -962,10 +962,19 @@ class CADBoardWindow(QMainWindow):
             face_elems = self._face_group.get_elements_by_component(component_id)
 
         from face_overview_dialog import FaceOverviewDialog, PIER_COMMON_PARAMS, CABLE_ANCHOR_COMMON_PARAMS
+        try:
+            from face_overview_dialog import GATE_PIER_COMMON_PARAMS, PILE_FOUNDATION_COMMON_PARAMS
+        except ImportError:
+            GATE_PIER_COMMON_PARAMS = None
+            PILE_FOUNDATION_COMMON_PARAMS = None
         if component_type == '引桥桥墩' and visible_keys is None:
             visible_keys = PIER_COMMON_PARAMS
         elif component_type == '索缆锚锭' and visible_keys is None:
             visible_keys = CABLE_ANCHOR_COMMON_PARAMS
+        elif component_type == '门式桥墩' and visible_keys is None:
+            visible_keys = GATE_PIER_COMMON_PARAMS
+        elif component_type == '承台及桩基' and visible_keys is None:
+            visible_keys = PILE_FOUNDATION_COMMON_PARAMS
 
         # 先确保主窗口在父级层级中处于活跃状态，再弹出模态对话框
         self.raise_()
@@ -1001,11 +1010,23 @@ class CADBoardWindow(QMainWindow):
                 pass
         elif component_type == '索缆锚锭':
             new_params = self._normalize_cable_anchor_params(new_params)
+        elif component_type == '门式桥墩':
+            try:
+                from utils.generated_component_cache import normalize_gate_pier_params
+                new_params = normalize_gate_pier_params(new_params)
+            except Exception:
+                pass
+        elif component_type == '承台及桩基':
+            try:
+                from utils.generated_component_cache import normalize_pile_foundation_params
+                new_params = normalize_pile_foundation_params(new_params)
+            except Exception:
+                pass
 
         self._save_undo_state()
 
         # 复杂构件：在面编辑模式下重新生成三视图模板面
-        if component_type in ('引桥桥墩', '索缆锚锭'):
+        if component_type in ('引桥桥墩', '索缆锚锭', '门式桥墩', '承台及桩基'):
             source_elem.component_params = dict(new_params)
             source_elem._face_params_modified = False
             self._regenerate_three_view_faces(component_id, new_params)
@@ -1061,7 +1082,7 @@ class CADBoardWindow(QMainWindow):
         if not elem:
             return
         component_id = getattr(elem, 'face_info', {}).get('component_id')
-        if not component_id and getattr(elem, 'component_type', '') in ('引桥桥墩', '索缆锚锭'):
+        if not component_id and getattr(elem, 'component_type', '') in ('引桥桥墩', '索缆锚锭', '门式桥墩', '承台及桩基'):
             component_id = elem.id
         if not component_id:
             QMessageBox.information(self, "面参数总览", "未找到组件的面元素。")
@@ -1214,7 +1235,7 @@ class CADBoardWindow(QMainWindow):
 
         # Phase 3 Enhancement: 智能识别三视图按钮
         self._recognize_views_btn = QPushButton("🔍 识别三视图")
-        self._recognize_views_btn.setToolTip("识别导入的PDF/DWG三视图；复杂构件（引桥桥墩/索缆锚锭）自动调用 AI 复杂识图")
+        self._recognize_views_btn.setToolTip("识别导入的PDF/DWG三视图；复杂构件（引桥桥墩/索缆锚锭/门式桥墩/承台及桩基）自动调用 AI 复杂识图")
         self._recognize_views_btn.setMinimumWidth(110)
         self._recognize_views_btn.setStyleSheet("QPushButton { background-color: #1565C0; color: white; font-weight: bold; }")
         self._recognize_views_btn.clicked.connect(self._recognize_pdf_views)
@@ -2252,7 +2273,7 @@ class CADBoardWindow(QMainWindow):
                 e.visible = True
                 e.face_info = {}
                 comp_type = getattr(e, 'component_type', '')
-                if comp_type in ('引桥桥墩', '索缆锚锭'):
+                if comp_type in ('引桥桥墩', '索缆锚锭', '门式桥墩', '承台及桩基'):
                     last_created_source = e
                     _write_board_log(f"sync_from_bimbase: keep front view source for {comp_type} {e.id[:8]}")
                 else:
@@ -2282,7 +2303,7 @@ class CADBoardWindow(QMainWindow):
                     if e.id == face_cid and not getattr(e, 'face_info', {}):
                         source = e
                         break
-                if source and source.component_type in ('引桥桥墩', '索缆锚锭'):
+                if source and source.component_type in ('引桥桥墩', '索缆锚锭', '门式桥墩', '承台及桩基'):
                     self._regenerate_three_view_faces(source.id, dict(source.component_params))
                     source.visible = False
                     self.viewport.update()
@@ -2427,7 +2448,7 @@ class CADBoardWindow(QMainWindow):
             if self._face_group is None:
                 self._face_group = ComponentFaceGroup(self)
 
-            # 所有支持的组件（简单组件/引桥桥墩/索缆锚锭）统一弹出模式选择对话框：
+            # 所有支持的组件（简单组件/引桥桥墩/索缆锚锭/门式桥墩/承台及桩基）统一弹出模式选择对话框：
             # 智能=三视图3个投影面，全部面=组件定义的所有面（正方体/长方体为6面）
             dialog = FaceGenerateDialog(self, source.component_type)
             if dialog.exec_() != QDialog.Accepted:
@@ -2518,10 +2539,14 @@ class CADBoardWindow(QMainWindow):
             last_path = getattr(self, '_last_imported_file_path', None) or ''
             hinted_type = None
             lower_path = last_path.lower()
-            if '引桥桥墩' in lower_path or '桥墩' in lower_path:
+            if '门式桥墩' in lower_path or '门式墩' in lower_path:
+                hinted_type = '门式桥墩'
+            elif '引桥桥墩' in lower_path or '桥墩' in lower_path:
                 hinted_type = '引桥桥墩'
             elif '索缆锚锭' in lower_path or '锚锭' in lower_path:
                 hinted_type = '索缆锚锭'
+            elif '承台' in lower_path or '桩基' in lower_path:
+                hinted_type = '承台及桩基'
 
             if hinted_type:
                 self.status_bar.showMessage(f"检测到复杂构件图纸：{hinted_type}，调用 AI 复杂识图...")
@@ -2701,6 +2726,12 @@ class CADBoardWindow(QMainWindow):
                     params = normalize_pier_params(params)
                 elif comp_type == '索缆锚锭':
                     params = self._normalize_cable_anchor_params(params)
+                elif comp_type == '门式桥墩':
+                    from utils.generated_component_cache import normalize_gate_pier_params
+                    params = normalize_gate_pier_params(params)
+                elif comp_type == '承台及桩基':
+                    from utils.generated_component_cache import normalize_pile_foundation_params
+                    params = normalize_pile_foundation_params(params)
             except Exception:
                 pass
             if not comp_type:
@@ -2743,7 +2774,7 @@ class CADBoardWindow(QMainWindow):
                 e.selected = False
             source.selected = True
 
-            if comp_type in ('引桥桥墩', '索缆锚锭'):
+            if comp_type in ('引桥桥墩', '索缆锚锭', '门式桥墩', '承台及桩基'):
                 # 复杂构件：进入面编辑模式，用模板生成三视图面元素
                 if is_line_source:
                     ok, msg = self._build_faces_from_imported_lines(file_path, source, comp_type, params)
@@ -2915,6 +2946,10 @@ class CADBoardWindow(QMainWindow):
             source.z_end = z_bottom + float(params.get('墩高', 1200)) + float(params.get('盖梁总高', 300))
         elif comp_type == '索缆锚锭':
             source.z_end = z_bottom + float(params.get('底柱高度', 1000)) + float(params.get('承台高度', 400)) + float(params.get('锚块总高', 2039))
+        elif comp_type == '门式桥墩':
+            source.z_end = z_bottom + float(params.get('墩高', 5000)) + float(params.get('盖梁总高', 400)) + 80
+        elif comp_type == '承台及桩基':
+            source.z_end = z_bottom + float(params.get('桩长', 5000)) + float(params.get('承台高', 500))
         elif hasattr(source, 'z_end'):
             source.z_end = z_bottom
         return True
@@ -2928,7 +2963,7 @@ class CADBoardWindow(QMainWindow):
             if e.id == component_id:
                 source = e
                 break
-        if not source or source.component_type not in ('引桥桥墩', '索缆锚锭'):
+        if not source or source.component_type not in ('引桥桥墩', '索缆锚锭', '门式桥墩', '承台及桩基'):
             return
         comp_type = source.component_type
         from geometry.faces import FaceManager
@@ -2946,7 +2981,7 @@ class CADBoardWindow(QMainWindow):
             if e.id == component_id:
                 source = e
                 break
-        if not source or source.component_type not in ('引桥桥墩', '索缆锚锭'):
+        if not source or source.component_type not in ('引桥桥墩', '索缆锚锭', '门式桥墩', '承台及桩基'):
             return
         source.component_params = dict(params)
         source.visible = False
@@ -2959,7 +2994,7 @@ class CADBoardWindow(QMainWindow):
 
     def _clear_complex_face_elements(self, comp_type):
         """清理画板中残留的复杂构件面模板元素，避免重复生成时叠加显示。"""
-        if comp_type not in ('引桥桥墩', '索缆锚锭'):
+        if comp_type not in ('引桥桥墩', '索缆锚锭', '门式桥墩', '承台及桩基'):
             return
         before = len(self.elements)
         self.elements = [
@@ -3019,7 +3054,7 @@ class CADBoardWindow(QMainWindow):
 
     def _exit_face_edit_mode(self):
         """退出面编辑模式：恢复正常交互。
-        对于复杂构件（引桥桥墩/索缆锚锭），把模板三视图转换为普通可选中的多段线，并删除隐藏源元素；
+        对于复杂构件（引桥桥墩/索缆锚锭/门式桥墩/承台及桩基），把模板三视图转换为普通可选中的多段线，并删除隐藏源元素；
         对于简单构件，删除面元素并恢复源元素显示。"""
         import traceback as _tb
         _write_board_log("_exit_face_edit_mode called")
@@ -3038,7 +3073,7 @@ class CADBoardWindow(QMainWindow):
                         source_elem = e
                         break
 
-            is_complex = source_elem and source_elem.component_type in ('引桥桥墩', '索缆锚锭')
+            is_complex = source_elem and source_elem.component_type in ('引桥桥墩', '索缆锚锭', '门式桥墩', '承台及桩基')
 
             if is_complex:
                 # 复杂构件：退出面编辑模式时，把三个模板面转换为普通多段线，并删除隐藏的源元素
@@ -3276,7 +3311,7 @@ class CADBoardWindow(QMainWindow):
         if source_elem and changed:
             source_elem._face_params_modified = True
 
-        if source_elem and source_elem.component_type in ('引桥桥墩', '索缆锚锭'):
+        if source_elem and source_elem.component_type in ('引桥桥墩', '索缆锚锭', '门式桥墩', '承台及桩基'):
             # 复杂构件：在面编辑模式下重新生成三视图模板面
             self._regenerate_three_view_faces(self._face_component_id, new_params)
             _log_face("complex component: regenerated three-view faces")
@@ -3304,6 +3339,12 @@ class CADBoardWindow(QMainWindow):
             elif source_elem.component_type == '索缆锚锭':
                 anchor_h = float(new_params.get('底柱高度', 1000)) + float(new_params.get('承台高度', 400)) + float(new_params.get('锚块总高', 2039))
                 source_elem.z_end = source_elem.z_start + anchor_h
+            elif source_elem.component_type == '门式桥墩':
+                gate_h = float(new_params.get('墩高', 5000)) + float(new_params.get('盖梁总高', 400)) + 80
+                source_elem.z_end = source_elem.z_start + gate_h
+            elif source_elem.component_type == '承台及桩基':
+                pile_total_h = float(new_params.get('桩长', 5000)) + float(new_params.get('承台高', 500))
+                source_elem.z_end = source_elem.z_start + pile_total_h
             else:
                 z_bottom = new_params.get('z_bottom') or new_params.get('z1') or new_params.get('z', 0)
                 z_top = new_params.get('z_top') or new_params.get('z2') or new_params.get('z', 0)
@@ -3380,6 +3421,20 @@ class CADBoardWindow(QMainWindow):
                     cp['承台长度'] = float(elem.width)
                 if hasattr(elem, 'height'):
                     cp['承台宽度'] = float(elem.height)
+                if hasattr(elem, 'z_start'):
+                    cp['z_bottom'] = float(elem.z_start)
+            elif comp_type == '门式桥墩':
+                if hasattr(elem, 'width'):
+                    cp['盖梁总长'] = float(elem.width)
+                if hasattr(elem, 'height'):
+                    cp['盖梁宽'] = float(elem.height)
+                if hasattr(elem, 'z_start'):
+                    cp['z_bottom'] = float(elem.z_start)
+            elif comp_type == '承台及桩基':
+                if hasattr(elem, 'width'):
+                    cp['承台长'] = float(elem.width)
+                if hasattr(elem, 'height'):
+                    cp['承台宽'] = float(elem.height)
                 if hasattr(elem, 'z_start'):
                     cp['z_bottom'] = float(elem.z_start)
             else:
@@ -3496,6 +3551,40 @@ class CADBoardWindow(QMainWindow):
                 new_h = left[3] - left[1]
                 fixed_h = new_params.get('承台高度', 400) + new_params.get('锚块总高', 2039)
                 new_params['底柱高度'] = round(max(0, new_h - fixed_h), 1)
+
+        elif component_type == '门式桥墩':
+            top = face_bounds.get('top')
+            front = face_bounds.get('front')
+            left = face_bounds.get('left')
+            if top:
+                new_params['盖梁总长'] = round(top[2] - top[0], 1)
+                new_params['盖梁宽'] = round(top[3] - top[1], 1)
+            if front:
+                new_params['盖梁总长'] = round(front[2] - front[0], 1)
+                new_h = front[3] - front[1]
+                fixed_h = new_params.get('盖梁总高', 400) + 80
+                new_params['墩高'] = round(max(0, new_h - fixed_h), 1)
+            if left:
+                new_params['盖梁宽'] = round(left[2] - left[0], 1)
+                new_h = left[3] - left[1]
+                fixed_h = new_params.get('盖梁总高', 400) + 80
+                new_params['墩高'] = round(max(0, new_h - fixed_h), 1)
+
+        elif component_type == '承台及桩基':
+            top = face_bounds.get('top')
+            front = face_bounds.get('front')
+            left = face_bounds.get('left')
+            if top:
+                new_params['承台长'] = round(top[2] - top[0], 1)
+                new_params['承台宽'] = round(top[3] - top[1], 1)
+            if front:
+                new_params['承台长'] = round(front[2] - front[0], 1)
+                new_h = front[3] - front[1]
+                new_params['桩长'] = round(max(0, new_h - new_params.get('承台高', 500)), 1)
+            if left:
+                new_params['承台宽'] = round(left[2] - left[0], 1)
+                new_h = left[3] - left[1]
+                new_params['桩长'] = round(max(0, new_h - new_params.get('承台高', 500)), 1)
 
         return new_params
 

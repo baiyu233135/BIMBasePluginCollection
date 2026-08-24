@@ -617,6 +617,36 @@ def place_component_at(comp, x, y, z, _in_modal=False, auto_only=True):
             except Exception as e:
                 _log(f"place_component_at: bounding-box fallback failed: {e}")
 
+        # 门式桥墩兜底：复杂几何全部失败时，用简单长方体近似占位
+        if type(comp).__name__ == 'GatePierComponent':
+            try:
+                _log("place_component_at: trying bounding-box fallback for GatePierComponent")
+                cap_l = float(comp['盖梁总长'])
+                cap_w = float(comp['盖梁宽'])
+                pier_h = float(comp['墩高']) + float(comp['盖梁总高']) + 80.0
+                bbox_comp = BoxComponent(长度=cap_l, 宽度=cap_w, 高度=pier_h)
+                ok, msg = place_component_at(bbox_comp, x, y, z, auto_only=auto_only)
+                _log(f"place_component_at: bounding-box fallback result ok={ok}, msg={msg}")
+                if ok:
+                    return ok, f"已用长方体近似布置门式桥墩占位（{msg}）"
+            except Exception as e:
+                _log(f"place_component_at: bounding-box fallback failed: {e}")
+
+        # 承台及桩基兜底：复杂几何全部失败时，用简单长方体近似占位
+        if type(comp).__name__ == 'PileFoundationComponent':
+            try:
+                _log("place_component_at: trying bounding-box fallback for PileFoundationComponent")
+                cap_l = float(comp['承台长'])
+                cap_w = float(comp['承台宽'])
+                cap_h = float(comp['承台高'])
+                bbox_comp = BoxComponent(长度=cap_l, 宽度=cap_w, 高度=cap_h)
+                ok, msg = place_component_at(bbox_comp, x, y, z, auto_only=auto_only)
+                _log(f"place_component_at: bounding-box fallback result ok={ok}, msg={msg}")
+                if ok:
+                    return ok, f"已用长方体近似布置承台及桩基占位（{msg}）"
+            except Exception as e:
+                _log(f"place_component_at: bounding-box fallback failed: {e}")
+
         _log("place_component_at: all auto placement methods failed")
         return False, "自动布置失败"
     except Exception as e:
@@ -1407,6 +1437,220 @@ class CableAnchorComponent(Component):
             traceback.print_exc()
 
 
+def _octagon_section(w, d, c):
+    """XY 平面内的倒角八边形截面：宽 w（X），深 d（Y），倒角 c"""
+    hw, hd = w / 2.0, d / 2.0
+    c = min(c, hw, hd)
+    return Section(
+        Vec2(-hw + c, -hd), Vec2(hw - c, -hd),
+        Vec2(hw, -hd + c), Vec2(hw, hd - c),
+        Vec2(hw - c, hd), Vec2(-hw + c, hd),
+        Vec2(-hw, hd - c), Vec2(-hw, -hd + c)
+    )
+
+
+def _rect_section(w, d):
+    """XY 平面内的矩形截面：宽 w（X），深 d（Y）"""
+    hw, hd = w / 2.0, d / 2.0
+    return Section(
+        Vec2(-hw, -hd), Vec2(hw, -hd), Vec2(hw, hd), Vec2(-hw, hd)
+    )
+
+
+class GatePierComponent(Component):
+    """门式桥墩：盖梁（含垫石）+ 双根变截面空心八边形墩柱 + 系梁
+    与 组件测试/门式桥墩.py 保持一致的精简参数与几何逻辑。
+    原点在两柱中间地面处；总高 = 墩高 + 盖梁总高 + 80（垫石）。"""
+
+    DEFAULT_PARAMS = {
+        '盖梁总长': 4700.0,
+        '盖梁总高': 400.0,
+        '盖梁宽': 1000.0,
+        '墩高': 5000.0,
+        '墩柱间距': 3500.0,   # 两柱中心间距
+        '柱顶宽': 1200.0,     # X 向
+        '柱底宽': 1400.0,     # X 向
+        '柱顶厚': 1000.0,     # Y 向
+        '柱底厚': 1200.0,     # Y 向
+        '系梁根数': 1,
+    }
+
+    def __init__(self, **kwargs):
+        super().__init__()
+        for k, v in self.DEFAULT_PARAMS.items():
+            self[k] = Attr(float(v) if isinstance(v, (int, float)) else v, show=True, obvious=True)
+        # 隐藏属性：用于反向同步时恢复画板元素位置
+        for k in ('偏移X', '偏移Y', '偏移Z', 'x', 'y', 'z_bottom'):
+            self[k] = Attr(0.0, show=False)
+        # 允许外部传入参数覆盖默认值
+        for k, v in kwargs.items():
+            if k in self.DEFAULT_PARAMS or k in ('偏移X', '偏移Y', '偏移Z', 'x', 'y', 'z_bottom'):
+                is_number = isinstance(v, (int, float))
+                self[k] = Attr(float(v) if is_number and k != '系梁根数' else v,
+                               show=(k in self.DEFAULT_PARAMS), obvious=(k in self.DEFAULT_PARAMS))
+        self['门式桥墩'] = Attr(None, show=True, obvious=True)
+        # 整体颜色 (r,g,b,a)，None 表示不上色
+        self['颜色'] = Attr(kwargs.get('颜色'), show=False)
+        self.replace()
+
+    @export
+    def replace(self):
+        try:
+            cap_l = self['盖梁总长']
+            cap_h = self['盖梁总高']
+            cap_w = self['盖梁宽']
+            col_h = self['墩高']
+            col_s = self['墩柱间距']
+            top_w = self['柱顶宽']
+            bot_w = self['柱底宽']
+            top_d = self['柱顶厚']
+            bot_d = self['柱底厚']
+            tie_n = int(self['系梁根数'])
+            ox = float(self['偏移X']) if '偏移X' in self else 0.0
+            oy = float(self['偏移Y']) if '偏移Y' in self else 0.0
+            oz = float(self['偏移Z']) if '偏移Z' in self else 0.0
+
+            # 细部尺寸固定为图纸默认值（与参考 DWG 一致）
+            pad_l = 400.0       # 垫石平面边长
+            pad_h = 80.0        # 垫石高
+            wall = 300.0        # 空心柱壁厚
+            chamfer = 300.0     # 八边形倒角
+            tie_h = 400.0       # 系梁高
+            tie_d = 400.0       # 系梁深（Y 向）
+            tie_step = 1000.0   # 多根系梁时的竖向间距（顶到顶）
+
+            parts = []
+
+            # 盖梁：z 从 墩高 到 墩高+盖梁总高
+            cap = translate(-cap_l / 2, -cap_w / 2, col_h) * scale(cap_l, cap_w, cap_h) * Cube()
+            parts.append(cap)
+
+            # 垫石×2：位于柱顶中心的盖梁顶面
+            for sx in (-col_s / 2, col_s / 2):
+                pad = translate(sx - pad_l / 2, -pad_l / 2, col_h + cap_h) * scale(pad_l, pad_l, pad_h) * Cube()
+                parts.append(pad)
+
+            # 墩柱×2：变截面空心八边形（底截面 -> 顶截面 Loft）
+            outer_bot = _octagon_section(bot_w, bot_d, chamfer)
+            outer_top = _octagon_section(top_w, top_d, chamfer)
+            core_bot = _rect_section(max(bot_w - 2 * wall, 10.0), max(bot_d - 2 * wall, 10.0))
+            core_top = _rect_section(max(top_w - 2 * wall, 10.0), max(top_d - 2 * wall, 10.0))
+            for sx in (-col_s / 2, col_s / 2):
+                outer = Loft(outer_bot, translate(0, 0, col_h) * outer_top)
+                try:
+                    # 空心：减去内腔（布尔运算不稳定时退化为实心柱）
+                    core = Loft(core_bot, translate(0, 0, col_h) * core_top)
+                    col = outer - core
+                except Exception:
+                    col = outer
+                parts.append(translate(sx, 0, 0) * col)
+
+            # 系梁：贴盖梁底向下均布，长度随柱身锥度自动适配（与两柱内侧面相接）
+            if tie_n > 0 and col_h > 0:
+                for i in range(tie_n):
+                    z_top = col_h - i * tie_step
+                    if z_top - tie_h < 0:
+                        z_top = tie_h
+                    zc = z_top - tie_h / 2
+                    # 该高度处柱身 X 向宽度（线性插值）
+                    w_at = bot_w + (top_w - bot_w) * (zc / col_h)
+                    tie_l = max(col_s - w_at, 100.0)
+                    tie = translate(-tie_l / 2, -tie_d / 2, z_top - tie_h) * scale(tie_l, tie_d, tie_h) * Cube()
+                    parts.append(tie)
+
+            geom = translate(ox, oy, oz) * Combine(*parts)
+            try:
+                _c = self['颜色'] if '颜色' in self else None
+                if _c:
+                    _vals = [float(v) for v in str(_c).split(',')] if isinstance(_c, str) else [float(v) for v in _c]
+                    if len(_vals) >= 3:
+                        geom = geom.color(*_vals)
+            except Exception:
+                pass
+            self['门式桥墩'] = geom
+        except Exception as e:
+            _log(f"  GatePierComponent.replace() error: {e}")
+            self['门式桥墩'] = Cube()
+
+
+class PileFoundationComponent(Component):
+    """承台及桩基：矩形承台 + 列×排圆柱桩阵列
+    与 组件测试/承台及桩基.py 保持一致的精简参数与几何逻辑。
+    原点在承台底面中心，桩向下延伸到 -桩长。"""
+
+    DEFAULT_PARAMS = {
+        '承台长': 5500.0,
+        '承台宽': 2350.0,
+        '承台高': 500.0,
+        '桩径': 250.0,
+        '桩长': 5000.0,
+        '桩间距': 630.0,      # 桩中心间距
+        '桩列数': 9,          # X 向桩数
+        '桩排数': 4,          # Y 向桩数
+    }
+
+    def __init__(self, **kwargs):
+        super().__init__()
+        for k, v in self.DEFAULT_PARAMS.items():
+            self[k] = Attr(float(v) if isinstance(v, (int, float)) else v, show=True, obvious=True)
+        # 隐藏属性：用于反向同步时恢复画板元素位置
+        for k in ('偏移X', '偏移Y', '偏移Z', 'x', 'y', 'z_bottom'):
+            self[k] = Attr(0.0, show=False)
+        # 允许外部传入参数覆盖默认值
+        for k, v in kwargs.items():
+            if k in self.DEFAULT_PARAMS or k in ('偏移X', '偏移Y', '偏移Z', 'x', 'y', 'z_bottom'):
+                is_number = isinstance(v, (int, float))
+                self[k] = Attr(float(v) if is_number and k not in ('桩列数', '桩排数') else v,
+                               show=(k in self.DEFAULT_PARAMS), obvious=(k in self.DEFAULT_PARAMS))
+        self['承台及桩基'] = Attr(None, show=True, obvious=True)
+        # 整体颜色 (r,g,b,a)，None 表示不上色
+        self['颜色'] = Attr(kwargs.get('颜色'), show=False)
+        self.replace()
+
+    @export
+    def replace(self):
+        try:
+            cap_l = self['承台长']
+            cap_w = self['承台宽']
+            cap_h = self['承台高']
+            pile_d = self['桩径']
+            pile_l = self['桩长']
+            spacing = self['桩间距']
+            n_col = max(int(self['桩列数']), 1)
+            n_row = max(int(self['桩排数']), 1)
+            ox = float(self['偏移X']) if '偏移X' in self else 0.0
+            oy = float(self['偏移Y']) if '偏移Y' in self else 0.0
+            oz = float(self['偏移Z']) if '偏移Z' in self else 0.0
+
+            # 承台：z 从 0 到 承台高，中心在原点
+            cap = translate(-cap_l / 2, -cap_w / 2, 0) * scale(cap_l, cap_w, cap_h) * Cube()
+
+            # 桩阵列：桩顶伸入承台底（z=0），桩底 z=-桩长
+            r = pile_d / 2
+            x0 = -(n_col - 1) * spacing / 2
+            y0 = -(n_row - 1) * spacing / 2
+            piles = []
+            for i in range(n_col):
+                for j in range(n_row):
+                    px = x0 + i * spacing
+                    py = y0 + j * spacing
+                    piles.append(Cone(Vec3(px, py, -pile_l), Vec3(px, py, 0), r, r))
+
+            geom = translate(ox, oy, oz) * Combine(cap, *piles)
+            try:
+                _c = self['颜色'] if '颜色' in self else None
+                if _c:
+                    _vals = [float(v) for v in str(_c).split(',')] if isinstance(_c, str) else [float(v) for v in _c]
+                    if len(_vals) >= 3:
+                        geom = geom.color(*_vals)
+            except Exception:
+                pass
+            self['承台及桩基'] = geom
+        except Exception as e:
+            _log(f"  PileFoundationComponent.replace() error: {e}")
+            self['承台及桩基'] = Cube()
+
+
 class BIMBaseSync:
     def __init__(self, board):
         self.board = board
@@ -1549,7 +1793,11 @@ class BIMBaseSync:
                                  '锚块总长', '锚块总高', '锚块宽度',
                                  '承台长度', '承台宽度', '承台高度',
                                  '底柱半径', '底柱高度',
-                                 '底柱数量', '底柱排数', '系梁数量'}
+                                 '底柱数量', '底柱排数', '系梁数量',
+                                 # 门式桥墩 / 承台及桩基
+                                 '柱顶宽', '柱底宽', '柱顶厚', '柱底厚',
+                                 '承台长', '承台宽', '承台高',
+                                 '桩径', '桩长', '桩间距', '桩列数', '桩排数'}
                 matched_keys = keys & cadboard_keys
                 _log(f"    matched cadboard_keys={len(matched_keys)}: {list(matched_keys)[:6]}")
                 if matched_keys:
@@ -1598,6 +1846,10 @@ class BIMBaseSync:
             return '正方体'
         if '长度' in keys and '宽度' in keys and '高度' in keys:
             return '长方体'
+        if '柱顶宽' in keys or '柱底宽' in keys:
+            return '门式桥墩'
+        if '桩列数' in keys or '桩排数' in keys or '承台长' in keys:
+            return '承台及桩基'
         if '盖梁总长' in keys or '墩柱直径' in keys:
             return '引桥桥墩'
         if '锚块总长' in keys or '底柱半径' in keys:
@@ -1675,6 +1927,35 @@ class BIMBaseSync:
         try:
             # 组件类型，后续多处使用
             comp_type_for_skip = getattr(elem, 'component_type', '')
+            # 退出面编辑后被转成普通线条的复杂构件：恢复缓存的组件身份
+            if not comp_type_for_skip:
+                cached_type = getattr(elem, '_cached_component_type', None)
+                if cached_type:
+                    elem.component_type = cached_type
+                    if not getattr(elem, 'component_params', None):
+                        elem.component_params = dict(getattr(elem, '_cached_component_params', {}) or {})
+                    _cp = elem.component_params
+                    # 补齐放置锚点，供 _sync_*_via_generated_code 读取
+                    for _attr, _key in (('pdf_anchor_x', 'x'), ('pdf_anchor_y', 'y'), ('pdf_anchor_z', 'z_bottom')):
+                        if not hasattr(elem, _attr):
+                            try:
+                                setattr(elem, _attr, float(_cp.get(_key, 0.0) or 0.0))
+                            except Exception:
+                                setattr(elem, _attr, 0.0)
+                    comp_type_for_skip = cached_type
+                    _log(f"  element {elem.id}: restored cached component identity '{cached_type}'")
+                else:
+                    # 若是某缓存组件的非主视兄弟面，委托给持有者同步（避免同一组件重复同步）
+                    _holder = None
+                    for _e in getattr(self.board, 'elements', []):
+                        if _e is elem:
+                            continue
+                        if elem.id in (getattr(_e, '_cached_sibling_ids', None) or []):
+                            _holder = _e
+                            break
+                    if _holder is not None:
+                        _log(f"  element {elem.id}: sibling of cached component, delegate to holder {_holder.id}")
+                        return self._sync_element(_holder)
             # 跳过非组件的原始 DWG/画板线条：没有 component_type 且不是 PDF 识别来源的原始几何
             if not comp_type_for_skip and not getattr(elem, 'pdf_recognized', False):
                 et = getattr(elem, 'element_type', '')
@@ -1727,6 +2008,11 @@ class BIMBaseSync:
                         elif comp_type == '索缆锚锭':
                             anchor_h = float(new_params.get('底柱高度', 1000)) + float(new_params.get('承台高度', 400)) + float(new_params.get('锚块总高', 2039))
                             elem.z_end = elem.z_start + anchor_h
+                        elif comp_type == '门式桥墩':
+                            gate_h = float(new_params.get('墩高', 5000)) + float(new_params.get('盖梁总高', 400)) + 80.0
+                            elem.z_end = elem.z_start + gate_h
+                        elif comp_type == '承台及桩基':
+                            elem.z_end = elem.z_start + float(new_params.get('承台高', 500))
                         elif comp_type == '球体':
                             if '半径' in new_params:
                                 elem.z_end = elem.z_start + 2 * float(new_params['半径'])
@@ -1816,13 +2102,41 @@ class BIMBaseSync:
                 except Exception as e:
                     _log(f"  generated anchor code path exception: {e}")
 
+            # 门式桥墩：同样使用代码生成缓存路径
+            if comp_type_for_skip == '门式桥墩':
+                try:
+                    _log(f"  gate pier element {elem.id}: trying generated code path")
+                    ok, msg, is_manual = self._sync_gate_pier_via_generated_code(elem)
+                    _log(f"  generated gate pier code path result: ok={ok}, is_manual={is_manual}, msg={msg}")
+                    if ok:
+                        if is_manual:
+                            elem._generated_code_manual_place = True
+                        return True
+                    _log("  generated gate pier code path failed, fallback to standard place_component_at")
+                except Exception as e:
+                    _log(f"  generated gate pier code path exception: {e}")
+
+            # 承台及桩基：同样使用代码生成缓存路径
+            if comp_type_for_skip == '承台及桩基':
+                try:
+                    _log(f"  pile foundation element {elem.id}: trying generated code path")
+                    ok, msg, is_manual = self._sync_pile_foundation_via_generated_code(elem)
+                    _log(f"  generated pile foundation code path result: ok={ok}, is_manual={is_manual}, msg={msg}")
+                    if ok:
+                        if is_manual:
+                            elem._generated_code_manual_place = True
+                        return True
+                    _log("  generated pile foundation code path failed, fallback to standard place_component_at")
+                except Exception as e:
+                    _log(f"  generated pile foundation code path exception: {e}")
+
             # 首次同步：创建新组件并 place
             comp, params, comp_type = self._make_component(elem)
             if comp is None:
                 _log(f"  element {elem.id} is not a recognized component, skip")
                 return None
             # 所有组件统一使用 create_geometry 优先的 place_component_at 自动放置
-            SOLID_TYPES = {'圆柱', '正方体', '长方体', '球体', '直角三棱柱', '圆锥', '引桥桥墩', '索缆锚锭'}
+            SOLID_TYPES = {'圆柱', '正方体', '长方体', '球体', '直角三棱柱', '圆锥', '引桥桥墩', '索缆锚锭', '门式桥墩', '承台及桩基'}
             if comp_type in SOLID_TYPES:
                 # 优先使用用户通过弹窗输入的 PDF 放置锚点，防止 PolylineElement 等
                 # 没有 x/y/cx/cy 属性的元素丢失 X/Y 坐标
@@ -1872,6 +2186,11 @@ class BIMBaseSync:
             elif comp_type == '索缆锚锭':
                 anchor_h = float(params.get('底柱高度', 1000)) + float(params.get('承台高度', 400)) + float(params.get('锚块总高', 2039))
                 elem.z_end = elem.z_start + anchor_h
+            elif comp_type == '门式桥墩':
+                gate_h = float(params.get('墩高', 5000)) + float(params.get('盖梁总高', 400)) + 80.0
+                elem.z_end = elem.z_start + gate_h
+            elif comp_type == '承台及桩基':
+                elem.z_end = elem.z_start + float(params.get('承台高', 500))
             elif comp_type == '球体':
                 if '半径' in params:
                     elem.z_end = elem.z_start + 2 * float(params['半径'])
@@ -1997,6 +2316,42 @@ class BIMBaseSync:
             params['z_bottom'] = float(z_start)
             comp = CableAnchorComponent(**params)
             return comp, params, '索缆锚锭'
+
+        if comp_type == '门式桥墩':
+            cp = dict(getattr(elem, 'component_params', {}))
+            try:
+                from utils.generated_component_cache import normalize_gate_pier_params
+                cp = normalize_gate_pier_params(cp)
+            except Exception:
+                pass
+            params = dict(GatePierComponent.DEFAULT_PARAMS)
+            for k in params:
+                if k in cp:
+                    params[k] = float(cp[k]) if k != '系梁根数' else int(cp[k])
+            # 记录元素位置，供反向同步匹配与恢复
+            params['x'] = float(x)
+            params['y'] = float(y)
+            params['z_bottom'] = float(z_start)
+            comp = GatePierComponent(**params)
+            return comp, params, '门式桥墩'
+
+        if comp_type == '承台及桩基':
+            cp = dict(getattr(elem, 'component_params', {}))
+            try:
+                from utils.generated_component_cache import normalize_pile_foundation_params
+                cp = normalize_pile_foundation_params(cp)
+            except Exception:
+                pass
+            params = dict(PileFoundationComponent.DEFAULT_PARAMS)
+            for k in params:
+                if k in cp:
+                    params[k] = float(cp[k]) if k not in ('桩列数', '桩排数') else int(cp[k])
+            # 记录元素位置，供反向同步匹配与恢复
+            params['x'] = float(x)
+            params['y'] = float(y)
+            params['z_bottom'] = float(z_start)
+            comp = PileFoundationComponent(**params)
+            return comp, params, '承台及桩基'
 
         if elem_type == 'line' or comp_type == 'Line3DComponent':
             x2 = getattr(elem, 'x2', x + 100)
@@ -2264,6 +2619,194 @@ class BIMBaseSync:
             elem.is_3d = True
         return ok, msg, is_manual
 
+    def _sync_gate_pier_via_generated_code(self, elem):
+        """为门式桥墩生成独立 pyp3d 脚本并执行/导入，返回 (ok, msg, is_manual)。
+        优先使用 AI_Modeling 已被验证的 _PlaceToDirect 坐标自动放置，
+        失败时回退到执行生成脚本（create_geometry / place()），不再使用 SendInput。"""
+        _log(f"[_sync_gate_pier_via_generated_code] start elem={elem.id[:8]}")
+        params = dict(getattr(elem, 'component_params', {}))
+        try:
+            from utils.generated_component_cache import normalize_gate_pier_params
+            params = normalize_gate_pier_params(params)
+        except Exception:
+            pass
+        x = float(getattr(elem, 'pdf_anchor_x',
+                          getattr(elem, 'x', getattr(elem, 'cx', 0))))
+        y = float(getattr(elem, 'pdf_anchor_y',
+                          getattr(elem, 'y', getattr(elem, 'cy', 0))))
+        z = float(getattr(elem, 'pdf_anchor_z', getattr(elem, 'z_start', 0)))
+        _log(f"[_sync_gate_pier_via_generated_code] placement=({x},{y},{z}) params={params}")
+        try:
+            from utils.generated_component_cache import generate_gate_pier_code
+            file_path = generate_gate_pier_code(elem.id, params, x, y, z)
+            _log(f"[_sync_gate_pier_via_generated_code] generated script: {file_path}")
+        except Exception as e:
+            _log(f"  generated gate pier code failed: {e}")
+            return False, f"生成脚本失败: {e}", False
+
+        # 1) 尝试以模块方式导入生成脚本，拿到组件类
+        try:
+            import importlib.util
+            mod_name = '_generated_gate_pier_' + ''.join(c if c.isalnum() else '_' for c in elem.id)[:32]
+            spec = importlib.util.spec_from_file_location(mod_name, file_path)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[mod_name] = module
+            cache_dir = os.path.dirname(file_path)
+            if cache_dir not in sys.path:
+                sys.path.insert(0, cache_dir)
+            try:
+                import pyp3d
+                module.__dict__.update({name: getattr(pyp3d, name) for name in dir(pyp3d)
+                                         if not name.startswith('_')})
+            except Exception as e:
+                _log(f"  inject pyp3d into generated gate pier module failed: {e}")
+            spec.loader.exec_module(module)
+
+            comp_class = None
+            for name in dir(module):
+                obj = getattr(module, name)
+                if isinstance(obj, type) and name.startswith('门式桥墩_'):
+                    comp_class = obj
+                    break
+            if comp_class is None:
+                raise RuntimeError("生成脚本中未找到组件类")
+
+            comp = comp_class()
+            # 把元素位置写入组件隐藏属性，供反向同步使用
+            for k, v in [('x', x), ('y', y), ('z_bottom', z)]:
+                if k in comp:
+                    comp[k] = float(v)
+            _log(f"[_sync_gate_pier_via_generated_code] elem={elem.id[:8]}: trying AI_Modeling auto placement at ({x}, {y}, {z})")
+            ai_ok, ai_msg = _place_via_ai_modeling_direct(comp, x, y, z)
+            _log(f"[_sync_gate_pier_via_generated_code] AI_Modeling placement result ok={ai_ok}, msg={ai_msg}")
+            if not ai_ok:
+                raise RuntimeError(f"AI_Modeling 自动放置失败: {ai_msg}")
+            self.registry.register(
+                elem.id, comp,
+                {k: v for k, v in params.items() if isinstance(v, (int, float, str, bool))},
+                '门式桥墩')
+            elem.pdf_recognized = False
+            elem.bimbase_component_id = id(comp)
+            elem.component_type = '门式桥墩'
+            elem.component_params = params.copy()
+            elem.is_3d = True
+            return True, f"已自动放置: {os.path.basename(file_path)}", False
+        except Exception as e:
+            _log(f"  generated gate pier code auto placement failed: {e}")
+
+        # 兜底：直接执行生成脚本（create_geometry / place()，不含 SendInput）
+        _log(f"[_sync_gate_pier_via_generated_code] falling back to execute_generated_code: {file_path}")
+        ok, msg, is_manual = execute_generated_code(file_path)
+        _log(f"[_sync_gate_pier_via_generated_code] execute_generated_code result ok={ok}, is_manual={is_manual}, msg={msg}")
+        if ok:
+            if is_manual:
+                self.manual_placed.append(elem)
+            elem.pdf_recognized = False
+            self.registry.register(
+                elem.id,
+                None,
+                {k: v for k, v in params.items() if isinstance(v, (int, float, str, bool))},
+                '门式桥墩')
+            elem.bimbase_component_id = None
+            elem.component_type = '门式桥墩'
+            elem.component_params = params.copy()
+            elem.is_3d = True
+        return ok, msg, is_manual
+
+    def _sync_pile_foundation_via_generated_code(self, elem):
+        """为承台及桩基生成独立 pyp3d 脚本并执行/导入，返回 (ok, msg, is_manual)。
+        优先使用 AI_Modeling 已被验证的 _PlaceToDirect 坐标自动放置，
+        失败时回退到执行生成脚本（create_geometry / place()），不再使用 SendInput。"""
+        _log(f"[_sync_pile_foundation_via_generated_code] start elem={elem.id[:8]}")
+        params = dict(getattr(elem, 'component_params', {}))
+        try:
+            from utils.generated_component_cache import normalize_pile_foundation_params
+            params = normalize_pile_foundation_params(params)
+        except Exception:
+            pass
+        x = float(getattr(elem, 'pdf_anchor_x',
+                          getattr(elem, 'x', getattr(elem, 'cx', 0))))
+        y = float(getattr(elem, 'pdf_anchor_y',
+                          getattr(elem, 'y', getattr(elem, 'cy', 0))))
+        z = float(getattr(elem, 'pdf_anchor_z', getattr(elem, 'z_start', 0)))
+        _log(f"[_sync_pile_foundation_via_generated_code] placement=({x},{y},{z}) params={params}")
+        try:
+            from utils.generated_component_cache import generate_pile_foundation_code
+            file_path = generate_pile_foundation_code(elem.id, params, x, y, z)
+            _log(f"[_sync_pile_foundation_via_generated_code] generated script: {file_path}")
+        except Exception as e:
+            _log(f"  generated pile foundation code failed: {e}")
+            return False, f"生成脚本失败: {e}", False
+
+        # 1) 尝试以模块方式导入生成脚本，拿到组件类
+        try:
+            import importlib.util
+            mod_name = '_generated_pile_found_' + ''.join(c if c.isalnum() else '_' for c in elem.id)[:32]
+            spec = importlib.util.spec_from_file_location(mod_name, file_path)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[mod_name] = module
+            cache_dir = os.path.dirname(file_path)
+            if cache_dir not in sys.path:
+                sys.path.insert(0, cache_dir)
+            try:
+                import pyp3d
+                module.__dict__.update({name: getattr(pyp3d, name) for name in dir(pyp3d)
+                                         if not name.startswith('_')})
+            except Exception as e:
+                _log(f"  inject pyp3d into generated pile foundation module failed: {e}")
+            spec.loader.exec_module(module)
+
+            comp_class = None
+            for name in dir(module):
+                obj = getattr(module, name)
+                if isinstance(obj, type) and name.startswith('承台及桩基_'):
+                    comp_class = obj
+                    break
+            if comp_class is None:
+                raise RuntimeError("生成脚本中未找到组件类")
+
+            comp = comp_class()
+            # 把元素位置写入组件隐藏属性，供反向同步使用
+            for k, v in [('x', x), ('y', y), ('z_bottom', z)]:
+                if k in comp:
+                    comp[k] = float(v)
+            _log(f"[_sync_pile_foundation_via_generated_code] elem={elem.id[:8]}: trying AI_Modeling auto placement at ({x}, {y}, {z})")
+            ai_ok, ai_msg = _place_via_ai_modeling_direct(comp, x, y, z)
+            _log(f"[_sync_pile_foundation_via_generated_code] AI_Modeling placement result ok={ai_ok}, msg={ai_msg}")
+            if not ai_ok:
+                raise RuntimeError(f"AI_Modeling 自动放置失败: {ai_msg}")
+            self.registry.register(
+                elem.id, comp,
+                {k: v for k, v in params.items() if isinstance(v, (int, float, str, bool))},
+                '承台及桩基')
+            elem.pdf_recognized = False
+            elem.bimbase_component_id = id(comp)
+            elem.component_type = '承台及桩基'
+            elem.component_params = params.copy()
+            elem.is_3d = True
+            return True, f"已自动放置: {os.path.basename(file_path)}", False
+        except Exception as e:
+            _log(f"  generated pile foundation code auto placement failed: {e}")
+
+        # 兜底：直接执行生成脚本（create_geometry / place()，不含 SendInput）
+        _log(f"[_sync_pile_foundation_via_generated_code] falling back to execute_generated_code: {file_path}")
+        ok, msg, is_manual = execute_generated_code(file_path)
+        _log(f"[_sync_pile_foundation_via_generated_code] execute_generated_code result ok={ok}, is_manual={is_manual}, msg={msg}")
+        if ok:
+            if is_manual:
+                self.manual_placed.append(elem)
+            elem.pdf_recognized = False
+            self.registry.register(
+                elem.id,
+                None,
+                {k: v for k, v in params.items() if isinstance(v, (int, float, str, bool))},
+                '承台及桩基')
+            elem.bimbase_component_id = None
+            elem.component_type = '承台及桩基'
+            elem.component_params = params.copy()
+            elem.is_3d = True
+        return ok, msg, is_manual
+
     def sync_from_bimbase(self, selected_elements=None):
         _log("sync_from_bimbase() start")
         # 获取画板中选中的元素（过滤掉面元素）
@@ -2298,6 +2841,7 @@ class BIMBaseSync:
             'Ellipse3DComponent', 'Line3DComponent', 'Point3DComponent',
             'Polygon3DComponent', 'Polyline3DComponent',
             '直角三棱柱', '圆柱', '正方体', '长方体', '引桥桥墩', '索缆锚锭',
+            '门式桥墩', '承台及桩基',
         }
 
         # 辅助：定期刷新 UI
@@ -2547,7 +3091,7 @@ class BIMBaseSync:
             return (float(params.get('x1', 0)), float(params.get('y1', 0)))
         if comp_type == 'Point3DComponent':
             return (float(params.get('x', 0)), float(params.get('y', 0)))
-        if comp_type in ('引桥桥墩', '索缆锚锭'):
+        if comp_type in ('引桥桥墩', '索缆锚锭', '门式桥墩', '承台及桩基'):
             return (float(params.get('x', 0)), float(params.get('y', 0)))
         return None
 

@@ -658,6 +658,7 @@ class AIModelingWindow(QDialog):
         """本地执行复制命令：复制选中的组件到指定位置"""
         target = parsed.get('target', {'mode': 'selected'})
         pos = parsed.get('position', {'mode': 'selected'})
+        _log(f"_execute_local_copy: text={original_text!r} pos={pos} array={parsed.get('array')}")
 
         if target.get('mode') != 'selected':
             self._append_system("❌ 复制功能目前仅支持复制选中组件", "#d32f2f")
@@ -666,6 +667,7 @@ class AIModelingWindow(QDialog):
 
         # 获取选中组件信息
         infos = get_selected_component_info()
+        _log(f"_execute_local_copy: get_selected_component_info -> {len(infos)} infos")
         if not infos:
             self._append_system("❌ 未在 BIMBase 中选中任何组件，请先选中要复制的组件", "#d32f2f")
             self.status_label.setText("就绪")
@@ -674,6 +676,7 @@ class AIModelingWindow(QDialog):
         info = infos[0]
         comp_type = info.get('type')
         params = info.get('params') or {}
+        _log(f"_execute_local_copy: comp_type={comp_type} param_keys={list(params.keys())[:10]}")
 
         if not comp_type:
             # 尝试从注册表匹配
@@ -684,6 +687,7 @@ class AIModelingWindow(QDialog):
                     comp_type = record.get('component_type')
                     params = record.get('params', {})
             if not comp_type:
+                _log("_execute_local_copy: cannot infer component type, abort")
                 self._append_system("❌ 无法识别选中组件类型", "#d32f2f")
                 self.status_label.setText("就绪")
                 return
@@ -731,6 +735,26 @@ class AIModelingWindow(QDialog):
                 self.status_label.setText("就绪")
                 return
             x, y, z = base_pos
+
+        # 阵列复制：如“沿X轴每隔5米布置10个组件”（无类型布置指令由解析器转为 copy+array）
+        arr = parsed.get('array')
+        if arr and arr.get('mode') == 'linear' and arr.get('count'):
+            coords = linear_array(x, y, z, int(arr['count']),
+                                  float(arr.get('spacing', 0) or 0), arr.get('axis', 'x'))
+            results = []
+            for cx, cy, cz in coords:
+                ok_i, msg_i = place_component_at(create_component(comp_type, params), cx, cy, cz,
+                                                 bake=parsed.get('write_position', True))
+                results.append((ok_i, msg_i))
+            success = sum(1 for ok_i, _ in results if ok_i)
+            self._append_system(
+                f"{'✅' if success == len(results) else '⚠️'} 阵列复制完成：{success}/{len(results)} 个成功",
+                "#2E7D32" if success == len(results) else "#f57c00")
+            for i, (ok_i, msg_i) in enumerate(results):
+                if not ok_i:
+                    self._append_system(f"  [{i+1}] ❌ {msg_i}", "#d32f2f")
+            self.status_label.setText("就绪")
+            return
 
         ok, msg = place_component_at(create_component(comp_type, params), x, y, z,
                                      bake=parsed.get('write_position', True))
@@ -1001,7 +1025,7 @@ class AIModelingWindow(QDialog):
             "2. 信息不足时返回：{\"action\": \"ask\", \"question\": \"追问内容\"}\n"
             "3. 闲聊/问答返回：{\"action\": \"chat\", \"message\": \"回答内容\"}\n\n"
             "## 操作JSON格式\n"
-            "创建组件: {\"action\": \"create\", \"component_type\": \"cylinder|box|cube|sphere|cone|pier|anchor\", "
+            "创建组件: {\"action\": \"create\", \"component_type\": \"cylinder|box|cube|sphere|cone|pier|anchor|gate_pier|pile_foundation\", "
             "\"params\": {\"radius\":300, \"height\":800}, "
             "\"position\": {\"mode\": \"absolute\", \"x\":1000, \"y\":2000, \"z\":500}, "
             "\"array\": null or {\"mode\":\"linear\",\"axis\":\"x\",\"spacing\":1000,\"count\":5}, "
@@ -1033,6 +1057,8 @@ class AIModelingWindow(QDialog):
             "- sphere（球体）: radius（半径）\n"
             "- cone（圆锥）: radius（底面半径）, height（高度）\n"
             "- pier（引桥桥墩）: 盖梁总长, 盖梁总高, 盖梁宽, 墩柱直径, 墩柱间距, 墩高, 系梁根数\n"
+            "- gate_pier（门式桥墩）: 盖梁总长, 盖梁总高, 盖梁宽, 墩高, 墩柱间距, 柱顶宽, 柱底宽, 柱顶厚, 柱底厚, 系梁根数\n"
+            "- pile_foundation（承台及桩基）: 承台长, 承台宽, 承台高, 桩径, 桩长, 桩间距, 桩列数, 桩排数\n"
             "- anchor（索缆锚锭/索塔锚块）: 锚块总长, 锚块总高, 锚块宽度, 承台长度, 承台宽度, 承台高度, 底柱半径, 底柱高度\n"
             "## 位置模式说明\n"
             "- absolute: 绝对坐标 (x,y,z)\n"

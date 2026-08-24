@@ -132,7 +132,7 @@ def run_disease_recognition():
     except Exception as e:
         _log(f"FAILED: {e}")
         _log(traceback.format_exc())
-        _winmsg("桥隧病害识别 - 错误", f"启动失败:\n{e}\n\n请查看日志:\n{_log_file}", icon=0x10)
+        _winmsg("桥梁病害识别 - 错误", f"启动失败:\n{e}\n\n请查看日志:\n{_log_file}", icon=0x10)
         raise
 
     _log("COMPLETED")

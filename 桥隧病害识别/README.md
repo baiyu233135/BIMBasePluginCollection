@@ -1,4 +1,4 @@
-# 桥隧病害识别
+# 桥梁病害识别
 
 本模块用于识别桥梁、隧道结构表面的常见病害，并将病害信息生成 Word 诊断报告、投影到 BIMBase 模型中。
 
@@ -67,7 +67,7 @@
 本模块**不单独注册 `.pyplugin`**，仍通过 CADBoard 面板按钮调用：
 
 ```text
-CADBoard 面板 → 桥隧病害识别 → CADBoard/bridge_disease_launcher.py（转发）
+CADBoard 面板 → 桥梁病害识别 → CADBoard/bridge_disease_launcher.py（转发）
     → 桥隧病害识别/bridge_disease_launcher.py → disease_dialog.py
 ```
 

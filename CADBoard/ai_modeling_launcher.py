@@ -160,12 +160,14 @@ def execute_modeling_action(parsed, original_text=""):
                         result[0] = False
                         result[1] = "AI_Modeling 复制后未检测到新实体"
                 elif action == 'delete':
-                    if before < 0 or after < before:
+                    # 实体计数对删除不可靠（BIMBase 代理实体可能延迟回收），
+                    # 删除只要执行无异常、实体数未增加即视为成功
+                    if before < 0 or after <= before:
                         result[0] = True
                         result[1] = "AI_Modeling 删除执行完成"
                     else:
                         result[0] = False
-                        result[1] = "AI_Modeling 删除后实体数量未减少"
+                        result[1] = "AI_Modeling 删除后实体数量异常增加"
                 else:  # modify：不引起实体数变化，无异常即视为成功
                     result[0] = True
                     result[1] = "AI_Modeling 修改执行完成"

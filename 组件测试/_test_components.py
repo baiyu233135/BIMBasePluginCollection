@@ -98,4 +98,32 @@ try:
 except Exception as e:
     print(f"  [ERR] 曲线实例化: {type(e).__name__}: {e}")
 
+# 测试门式桥墩
+print("\n[6] 测试门式桥墩")
+try:
+    from 门式桥墩 import 门式桥墩
+    e1 = 门式桥墩()
+    print("  [OK] 门式桥墩实例化成功")
+    try:
+        place(e1)
+        print("  [OK] 门式桥墩 place 成功")
+    except Exception as e:
+        print(f"  [ERR] 门式桥墩 place: {type(e).__name__}: {e}")
+except Exception as e:
+    print(f"  [ERR] 门式桥墩实例化: {type(e).__name__}: {e}")
+
+# 测试承台及桩基
+print("\n[7] 测试承台及桩基")
+try:
+    from 承台及桩基 import 承台及桩基
+    f1 = 承台及桩基()
+    print("  [OK] 承台及桩基实例化成功")
+    try:
+        place(f1)
+        print("  [OK] 承台及桩基 place 成功")
+    except Exception as e:
+        print(f"  [ERR] 承台及桩基 place: {type(e).__name__}: {e}")
+except Exception as e:
+    print(f"  [ERR] 承台及桩基实例化: {type(e).__name__}: {e}")
+
 print("\n=== 测试结束 ===")

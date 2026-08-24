@@ -138,7 +138,31 @@ def _build_prompt(component_hint: Optional[str]) -> str:
     hint_text = f"本次优先识别构件类型：{component_hint}。" if component_hint else ""
 
     # 根据提示动态选择示例类型与参数
-    if component_hint == '索缆锚锭':
+    if component_hint == '门式桥墩':
+        example_type = "门式桥墩"
+        example_params = """    "盖梁总长": {{"value": 4700, "unit": "mm"}},
+    "盖梁总高": {{"value": 400, "unit": "mm"}},
+    "盖梁宽": {{"value": 1000, "unit": "mm"}},
+    "墩高": {{"value": 5000, "unit": "mm"}},
+    "墩柱间距": {{"value": 3500, "unit": "mm"}},
+    "柱顶宽": {{"value": 1200, "unit": "mm"}},
+    "柱底宽": {{"value": 1400, "unit": "mm"}},
+    "柱顶厚": {{"value": 1000, "unit": "mm"}},
+    "柱底厚": {{"value": 1200, "unit": "mm"}},
+    "系梁根数": {{"value": 1, "unit": "根"}}"""
+        detail_note = "输出上述核心外轮廓参数；垫石、空心柱壁厚、八边形倒角、系梁尺寸等细部由系统按默认值计算。若图纸未体现，可省略对应字段，系统会使用默认值。"
+    elif component_hint == '承台及桩基':
+        example_type = "承台及桩基"
+        example_params = """    "承台长": {{"value": 5500, "unit": "mm"}},
+    "承台宽": {{"value": 2350, "unit": "mm"}},
+    "承台高": {{"value": 500, "unit": "mm"}},
+    "桩径": {{"value": 250, "unit": "mm"}},
+    "桩长": {{"value": 5000, "unit": "mm"}},
+    "桩间距": {{"value": 630, "unit": "mm"}},
+    "桩列数": {{"value": 9, "unit": "根"}},
+    "桩排数": {{"value": 4, "unit": "排"}}"""
+        detail_note = "输出上述核心外轮廓参数；「桩列数」指长向（X）每排的桩根数，「桩排数」指宽向（Y）的排数，桩间距为相邻桩中心距。若图纸未体现，可省略对应字段，系统会使用默认值（9 列 × 4 排）。"
+    elif component_hint == '索缆锚锭':
         example_type = "索缆锚锭"
         example_params = """    "锚块总长": {{"value": 5450, "unit": "mm"}},
     "锚块总高": {{"value": 2039, "unit": "mm"}},
@@ -184,7 +208,7 @@ def _build_prompt(component_hint: Optional[str]) -> str:
 }}
 
 说明：
-1. component_type 请从 [引桥桥墩, 索缆锚锭] 中选择；无法判断时填最接近的。
+1. component_type 请从 [引桥桥墩, 索缆锚锭, 门式桥墩, 承台及桩基] 中选择；无法判断时填最接近的。
 2. 单位支持 mm/cm/m，输出时统一标注实际单位，系统会自动换算为 mm。
 3. 若图纸中某些尺寸缺失，可省略该字段，系统会使用默认值。
 4. confidence 为 0~1 的识别置信度。
