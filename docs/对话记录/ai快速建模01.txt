@@ -129,8 +129,8 @@ feat(组件测试+CADBoard+AI_Modeling): 门式桥墩/承台及桩基全链路�
   复制链路代理实体 noumKV 空（绑定扫描）、triangular_prism 类型推断缺失、
   删除误报、普通画板元素复制阵列、上色链路
 - 改名：桥隧病害识别→桥梁病害识别（显示名）、CADBoard→速构智维（选项卡/插件名）
-- 测试：新增 test_new_components_parse.py、test_cached_component_ops.py，
-  全部离线测试通过（解析 40 + 画板 47 + 复制工具 11 等）
+- 测试：新增 test_new_components_parse.py（17 条）、test_cached_component_ops.py（11 条），
+  全部离线测试通过（pier 20 + 新组件 17 + 注册表 10 + 删除 20 + 桥接 27 + 缓存/复制 11）
 
 五、遗留问题 / 待办
 --------------------------------------------------------------------------------

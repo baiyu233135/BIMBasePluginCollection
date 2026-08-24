@@ -50,7 +50,10 @@ ai快速建模00 —— 对话整理与技术交接文档
 - 疑问：组件参数能否统一改成 m/cm 显示？→ 结论：不能也不必，BIMBase 内核
   单位是 mm，参数值即真实几何尺寸；指令层已支持 m/cm 自动换算。
 - 需求：语音输入不规范时先调大模型理解语义 → 已实现面板标题栏"AI优先"
-  开关（勾选后所有输入先给 DeepSeek 理解，建模 JSON 直接执行；本地解析兜底）。
+  开关（勾选后输入先给 DeepSeek 理解，建模 JSON 直接执行；本地解析兜底）。
+  后续修订（ai快速建模01）：AI优先下新增本地快速通道——明确的建模指令
+  （create/copy，或含 bimbase/软件 关键词的 modify/delete）先本地解析执行，
+  不再先问大模型；含"画板"关键词的删除/修改走画板本地 2D 链路。
 
 【需求6】画板面编辑调整（第三轮）
 - 解答了 Z起始/Z终止/厚度/宽度/高度 的语义（见四.名词解释）。
@@ -128,9 +131,12 @@ ai快速建模00 —— 对话整理与技术交接文档
 【关键技术坑 c】pyp3d Attr 只能存标量/字符串（颜色方案）
 - 把颜色元组 (r,g,b,a) 写进 Attr 会报"该类型尚未注册序列化方法"，放置失败。
 - 现行方案：颜色以 "r,g,b,a" 字符串写入组件 '颜色' 属性（show=False），
-  各组件类 replace() 末尾统一调 _apply_color_attr(self, geom) 解析上色
-  （AI_Modeling/aim_bimbase_sync.py 7 个类 + 组件测试/索缆锚锭.py 的索塔锚块，
-  几何键名：圆柱/长方体/正方体/球体/圆锥/直角三棱柱/引桥桥墩/索塔）。
+  各组件类 replace() 末尾统一调 _apply_color_attr(self, geom) 解析上色。
+  已接入的类（ai快速建模01 后）：AI_Modeling/aim_bimbase_sync.py 全部组件类、
+  CADBoard/bimbase_sync.py 的 GatePierComponent/PileFoundationComponent、
+  CADBoard/utils/generated_component_cache.py 的门式桥墩/承台及桩基生成模板、
+  组件测试/索缆锚锭.py（索塔锚块）、组件测试/门式桥墩.py、承台及桩基.py。
+  注意：generated_component_cache 的引桥桥墩/索缆锚锭生成模板仍无颜色支持。
 - 组件颜色存在几何 Symbology 上，可正常序列化；Combine.color() 会递归
   覆盖所有零件（正好满足"整体统一色"）。
 - create_component 弹出 params['颜色'] → 写字符串属性 + 记录 _ai_color；
@@ -163,8 +169,8 @@ ai快速建模00 —— 对话整理与技术交接文档
 - 生成面元素：FaceGenerateDialog 两选项（智能→内部'三视图'3面，
   全部面→内部'完整'所有面），所有支持的组件（简单组件/引桥桥墩/索缆锚锭）
   统一弹窗。模板面数（geometry/faces.py FACE_TEMPLATES）：
-  正方体/长方体 6 面，圆柱/直角三棱柱 5 面，引桥桥墩/索缆锚锭 3 面，
-  线/弧/多边形等 1 面。
+  正方体/长方体 6 面，圆柱/直角三棱柱 5 面，引桥桥墩/索缆锚锭/门式桥墩/
+  承台及桩基 3 面（后两个为 ai快速建模01 新增），线/弧/多边形等 1 面。
 - 左侧面板原"三视图"下拉（_face_mode_combo）是创建后从未被读取的死代码，
   已删除；"全部面"下拉是面过滤器（_face_filter_combo），保留。
 
@@ -203,7 +209,9 @@ ai快速建模00 —— 对话整理与技术交接文档
 --------------------------------------------------------------------------------
 离线（无需 BIMBase，系统 Python）：
     python CADBoard/test_ai_modeling_bridge.py        # 桥接路由 27 用例
-    cd AI_Modeling && python -m unittest test_pier_parse test_delete_component test_component_registry
+    cd CADBoard && python -m unittest test_cached_component_ops  # 缓存组件/复制工具 11 用例（ai快速建模01 新增）
+    cd AI_Modeling && python -m unittest test_pier_parse test_delete_component test_component_registry test_new_components_parse
+    # 20 + 20 + 10 + 17 用例（test_new_components_parse 为 ai快速建模01 新增）
 
 BIMBase 内人工测试：按 CADBoard/docs/测试文档.md 第 5/5b/5c/5d 节执行。
 日志位置：CADBoard/ai_modeling_launcher.log（[AI_PANEL]/[AI_BRIDGE] 标记）、
@@ -219,8 +227,13 @@ AI_Modeling/ai_modeling_debug.log、CADBoard/bimbase_sync_debug.log。
 八、后续方向（未做，供参考）
 --------------------------------------------------------------------------------
 - AI自动化扩展路线图.md 中的 IntentEngine/PluginRegistry 重构（skill 化）
-- 复杂构件（引桥桥墩/索缆锚锭）补 6 面模板
+- 复杂构件（引桥桥墩/索缆锚锭/门式桥墩/承台及桩基）补 6 面模板
 - "面参数总览"半径显示异常修复
 - 本地大模型（Ollama + Qwen2.5）接入：chat_thread.py 改 base_url 即可
-- 图纸识别落地（docs/画板图纸识别技术方案.md 方案 A/B 均未实现）
+- 图纸识别（docs/画板图纸识别技术方案.md）：方案 A 已实现并在用
+  （CADBoard/utils/drawing_recognizer.py，Qwen-VL 多模态，门式桥墩/承台及桩基
+  已实测识别成功）；方案 B（本地 PaddleOCR+CV）未实现，
+  pdf_view_recognizer.py 只有简单构件的几何启发式推断，无 OCR。
+- 后续会话见 docs/对话记录/ai快速建模01.txt（门式桥墩/承台及桩基接入 +
+  画板 AI 操作链路修复：缓存组件身份、绑定扫描、删除/阵列/上色等）
 ================================================================================
