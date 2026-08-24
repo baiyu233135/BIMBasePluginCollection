@@ -732,6 +732,15 @@ class CADBoardWindow(QMainWindow):
         center_layout.setContentsMargins(0, 0, 0, 0)
         center_layout.setSpacing(0)
 
+        # 顶部加载提示条（同步/识别/导入/AI执行等长耗时操作时显示）
+        self.loading_bar = QLabel("")
+        self.loading_bar.setFixedHeight(24)
+        self.loading_bar.setAlignment(Qt.AlignCenter)
+        self.loading_bar.setStyleSheet(
+            "background-color: #1565C0; color: white; font-weight: bold; padding: 2px 10px;")
+        self.loading_bar.setVisible(False)
+        center_layout.addWidget(self.loading_bar, 0)
+
         # 画布
         self.viewport = CanvasWidget(self)
         center_layout.addWidget(self.viewport, 1)
@@ -1660,12 +1669,16 @@ class CADBoardWindow(QMainWindow):
         self._last_imported_file_path = file_path
 
         ext = os.path.splitext(file_path)[1].lower()
-        if ext == '.pdf':
-            elements, errors = import_pdf(file_path, self.status_bar.showMessage)
-            import_source = "PDF"
-        else:
-            elements, errors = import_dwg(file_path, self.status_bar.showMessage)
-            import_source = "DWG/DXF"
+        self.show_loading(f"正在导入 {os.path.basename(file_path)} ...")
+        try:
+            if ext == '.pdf':
+                elements, errors = import_pdf(file_path, self.status_bar.showMessage)
+                import_source = "PDF"
+            else:
+                elements, errors = import_dwg(file_path, self.status_bar.showMessage)
+                import_source = "DWG/DXF"
+        finally:
+            self.hide_loading()
 
         if elements:
             self._save_undo_state()
@@ -2171,6 +2184,22 @@ class CADBoardWindow(QMainWindow):
                 return None
         return None
 
+    def show_loading(self, text="正在加载，请稍候..."):
+        """在画布顶部显示加载提示条（长耗时操作入口调用）"""
+        try:
+            self.loading_bar.setText(text)
+            self.loading_bar.setVisible(True)
+            QApplication.processEvents()
+        except Exception:
+            pass
+
+    def hide_loading(self):
+        """隐藏画布顶部的加载提示条"""
+        try:
+            self.loading_bar.setVisible(False)
+        except Exception:
+            pass
+
     def _sync_to_bimbase(self):
         if not bimbase_sync.is_bimbase_available():
             QMessageBox.warning(self, "同步失败",
@@ -2187,6 +2216,7 @@ class CADBoardWindow(QMainWindow):
                 return
             # 如果用户选中了面元素，自动找到对应的源组件进行同步
             selected = [e for e in self.elements if getattr(e, 'selected', False)]
+            self.show_loading("正在同步到 BIMBase...")
             if selected:
                 elements_to_sync = []
                 seen_ids = set()
@@ -2209,9 +2239,11 @@ class CADBoardWindow(QMainWindow):
             import traceback
             err_detail = traceback.format_exc()
             _write_board_log(f"_sync_to_bimbase error: {e}\n{err_detail}")
+            self.hide_loading()
             QMessageBox.critical(self, "同步失败", f"同步到BIMBase时发生错误:\n{e}\n\n详细错误已记录到 CADBoard_error.log")
             self.status_bar.showMessage("同步失败")
             return
+        self.hide_loading()
         msg = f"同步到BIMBase完成: {count} 个元素成功"
         if skip_count:
             msg += f"\n跳过非组件元素: {skip_count} 个（原始 DWG 线条等无需同步）"
@@ -2252,15 +2284,18 @@ class CADBoardWindow(QMainWindow):
             return
         # v1.5 P3: 增量更新（支持更新已有元素 + 导入新实体）
         self.status_bar.showMessage("正在从BIMBase获取组件，请稍候...")
+        self.show_loading("正在从 BIMBase 获取组件...")
         try:
             updated, created, errors = bimbase_sync.sync_from_bimbase(self)
         except Exception as e:
             import traceback
             err_detail = traceback.format_exc()
             _write_board_log(f"sync_from_bimbase error: {e}\n{err_detail}")
+            self.hide_loading()
             QMessageBox.critical(self, "同步失败", f"从BIMBase同步时发生错误:\n{e}\n\n请检查 CADBoard_error.log")
             self.status_bar.showMessage("同步失败")
             return
+        self.hide_loading()
         self.viewport.update()
         self._update_property_panel()
 
@@ -2519,6 +2554,7 @@ class CADBoardWindow(QMainWindow):
     def _recognize_pdf_views(self):
         """智能识别导入的PDF/DWG三视图：先尝试本地规则识别，复杂构件走 AI 复杂识图"""
         self.status_bar.showMessage("正在分析三视图布局...")
+        self.show_loading("正在识别三视图...")
         try:
             # 0. 若当前选中了缓存的前视图线条，或画板里只有一组缓存三视图线条，直接复用参数重建
             if self._try_enter_face_edit_from_cached_lines():
@@ -2576,6 +2612,8 @@ class CADBoardWindow(QMainWindow):
             _write_board_log(f"_recognize_pdf_views crash: {e}\n{traceback.format_exc()}")
             QMessageBox.critical(self, "三视图识别错误", f"识别过程中出错:\n{e}")
             self.status_bar.showMessage("三视图识别出错")
+        finally:
+            self.hide_loading()
 
     def _try_enter_face_edit_from_cached_lines(self, selected=None):
         """如果选中的线条包含之前退出面编辑时缓存了参数的前视图线条，
@@ -2711,6 +2749,7 @@ class CADBoardWindow(QMainWindow):
         is_line_source = ext in ('.pdf', '.dwg', '.dxf')
 
         self.status_bar.showMessage("正在使用 Qwen-VL 识别图纸，请稍候...")
+        self.show_loading("正在使用 AI 识别图纸，请稍候...")
         try:
             results = recognize_drawing_file(file_path, component_hint=component_hint)
             if not results:
@@ -2835,6 +2874,8 @@ class CADBoardWindow(QMainWindow):
             _write_board_log(f"_recognize_complex_views crash: {e}\n{err}")
             QMessageBox.critical(self, "图纸识别错误", f"识别过程中出错:\n{e}\n\n已记录到 drawing_recognizer.log")
             self.status_bar.showMessage("图纸识别出错")
+        finally:
+            self.hide_loading()
 
     def _normalize_cable_anchor_params(self, params: dict) -> dict:
         """把 AI 识别出的索缆锚锭参数归一化为标准参数集。"""

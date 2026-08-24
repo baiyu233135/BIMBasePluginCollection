@@ -1469,6 +1469,10 @@ class AIPanel(QWidget):
         bimbase_sync._log(f"[AI_PANEL] _execute_modeling_command: text={original_text!r} parsed={parsed}")
         self.mode_indicator.setText("🏗️ 建模")
         self._append_message('system', f"正在执行建模指令: {original_text}")
+        try:
+            self.board.show_loading("正在执行建模指令...")
+        except Exception:
+            pass
         # 复制指令：若画板中有选中的可识别组件（含识别后的缓存视图线），
         # 走画板侧复制（以画板组件为源，支持相对位置/沿轴阵列并逐个同步到 BIMBase）；
         # 否则委托 AI_Modeling 复制 BIMBase 中选中的组件
@@ -1494,6 +1498,10 @@ class AIPanel(QWidget):
                     bimbase_sync._log(f"[AI_PANEL] board copy exception: {e}")
                     success, msg = False, f"画板复制执行异常: {e}"
                 bimbase_sync._log(f"[AI_PANEL] board copy result: success={success}, msg={msg}")
+                try:
+                    self.board.hide_loading()
+                except Exception:
+                    pass
                 if success:
                     self._append_message('system', f"✅ {msg}")
                 else:
@@ -1505,6 +1513,10 @@ class AIPanel(QWidget):
             bimbase_sync._log(f"[AI_PANEL] modeling execute exception: {e}")
             bimbase_sync._log(traceback.format_exc())
             success, msg = False, f"建模执行异常: {e}"
+        try:
+            self.board.hide_loading()
+        except Exception:
+            pass
         bimbase_sync._log(f"[AI_PANEL] modeling result: success={success}, msg={msg}")
         if success:
             self._append_message('system', f"✅ {msg}")
