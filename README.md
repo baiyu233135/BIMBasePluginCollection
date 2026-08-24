@@ -11,9 +11,9 @@ pythonplugin/
 ├── CADBoard/             # CAD 画板 / AI 智能建模 / 自动配置环境
 │   └── bridge_disease_launcher.py  # 桥梁病害识别转发入口
 ├── 桥隧病害识别/         # 桥梁病害识别独立模块（由 CADBoard 按钮调用）
-├── 建模/                 # 曲线建模 + 圆柱批量建模（读取 Excel 参数）
 ├── 桥梁组件/             # 桥梁参数化组件库 + 清单工具 + STL/Lumion/3D打印
 ├── 组件测试/             # 基础几何体测试组件
+├── 组件成品/             # 成品组件（铁路封闭网等）
 ├── archive/              # 临时调试脚本归档
 ├── docs/                 # 项目级文档
 └── *.pyplugin            # BIMBase 插件清单文件（保留在根目录）
@@ -25,10 +25,10 @@ pythonplugin/
 |---|---|---|---|
 | `AI建模.pyplugin` | AI建模（大语言模型） | 登录大模型账号，对话生成建模代码 | `AI建模/` |
 | （已并入 CADBoard） | AI_Modeling | 本地 AI 智能建模，能力已并入 CADBoard 画板 AI 面板 | `AI_Modeling/` |
-| `CADBoard.pyplugin` | CADBoard | CAD 画板、AI 智能建模、桥梁病害识别、自动配置环境 | `CADBoard/` |
-| `建模.pyplugin` | 建模插件库 | 曲线建模、圆柱批量建模 | `建模/` |
+| `CADBoard.pyplugin` | 速构智维（原 CADBoard） | CAD 画板、AI 智能建模、桥梁病害识别、自动配置环境 | `CADBoard/` |
 | `桥梁组件.pyplugin` | 桥梁组件库 | 桥梁参数化结构、清单工具、STL 工具 | `桥梁组件/` |
 | `组件测试.pyplugin` | 组件测试 | 基础几何体与组合梁测试 | `组件测试/` |
+| `组件成品.pyplugin` | 组件成品 | 铁路封闭网等成品组件 | `组件成品/` |
 
 > 注意：`.pyplugin` 文件必须保留在根目录，BIMBase 才能正确加载插件。
 
