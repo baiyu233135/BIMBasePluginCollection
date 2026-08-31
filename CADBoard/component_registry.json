@@ -18,5 +18,15 @@
       "radius": 50.0
     },
     "component_type": "Circle3DComponent"
+  },
+  "078dacc4-7156-44df-a0c0-e67b6dd5127b": {
+    "params": {
+      "cx": 500.0,
+      "cy": 200.0,
+      "z_bottom": 100.0,
+      "z_top": 120.0,
+      "radius": 50.0
+    },
+    "component_type": "Circle3DComponent"
   }
 }

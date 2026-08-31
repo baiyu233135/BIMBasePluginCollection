@@ -847,6 +847,9 @@ class SweepBoxComponent(Component):
 
 
 class Circle3DComponent(Component):
+    """圆拉伸的实心圆柱。几何建在局部原点 (0,0,0)→(0,0,h)，
+    世界位置由放置变换承载（与 BoxComponent 同一模式），
+    不再把 cx/cy/z_bottom 烘焙进几何——烘焙+恒等放置的链路实测不可靠。"""
     def __init__(self, cx=0, cy=0, z_bottom=0, z_top=100, radius=50):
         super().__init__()
         self['cx'] = Attr(float(cx), show=True, obvious=True)
@@ -859,11 +862,11 @@ class Circle3DComponent(Component):
 
     @export
     def replace(self):
-        cx, cy = self['cx'], self['cy']
-        zb, zt = self['z_bottom'], self['z_top']
-        r = max(self['radius'], 1)
+        # 注意 self[...] 取出的是 Attr，需 float() 转换（对齐 AI_Modeling 已验证组件写法）
+        r = max(float(self['radius']), 1)
+        h = max(float(self['z_top']) - float(self['z_bottom']), 1)
         section = _circle_section(r)
-        path = Line(Vec3(cx, cy, zb), Vec3(cx, cy, zt))
+        path = Line(Vec3(0, 0, 0), Vec3(0, 0, h))
         self['圆柱'] = Sweep(section, path)
 
 
@@ -1658,6 +1661,15 @@ class PileFoundationComponent(Component):
 
 
 class BIMBaseSync:
+    # 实体组件类型：位置由放置变换承载（几何建在组件局部原点），按 x/y/z 放置
+    _SOLID_TYPES = {'圆柱', '正方体', '长方体', '球体', '直角三棱柱', '圆锥',
+                    '引桥桥墩', '索缆锚锭', '门式桥墩', '承台及桩基',
+                    'Circle3DComponent'}
+    # 已有实例同步时一律"删旧重新放置"的类型：
+    # 这些组件位置由放置变换承载，inst.replace() 原地更新不会改变变换
+    # （且内核重实例化会冲掉参数写入，docs/05 实锤）
+    _FORCE_REPLACE_TYPES = {'Circle3DComponent'}
+
     def __init__(self, board):
         self.board = board
         self.registry = ComponentRegistry()
@@ -2043,14 +2055,17 @@ class BIMBaseSync:
                 # 重新构建当前参数
                 _, new_params, _ = self._make_component(elem)
                 # 位置变化检测：replace 原地更新不会移动实际组件（内核重实例化会冲掉
-                # 参数写入，docs/05 实锤），位置变了必须删除旧实例并走下方重新放置路径
+                # 参数写入，docs/05 实锤），位置变了必须删除旧实例并走下方重新放置路径；
+                # Circle3DComponent 等"局部原点+放置变换"组件一律删旧重放
+                # （replace 改变不了放置变换）
+                force_replace = comp_type in self._FORCE_REPLACE_TYPES
                 pos_changed = bool(new_params) and self._position_params_changed(
                     info.get('params') or {}, new_params)
-                if pos_changed:
-                    _log(f"  position changed for {elem.id[:8]} ({comp_type}), "
-                         f"delete old instance and re-place at new position")
+                if force_replace or pos_changed:
+                    _log(f"  {'force re-place' if force_replace else 'position changed'} "
+                         f"for {elem.id[:8]} ({comp_type}), delete old instance and re-place")
                     self._delete_instance_by_params(info.get('params') or {})
-                if new_params and not pos_changed:
+                if new_params and not (force_replace or pos_changed):
                     # 写入新参数到已有实例
                     for k, v in new_params.items():
                         if k in inst:
@@ -2211,8 +2226,8 @@ class BIMBaseSync:
                 _log(f"  element {elem.id} is not a recognized component, skip")
                 return None
             # 所有组件统一使用 create_geometry 优先的 place_component_at 自动放置
-            SOLID_TYPES = {'圆柱', '正方体', '长方体', '球体', '直角三棱柱', '圆锥', '引桥桥墩', '索缆锚锭', '门式桥墩', '承台及桩基'}
-            if comp_type in SOLID_TYPES:
+            # 实体组件：位置由放置变换承载（几何建在组件局部原点）
+            if comp_type in self._SOLID_TYPES:
                 # 优先使用用户通过弹窗输入的 PDF 放置锚点，防止 PolylineElement 等
                 # 没有 x/y/cx/cy 属性的元素丢失 X/Y 坐标
                 x = float(getattr(elem, 'pdf_anchor_x',
@@ -2443,6 +2458,7 @@ class BIMBaseSync:
 
         elif elem_type == 'circle' or comp_type == 'Circle3DComponent':
             params = {'cx': x, 'cy': y, 'z_bottom': z_start, 'z_top': z_end, 'radius': radius}
+            _log(f"  Circle3DComponent params: cx={x}, cy={y}, z=[{z_start},{z_end}], radius={radius}")
             comp = Circle3DComponent(**params)
             return comp, params, 'Circle3DComponent'
 
