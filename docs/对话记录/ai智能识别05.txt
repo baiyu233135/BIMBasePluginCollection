@@ -1,0 +1,174 @@
+================================================================================
+  智能识别05 — AI 布置链路修复 + 新增移动布置 + 画板↔BIMBase 双向同步检修
+  日期：2026-08-31（三轮实测迭代修复，用户确认"这次都成功了"）
+  记录范围：需求①画板↔BIMBase 双向同步、②AI 对话操作 BIMBase/画板（含新增
+           移动布置）、③基本组件支持确认；识图本轮低优先级未动。
+  目的：便于新对话快速恢复上下文，避免重复说明
+================================================================================
+
+
+一、我的需求（用户原始要求 + 逐项确认结果）
+------------------------------------------
+原始要求：
+  ① 画板能画组件元素，可手动同步至 BIMBase，也可通过 AI 交流同步至 BIMBase，
+     也可以从 BIMBase 读组件同步回画板；
+  ② 通过 AI 对话操作/删除画板元素或 BIMBase 组件。重点是对 BIMBase：
+     自动布置、沿轴布置、相对布置，并新增"移动布置"（用 pyp3d trans 函数）。
+     AI 对画板只需：改元素/组件参数、删除、在指定位置画基本元素；
+  ③ 基本元素组件：正方体、圆球、三棱柱、圆柱、直角三棱柱；
+     识图：承台及桩基(dwg)、简单组件(PDF)、门式桥墩(dwg)、索缆锚锭(dwg)、
+     引桥桥墩(dwg)；
+  ④ 有任何问题先问用户，确认明白再执行。
+
+用户逐项拍板：
+  - "三棱柱" = "直角三棱柱"，同一个组件（简单组件/三棱柱.pdf 画的就是直角三棱柱）；
+  - 圆球保持现状不补（无组件关联/三视图模板）；
+  - 移动布置三种都要：相对移动、移动到绝对坐标、画板元素也能移动；
+  - 识图本轮低优先级，不动核心；
+  - 画板选中普通 2D 图形时 AI 同步：明确提示不可同步，不假成功；
+  - 相对布置语义：新组件放置点 = 选中组件【放置原点】+ 方向偏移
+    （"上方500"= 原点 +Z 500，X/Y 与原点相同，不从顶面起算）；
+  - 验证方式：AI 无法启动 BIMBase GUI → AI 做静态检查+离线测试+写测试清单，
+    用户在 BIMBase 里手动复测反馈；
+  - 不做 git push；本地提交由用户要求时执行。
+
+
+二、做到哪里了（当前状态：全部完成，用户实测通过）
+--------------------------------------------------
+第 1 轮（计划内修复）：
+  1. 修"放置失败"误报：ai_modeling_launcher.py create 成功判定补 before<0 兜底
+     （实体计数 API 不可用时按无异常判定）；
+  2. 修"指令被吞"：ai_panel.py 新增 _prefer_modeling——3D 组件词优先走建模链路，
+     纯 2D 词（直线/圆/矩形等）仍走画板；此前"生成一个圆柱"会被画板画圆吞掉；
+  3. component_path.py 占位桩 → 真实实现：沿路线布置恢复切向自动对齐，
+     沿组件路径布置从不可用变为可用；
+  4. 旧实体兼容：aim_bimbase_sync 注册 bimbase_sync 别名 + 类名兜底解析，
+     改名前放置的组件可改参/移动；
+  5. 新增移动布置全链路（详见第三节）；
+  6. 读回链路修复：球体读回被跳过（CADBOARD_TYPES 漏"球体"）、同类型≥2个读回
+     必失败（_match_and_update_entity 多候选全跳过）；
+  7. component_registry.py 加载容错：一条坏记录不再丢全部；
+  8. bimbase_agent 修改兜底：普通画板元素改参数不再报"未找到参数化组件"。
+
+第 2 轮（用户实测反馈修复）：
+  1. AI优先复选框默认勾选（ai_panel.py:1247 区域）；
+  2. AI 同步假成功：坐标正则不认识"同步到bimbase的50,20,30"的"的"字；
+     _do_sync 无条件报"已触发同步"→ 重写为真实校验+不可同步明确报错；
+     bimbase_sync 图元跳过规则补 is_3d 豁免；
+  3. 移动解析支持"向/沿 X/Y/Z轴（正/负方向）平移500"；
+     bimbase_agent 工具查"选中"改为委托临时 AI 窗口走 BIMBase 选择集；
+     DeepSeek 系统提示词补 move_bimbase_component 工具；
+  4. 相对布置解析：数量词"1个"不再被误吞为距离（负向环视）；
+     显式轴向规则新增；相对基准解析失败明确报错，不再静默放原点。
+
+第 3 轮（移动后相对布置偏移）：
+  根因：移动走实体级变换（m_transform），位置读取走数据级 \a_transformation
+  （放置时烘焙，移动后不更新）→ 基准停在移动前旧位置。
+  修复：bimbase_modifier.py 位置读取改 m_transform 优先、\a_transformation 兜底；
+  相对基准统一为"放置原点"（bounds 中心降级为无位置信息时的兜底）。
+
+第 4 轮（中文数字坐标 + 轴向省略"轴"字）：
+  1. "在五百二百一百的位置" 被连读累加成 800 → 坐标语境三段连读拆分
+     （五百二百一百→500,200,100；两段歧义不拆，明确报错）；坐标解析失败
+     不再弹窗卡死，直接报"请用阿拉伯数字如 500,200,100"；
+  2. "Y方向500mm"（无"轴"字）显式轴向规则不命中导致偏移丢失、原地放置
+     → 规则放宽：省略"轴"时须有"方向"二字；
+  3. 防御性修正：全零变换不再覆盖 attrs 里的偏移位置。
+
+  用户确认：第 4 轮后"这次都成功了"。
+
+  测试资产：docs/手动测试清单.md（十节 41 项，第八~十节为实测回归项）。
+  自动化回归：AI_Modeling/test_new_components_parse.py(17)、
+  test_pier_parse.py(20)、CADBoard/test_ai_modeling_bridge.py(27)、
+  test_cached_component_ops.py(11，须用 python -m unittest 运行) 全部通过。
+
+
+三、技术栈与关键实现（速查，新对话必读）
+----------------------------------------
+【指令路由链】
+  ai_panel._send_message → AI优先fast-path / _should_use_local
+    → _prefer_modeling 判定（3D组件词优先建模链路，"画板"字样/纯2D词走画板）
+    → 画板：LocalCommandParser → ai_executor.AICommandExecutor
+    → 建模：ai_modeling_bridge.parse/execute → ai_modeling_launcher
+      .execute_modeling_action → 屏外(-32000,-32000)临时 AIModelingWindow
+      → ai_window._execute_local_create/copy/modify/delete/move
+  临时窗口执行前后快照/恢复 sys.path 与 sys.modules（bimbase_sync 同名冲突
+  高危区，见 CADBoard/docs/报错处理记录.md #8/#10）。
+
+【move 契约】（parser 与执行端严格遵守）
+  {'action':'move', 'target':{...}, 'component_type':...|None,
+   'move': {'mode':'relative','dx','dy','dz'}      # mm
+       或 {'mode':'absolute','x','y','z'}}         # mm
+  执行：python_transformation_operation(entityid, trans(dx,dy,dz))；
+  绝对移动先读当前位置算增量；成功后更新注册表 placement。
+  "位置不变/不要移动"是 modify 语境，不入 move。
+
+【pyp3d 关键 API】（BIMBase 2025，SDK 源码在 D:\BIMBASE\BIMBase建模软件 2025\
+  PythonScript\python-3.7.9-embed-amd64\Lib\site-packages\pyp3d\）
+  - trans(x,y,z) ≡ translate ≡ translation → GeTransform；rotate 角度用弧度；
+  - python_transformation_operation(entityid, GeTransform) 移动已放置实体；
+  - place_to / create_geometry / place（交互）；get_place_to_entityId()；
+  - get_selected_entity_ids / get_selected_instance_keys（get_selections 不存在）；
+  - delete_one_entity（主）/ delete_data_bydatakey（兜底）；
+  - delete/move/modify 成功判据 = API 无异常；实体计数口径不稳定
+    （引桥桥墩=盖梁+双墩柱+系梁多个子实体，"新增5个实体"是正常的）。
+  - 组件放置首选"烘焙偏移进 attrs + create_geometry(translate(0,0,0))"。
+
+【位置读取的两个变换键】（本轮实测+docs/05 定论）
+  - \a_transformation：数据级，放置时烘焙，移动后不更新；
+  - \aGraphicElement::m_transform：实体级，移动后才是实际位置；
+  - 读取规则：m_transform 优先（恒等不覆盖非零已有值），\a_transformation 兜底，
+    再兜底 偏移X/Y/Z attrs；统一"放置原点"基准。
+  - 移动后回写 偏移X/Y/Z attrs 是死路（内核 replace() 会冲掉，docs/05 实测），
+    靠 m_transform 读取 + 注册表同步覆盖所有读取路径。
+
+【解析器要点】（AI_Modeling/ai_modeling/command_parser.py）
+  - 汉字数字 parse() 入口统一转换；坐标语境支持三段连读（五百二百一百）；
+  - 显式轴向优先于方向词："Y方向500/y轴方向500/向x轴负方向500" > "上方500"；
+  - 距离正则有 (?!\s*个) 负向环视，"布置一个"的"1个"不会被误吞为距离；
+  - 单位默认 mm，支持逐个后缀与"单位用米"整体声明；
+  - "三棱柱"映射 triangular_prism（=直角三棱柱）。
+
+【已知限制（接受的现状）】
+  - 读回是扫描式导入，不能精确匹配单个组件；BIMBase 来源组件重新同步只新建
+    不替换，旧组件需手动删除；
+  - 球体：能画能同步，无组件关联/三视图模板（用户明确不补）；
+  - "画一个正方体"默认走 BIMBase 建模链路；画板画需说"在画板画…"；
+  - m_transform 在实体带旋转/缩放时的平移语义未验证（移动链路只产纯平移）；
+  - 中文数字坐标仅支持三段连读，两段歧义报错。
+
+【配置与密钥】
+  - DeepSeek：AI_Modeling/ai_modeling_config.json（api_key 已配置）；
+  - 多模态识图：CADBoard/drawing_ai_config.json（dashscope_api_key 已配置）；
+  - 语音：同一配置文件的 baidu_api_key/baidu_secret_key（已配置）。
+  - 警告：密钥明文已进 git 历史，建议尽快轮换并移出版本控制。
+
+【文档更新】
+  - AI_Modeling/docs/功能说明.md：新增"5b. 移动布置"；
+  - CADBoard/docs/报错处理记录.md：新增条目 11-15（指令被吞/误报、
+    component_path 桩、球体读回、注册表容错、旧实体改名兼容）；
+  - docs/手动测试清单.md：新增（十节 41 项）。
+
+
+四、本地版本管理
+----------------
+  本轮提交（2026-08-31，本地 main，未 push）：
+  - 721b5f3 feat(CADBoard+AI_Modeling): AI布置链路修复与新增移动布置(trans)
+    （本轮全部代码+文档：16 文件，+1134/-164；component_registry.json 为
+    运行时产物未纳入）
+  - 未执行 git push（GitHub Token 未配置，仅本地仓库）；
+  - 历史重要版本：2767846（门式桥墩/承台全链路接入，实测全过）、
+    af260f9（AI_Modeling 独立窗口最后版）、d04da19（AI 建模并入画板面板，
+    同名模块改名，多轮兼容性副作用的源头）。
+
+
+五、后续可做（待用户确认）
+--------------------------
+  1. 识图链路（本轮低优先级未动）：承台及桩基/门式桥墩 dwg 有真实矢量数据，
+     索缆锚锭/引桥桥墩 dwg 是 12KB PDF 引用壳需走 Qwen-VL 图片识别，
+     简单组件/三棱柱.pdf 无尺寸标注文字；方案见 docs/画板图纸识别技术方案.md；
+  2. 圆球全链路补齐（组件测试/圆球.py + 关联对话框 + 三视图模板）；
+  3. 沿组件路径布置、沿路线切向对齐已实现但未经 BIMBase 实测；
+  4. DeepSeek/百度密钥轮换并移出版本控制；
+  5. "新增N个实体"提示改读注册表新增记录数（当前是原始实体差值，桥墩类
+     多子实体会显得数字大）。
