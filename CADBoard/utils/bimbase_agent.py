@@ -41,6 +41,7 @@ class BIMBaseAgent:
             'sync_from_bimbase': self._tool_sync_from_bimbase,
             'delete_bimbase_component': self._tool_delete_bimbase_component,
             'copy_component': self._tool_copy_component,
+            'move_bimbase_component': self._tool_move_bimbase_component,
         }
 
     def execute_tool(self, tool_name, params):
@@ -184,6 +185,13 @@ class BIMBaseAgent:
         path_hint = params.get('path', 'auto')
         position = params.get('position')
 
+        # AI 偶会把 position 误放进 changes：归一化到 position 参数
+        if isinstance(changes, dict) and isinstance(changes.get('position'), dict):
+            changes = dict(changes)
+            pos_in_changes = changes.pop('position')
+            if position is None:
+                position = pos_in_changes
+
         if not changes and not position:
             return False, "modify_component 缺少 changes 或 position 参数"
         _log(f"modify_component called target={target} changes={changes} position={position} path={path_hint}")
@@ -191,6 +199,27 @@ class BIMBaseAgent:
         # 解析目标元素
         elems = self._resolve_target(target)
         if not elems:
+            # 画板选择集中找不到目标时，目标可能是 BIMBase 当前选中的组件：
+            # 委托 ai_modeling_bridge（临时 AI 窗口上下文）按 BIMBase 选择集执行，
+            # 与 delete/move 工具同一路径，避免误报"未找到目标组件"
+            if not target or target.get('mode') == 'selected' or target.get('component'):
+                # 仅带相对/绝对位置的修改等价于移动，走 move 链路
+                if not changes and isinstance(position, dict):
+                    mv = self._position_to_move(position)
+                    if mv:
+                        return self._tool_move_bimbase_component(
+                            {'target': {'mode': 'selected'}, 'move': mv})
+                try:
+                    from utils import ai_modeling_bridge
+                    bridge_parsed = {
+                        'action': 'modify',
+                        'target': {'mode': 'selected'},
+                        'params': changes,
+                        'preserve_position': params.get('preserve_position', False),
+                    }
+                    return ai_modeling_bridge.execute(bridge_parsed, "AI修改选中BIMBase组件")
+                except Exception as e:
+                    return False, f"修改 BIMBase 选中组件失败: {e}"
             return False, f"未找到目标组件: {target}"
 
         # 收集有效元素，并先应用坐标变更
@@ -206,6 +235,42 @@ class BIMBaseAgent:
             elems_info.append((elem, comp_type))
 
         if not elems_info:
+            # 目标不是参数化组件（如普通圆/矩形）：回退为直接修改元素几何属性，
+            # 保证"把半径改成50"这类指令对普通画板元素也可用
+            if not changes:
+                return False, f"未找到有效的参数化组件: {target}"
+            self.board._save_undo_state()
+            applied = 0
+            for elem in elems:
+                for key, val in changes.items():
+                    if not hasattr(elem, key):
+                        continue
+                    try:
+                        old = getattr(elem, key)
+                        if isinstance(old, (int, float)):
+                            if isinstance(val, str):
+                                v = val.strip()
+                                if v.startswith(('+', '-', '*', '/')):
+                                    op, num = v[0], float(v[1:])
+                                    if op == '+':
+                                        val = old + num
+                                    elif op == '-':
+                                        val = old - num
+                                    elif op == '*':
+                                        val = old * num
+                                    else:
+                                        val = old / num if num != 0 else old
+                                else:
+                                    val = float(v)
+                            setattr(elem, key, float(val))
+                        else:
+                            setattr(elem, key, val)
+                        applied += 1
+                    except Exception:
+                        pass
+            if applied:
+                self.board.viewport.update()
+                return True, f"已修改 {applied} 个属性（普通画板元素）"
             return False, f"未找到有效的参数化组件: {target}"
 
         # 规范化 changes：把通用别名映射为组件专用参数名，并处理相对值
@@ -467,6 +532,55 @@ class BIMBaseAgent:
             return ai_modeling_bridge.execute(parsed, "AI删除选中BIMBase组件")
         except Exception as e:
             return False, f"删除 BIMBase 选中组件失败: {e}"
+
+    @staticmethod
+    def _position_to_move(position):
+        """把 position 描述转换为 move 参数；无法转换返回 None。
+        支持 {'mode':'relative','axis':..,'distance':..} 与 {'mode':'absolute','x','y','z'}；
+        省略 mode 的部分坐标（如 {'y': 500}）按相对增量解释，避免绝对移动把其它轴清零。"""
+        if not isinstance(position, dict):
+            return None
+        mode = position.get('mode')
+        if mode == 'relative':
+            axis = str(position.get('axis', 'z')).lower()
+            if axis not in ('x', 'y', 'z'):
+                axis = 'z'
+            move = {'mode': 'relative', 'dx': 0.0, 'dy': 0.0, 'dz': 0.0}
+            move['d' + axis] = float(position.get('distance', 0) or 0)
+            return move
+        if mode == 'absolute':
+            return {'mode': 'absolute',
+                    'x': float(position.get('x', 0) or 0),
+                    'y': float(position.get('y', 0) or 0),
+                    'z': float(position.get('z', 0) or 0)}
+        move = {'mode': 'relative',
+                'dx': float(position.get('x', 0) or 0),
+                'dy': float(position.get('y', 0) or 0),
+                'dz': float(position.get('z', 0) or 0)}
+        if not (move['dx'] or move['dy'] or move['dz']):
+            return None
+        return move
+
+    def _tool_move_bimbase_component(self, params):
+        """移动 BIMBase 中的组件（经 AI_Modeling move 链路，在临时 AI 窗口上下文执行）。
+        params:
+          - target: {'mode': 'selected'} / {'mode': 'index', 'index': N} / {'mode': 'last'}
+          - component_type: 可选，如 'cylinder'
+          - move: {'mode':'relative','dx':..,'dy':..,'dz':..}
+              或 {'mode':'absolute','x':..,'y':..,'z':..}（单位 mm）
+        """
+        try:
+            from utils import ai_modeling_bridge
+            parsed = {
+                'action': 'move',
+                'target': params.get('target') or {'mode': 'selected'},
+                'component_type': params.get('component_type'),
+                'move': params.get('move') or {},
+            }
+            return ai_modeling_bridge.execute(
+                parsed, params.get('original_text', "AI移动BIMBase组件"))
+        except Exception as e:
+            return False, f"移动 BIMBase 组件失败: {e}"
 
     def _tool_copy_component(self, params):
         """复制画板中选中的组件（含识别后转成普通线条的缓存组件）：

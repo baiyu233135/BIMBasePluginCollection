@@ -20,6 +20,13 @@ def _log(msg):
         pass
 
 
+# 组件数据级放置变换：放置时烘焙；python_transformation_operation 等实体级移动不会更新它
+_DATA_TRANSFORM_KEY = '\a_transformation'
+# 实体级变换：实体移动后随之更新。放置实例上它与 \a_transformation 初始相等（docs/05 实测定论），
+# 因此存在时优先以它为"当前实际位置"
+_ENTITY_TRANSFORM_KEY = '\aGraphicElement::m_transform'
+
+
 _pyp3d_ok = False
 get_all_instancekey = None
 get_noumKV_from_instancekey = None
@@ -528,8 +535,9 @@ def _position_from_params(params):
 
 def get_selected_component_position(prefer_bounds=True):
     """
-    获取当前选中组件的世界坐标位置
-    优先使用 bounding box 中心；不可用时回退到参数字典推断
+    获取当前选中组件的世界坐标位置（统一为"放置原点"基准）
+    优先使用参数/变换提取的放置原点（与注册表 placement、移动链路基准一致）；
+    参数不含位置信息时才回退到 bounding box 中心（中心≠原点，仅作兜底）
     返回: (x, y, z) 或 None
     """
     if not _pyp3d_ok:
@@ -552,33 +560,8 @@ def get_selected_component_position(prefer_bounds=True):
     eid = entity_ids[0]
     _log(f"get_selected_component_position: using first entity id, type={type(eid).__name__}")
 
-    # 优先读取 bounding box
-    if prefer_bounds and get_entity_bounds is not None:
-        _log("get_selected_component_position: trying get_entity_bounds")
-        # 先尝试用 entity id
-        bounds = None
-        try:
-            bounds = get_entity_bounds(eid)
-        except Exception as e:
-            _log(f"get_entity_bounds(entity_id) failed: {e}")
-
-        # 再尝试用 datakey
-        if bounds is None and get_datakey_from_entity is not None:
-            try:
-                dk = get_datakey_from_entity(eid)
-                _log(f"get_datakey_from_entity returned type={type(dk).__name__ if dk is not None else None}")
-                if dk is not None:
-                    bounds = get_entity_bounds(dk)
-            except Exception as e:
-                _log(f"get_entity_bounds(datakey) failed: {e}")
-
-        center = _bounds_center(bounds)
-        if center:
-            _log(f"get_selected_component_position: from bounds: {center}")
-            return center
-        _log("get_selected_component_position: bounds not available or invalid")
-
-    # 回退：从 entity / instance 读参数推断
+    # 优先：从 entity / instance 读参数与变换（放置原点基准）
+    params = None
     try:
         params = _read_params_from_entity(eid)
         _log(f"get_selected_component_position: read params from entity, type={type(params).__name__ if params else None}")
@@ -663,6 +646,40 @@ def get_selected_component_position(prefer_bounds=True):
                     _log(f"get_selected_component_position: fallback using the only AI component in scene")
             except Exception as e:
                 _log(f"get_selected_component_position only-one fallback error: {e}")
+
+        # 参数中含显式位置（变换/Placement 提取的 x/y/z，或坐标参数键）→ 放置原点，直接返回
+        if params and any(k in params for k in ('x', 'cx', 'x1', '偏移X', 'Placement',
+                                                _DATA_TRANSFORM_KEY, _ENTITY_TRANSFORM_KEY)):
+            pos = _position_from_params(params)
+            if pos:
+                _log(f"get_selected_component_position: from params (placement origin): {pos}")
+            return pos
+
+        # 回退：bounding box 中心（基准与放置原点不同，仅在参数不含位置信息时使用）
+        if prefer_bounds and get_entity_bounds is not None:
+            _log("get_selected_component_position: trying get_entity_bounds")
+            # 先尝试用 entity id
+            bounds = None
+            try:
+                bounds = get_entity_bounds(eid)
+            except Exception as e:
+                _log(f"get_entity_bounds(entity_id) failed: {e}")
+
+            # 再尝试用 datakey
+            if bounds is None and get_datakey_from_entity is not None:
+                try:
+                    dk = get_datakey_from_entity(eid)
+                    _log(f"get_datakey_from_entity returned type={type(dk).__name__ if dk is not None else None}")
+                    if dk is not None:
+                        bounds = get_entity_bounds(dk)
+                except Exception as e:
+                    _log(f"get_entity_bounds(datakey) failed: {e}")
+
+            center = _bounds_center(bounds)
+            if center:
+                _log(f"get_selected_component_position: from bounds: {center}")
+                return center
+            _log("get_selected_component_position: bounds not available or invalid")
 
         pos = _position_from_params(params)
         if pos:
@@ -922,6 +939,23 @@ def _extract_xyz_from_transform(transform):
     return None
 
 
+def _apply_xyz_to_params(params, xyz, source):
+    """把提取到的位置写入参数字典的 x/y/z/z_bottom。
+    全零变换（如只烘焙了 偏移X/Y/Z attrs、变换为恒等的放置方式）不覆盖已有位置信息，
+    让 _position_from_params 能回退到 偏移X/Y/Z。"""
+    if xyz is None:
+        return
+    x, y, z = xyz
+    if (x, y, z) == (0.0, 0.0, 0.0) and ('x' in params or '偏移X' in params):
+        _log(f"{source}: zero transform, keep existing position keys")
+        return
+    params['x'] = x
+    params['y'] = y
+    params['z'] = z
+    params['z_bottom'] = z
+    _log(f"{source}: extracted xyz=({x:.2f}, {y:.2f}, {z:.2f})")
+
+
 def _merge_para_cmpt_property(params):
     """展开 ParaCmptProperty 子字典"""
     if not isinstance(params, dict) or 'ParaCmptProperty' not in params:
@@ -970,26 +1004,18 @@ def _read_params_from_instancekey(datakey):
         params = _merge_para_cmpt_property(params)
         # 从 Placement 提取世界坐标
         if 'Placement' in params:
-            placement = params.get('Placement')
-            xyz = _extract_xyz_from_placement(placement)
-            if xyz is not None:
-                x, y, z = xyz
-                params['x'] = x
-                params['y'] = y
-                params['z'] = z
-                params['z_bottom'] = z
-                _log(f"_read_params_from_instancekey: extracted placement xyz=({x:.2f}, {y:.2f}, {z:.2f})")
-        # 从 transformation 矩阵提取世界坐标
-        trans_key = '\a_transformation'
-        if trans_key in params:
-            xyz = _extract_xyz_from_transform(params[trans_key])
-            if xyz is not None:
-                x, y, z = xyz
-                params['x'] = x
-                params['y'] = y
-                params['z'] = z
-                params['z_bottom'] = z
-                _log(f"_read_params_from_instancekey: extracted transform xyz=({x:.2f}, {y:.2f}, {z:.2f})")
+            _apply_xyz_to_params(params, _extract_xyz_from_placement(params.get('Placement')),
+                                 "_read_params_from_instancekey placement")
+        # 从数据级 transformation 矩阵提取世界坐标（放置时烘焙的值）
+        if _DATA_TRANSFORM_KEY in params:
+            _apply_xyz_to_params(params, _extract_xyz_from_transform(params[_DATA_TRANSFORM_KEY]),
+                                 "_read_params_from_instancekey transform")
+        # 实体级变换优先：python_transformation_operation 移动实体只更新
+        # \aGraphicElement::m_transform，数据级 \a_transformation 保持烘焙旧值。
+        # 放置实例上两者初始相等（docs/05），故 m_transform 可提取时以它为实际位置。
+        if _ENTITY_TRANSFORM_KEY in params:
+            _apply_xyz_to_params(params, _extract_xyz_from_transform(params[_ENTITY_TRANSFORM_KEY]),
+                                 "_read_params_from_instancekey m_transform")
         if len(params) > 0:
             return params
 
@@ -1046,34 +1072,27 @@ def _read_params_from_noumenon(noum):
     if d:
         d = _merge_para_cmpt_property(d)
         if 'Placement' in d:
-            placement = d.get('Placement')
-            xyz = _extract_xyz_from_placement(placement)
-            if xyz is not None:
-                x, y, z = xyz
-                d['x'] = x
-                d['y'] = y
-                d['z'] = z
-        trans_key = '\a_transformation'
-        if trans_key in d:
-            xyz = _extract_xyz_from_transform(d[trans_key])
-            if xyz is not None:
-                x, y, z = xyz
-                d['x'] = x
-                d['y'] = y
-                d['z'] = z
-                d['z_bottom'] = z
+            _apply_xyz_to_params(d, _extract_xyz_from_placement(d.get('Placement')),
+                                 "_read_params_from_noumenon placement")
+        if _DATA_TRANSFORM_KEY in d:
+            _apply_xyz_to_params(d, _extract_xyz_from_transform(d[_DATA_TRANSFORM_KEY]),
+                                 "_read_params_from_noumenon transform")
+        # 实体级变换优先（实体移动后只有 m_transform 更新，见 _read_params_from_instancekey）
+        if _ENTITY_TRANSFORM_KEY in d:
+            _apply_xyz_to_params(d, _extract_xyz_from_transform(d[_ENTITY_TRANSFORM_KEY]),
+                                 "_read_params_from_noumenon m_transform")
         if d:
             return d
-    # 最后尝试：即使没有任何参数，也读 transformation 矩阵的平移作为位置
-    try:
-        trans_key = '\a_transformation'
-        if trans_key in noum:
-            xyz = _extract_xyz_from_transform(noum[trans_key])
-            if xyz is not None:
-                x, y, z = xyz
-                return {'x': x, 'y': y, 'z': z, 'z_bottom': z, trans_key: noum[trans_key]}
-    except Exception:
-        pass
+    # 最后尝试：即使没有任何参数，也读变换矩阵的平移作为位置（实体级 m_transform 优先）
+    for trans_key in (_ENTITY_TRANSFORM_KEY, _DATA_TRANSFORM_KEY):
+        try:
+            if trans_key in noum:
+                xyz = _extract_xyz_from_transform(noum[trans_key])
+                if xyz is not None:
+                    x, y, z = xyz
+                    return {'x': x, 'y': y, 'z': z, 'z_bottom': z, trans_key: noum[trans_key]}
+        except Exception:
+            pass
     return None
 
 

@@ -78,7 +78,7 @@ class LocalCommandParser:
         '画': 'draw', '绘制': 'draw', '创建': 'draw', '画一个': 'draw',
         '删除': 'delete', '移除': 'delete', 'del': 'delete', 'erase': 'delete',
         '复制': 'copy', '拷贝': 'copy', 'co': 'copy',
-        '移动': 'move',
+        '移动': 'move', '移到': 'move',
         '旋转': 'rotate', 'ro': 'rotate',
         '缩放': 'scale', 'sc': 'scale',
         '镜像': 'mirror', 'mi': 'mirror',
@@ -187,6 +187,12 @@ class LocalCommandParser:
             if position:
                 result['position'] = position
             return result
+
+        # 3.5 移动操作（相对/绝对），复用 transform/translate 链路
+        if action == 'move':
+            move_cmd = cls._parse_move(text)
+            if move_cmd:
+                return move_cmd
 
         # 4. 检测元素类型
         elem_type = None
@@ -676,12 +682,13 @@ class LocalCommandParser:
         """从文本中提取放置坐标，返回 {'x':..., 'y':..., 'z':...} 或 None。
         兼容“放在bimbase(500,0,0)”“放在(500,0,0)”等写法。"""
         import re
-        # 允许在坐标前出现可选的 bimbase 前缀（不区分大小写，已在外部 lower）
+        # 允许在坐标前出现可选的 bimbase 前缀（不区分大小写，已在外部 lower），
+        # 兼容"同步到bimbase的50,20,30"这类"bimbase的"写法
         patterns = [
-            r'(?:放在|在|坐标|位置|同步到|到)\s*(?:bimbase\s*)?\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)',
-            r'(?:放在|在|坐标|位置|同步到|到)\s*(?:bimbase\s*)?\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)',
-            r'(?:放在|在|坐标|位置|同步到|到)\s*(?:bimbase\s*)?(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)',
-            r'(?:放在|在|坐标|位置|同步到|到)\s*(?:bimbase\s*)?(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)',
+            r'(?:放在|在|坐标|位置|同步到|到)\s*(?:bimbase\s*的?)?\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)',
+            r'(?:放在|在|坐标|位置|同步到|到)\s*(?:bimbase\s*的?)?\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)',
+            r'(?:放在|在|坐标|位置|同步到|到)\s*(?:bimbase\s*的?)?(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)',
+            r'(?:放在|在|坐标|位置|同步到|到)\s*(?:bimbase\s*的?)?(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)',
             # 兜底：裸三维/二维坐标，如 "(500,0,0)"
             r'\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)',
             r'\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)',
@@ -849,6 +856,65 @@ class LocalCommandParser:
                 if len(vals) == 2:
                     return [vals[0], vals[1], 0.0]
                 return vals
+        return None
+
+    @classmethod
+    def _parse_move(cls, text: str):
+        """解析画板元素的移动指令：
+        - 绝对移动："把矩形移动到(300,400)"、"把圆移到(100,200)"
+          → {'action': 'transform', 'transform_type': 'move_to', 'params': {'x','y'}}
+        - 相对移动："把选中的元素向右移动100"、"向上移动50"
+          → {'action': 'transform', 'transform_type': 'translate', 'params': {'dx','dy'}}
+        无法识别时返回 None（由上层回退处理）。
+        """
+        import re
+
+        # 提取目标（"把X移动..." 或 "移动X到/向..."，缺省为选中的元素）
+        target_text = text
+        m = re.search(r'(?:把|将|让)\s*(.+?)\s*移', text)
+        if m:
+            target_text = m.group(1).strip()
+        else:
+            m = re.search(r'移动\s*(.+?)\s*(?:到|向)', text)
+            if m:
+                target_text = m.group(1).strip()
+        target = cls._parse_target_text(target_text)
+
+        # 绝对移动：移动到(x,y) / 移到(x,y) / 移动X到(x,y)
+        m = re.search(r'移(?:动)?\s*到?\s*\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)', text)
+        if not m:
+            m = re.search(r'到\s*\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)', text)
+        if m:
+            return {
+                'action': 'transform',
+                'transform_type': 'move_to',
+                'target': target,
+                'params': {'x': float(m.group(1)), 'y': float(m.group(2))},
+            }
+
+        # 相对移动：向右/左/上/下 移动 N（画板 2D，Y 向上为正）
+        dir_map = {'右': (1, 0), '左': (-1, 0), '上': (0, 1), '下': (0, -1)}
+        m = re.search(r'(右|左|上|下)\s*(?:方|边|面)?\s*移(?:动)?\s*(-?\d+\.?\d*)', text)
+        if m:
+            sx, sy = dir_map[m.group(1)]
+            dist = float(m.group(2))
+            return {
+                'action': 'transform',
+                'transform_type': 'translate',
+                'target': target,
+                'params': {'dx': sx * dist, 'dy': sy * dist},
+            }
+
+        # 仅给距离未给方向："移动100" → 默认沿 X 正方向
+        m = re.search(r'移动\s*(-?\d+\.?\d*)', text)
+        if m:
+            dist = float(m.group(1))
+            return {
+                'action': 'transform',
+                'transform_type': 'translate',
+                'target': target,
+                'params': {'dx': dist, 'dy': 0.0},
+            }
         return None
 
 
@@ -1178,6 +1244,7 @@ class AIPanel(QWidget):
 
         # AI优先模式：所有输入先交给大模型理解语义（适合语音/模糊指令），本地解析作为兜底
         self.ai_first_cb = QCheckBox("AI优先")
+        self.ai_first_cb.setChecked(True)  # 默认勾选：语音/模糊指令先由大模型理解语义
         self.ai_first_cb.setToolTip("勾选后所有输入先调用大模型理解语义再执行（语音输入更稳定）；\n不勾选则简单指令走本地解析，响应更快、离线可用")
         title_layout.addWidget(self.ai_first_cb)
 
@@ -1309,29 +1376,26 @@ class AIPanel(QWidget):
         try:
             # AI优先模式：所有输入先交给大模型理解语义（语音/模糊指令更稳），失败再走本地
             if getattr(self, 'ai_first_cb', None) and self.ai_first_cb.isChecked():
-                # 明确的 3D 建模/布置指令（含“沿选中组件布置”“沿轴阵列”等）优先本地解析执行：
+                # 明确的 3D 建模/布置指令（含"沿选中组件布置""沿轴阵列"等）优先本地解析执行：
                 # 结果确定、不消耗 API；理解不了的模糊指令仍交给大模型
                 try:
-                    mp = ai_modeling_bridge.parse_modeling_command(text)
-                except Exception:
-                    mp = None
-                if ai_modeling_bridge.is_modeling_action(mp):
-                    act = mp.get('action')
-                    # create/copy 只涉及 BIMBase 3D 组件，可直接本地接管；
-                    # modify/delete 可能指向画板 2D 元素，仅当明确提到 BIMBase/软件 时才本地接管
-                    if act in ('create', 'copy') or 'bimbase' in text.lower() or '软件' in text:
-                        bimbase_sync._log(f"[AI_PANEL] AI优先 fast-path local modeling: {mp}")
+                    prefer, mp = self._prefer_modeling(text)
+                except Exception as e:
+                    bimbase_sync._log(f"[AI_PANEL] AI优先 _prefer_modeling exception: {e}")
+                    prefer, mp = False, None
+                if prefer:
+                    bimbase_sync._log(f"[AI_PANEL] AI优先 fast-path local modeling: {mp}")
+                    self.mode_indicator.setText("⚡ 本地")
+                    self._execute_modeling_command(mp, text)
+                    return
+                # 明确说"画板"的删除/修改：走画板本地 2D 链路
+                if '画板' in text:
+                    bp = LocalCommandParser.parse(text)
+                    if bp:
+                        bimbase_sync._log(f"[AI_PANEL] AI优先 fast-path board local: {bp}")
                         self.mode_indicator.setText("⚡ 本地")
-                        self._execute_modeling_command(mp, text)
+                        self._execute_local_command(bp, text)
                         return
-                    # 明确说“画板”的删除/修改：走画板本地 2D 链路
-                    if '画板' in text:
-                        bp = LocalCommandParser.parse(text)
-                        if bp:
-                            bimbase_sync._log(f"[AI_PANEL] AI优先 fast-path board local: {bp}")
-                            self.mode_indicator.setText("⚡ 本地")
-                            self._execute_local_command(bp, text)
-                            return
                 if self.api_key or self._api_config.get('coze_token'):
                     self.mode_indicator.setText("☁️ AI优先")
                     self._call_ai(text, fast_mode=True)
@@ -1345,6 +1409,15 @@ class AIPanel(QWidget):
             use_local = False
 
         if use_local:
+            # 3D 建模指令优先走建模链路（画板 2D 解析器可能误吞 3D 指令）
+            try:
+                prefer, mparsed = self._prefer_modeling(text)
+            except Exception as e:
+                bimbase_sync._log(f"[AI_PANEL] _prefer_modeling exception: {e}")
+                prefer, mparsed = False, None
+            if prefer:
+                self._execute_modeling_command(mparsed, text)
+                return
             # 本地执行路径
             parsed = LocalCommandParser.parse(text)
             if parsed:
@@ -1385,6 +1458,48 @@ class AIPanel(QWidget):
             return
         self._call_ai(text, fast_mode=True)
 
+    # AI_Modeling 3D 组件类型（COMPONENT_MAP 的中文键与英文值）
+    _MODELING_3D_TYPES = frozenset({
+        'cylinder', 'box', 'cube', 'sphere', 'cone', 'triangular_prism',
+        'gate_pier', 'pier', 'anchor', 'pile_foundation',
+        '圆柱', '圆柱体', '正方体', '立方体', '长方体', '球体', '球', '圆锥', '圆锥体',
+        '直角三棱柱', '三棱柱', '门式桥墩', '引桥桥墩', '索缆锚锭', '承台及桩基',
+    })
+
+    # 纯 2D 图形词：出现即保持画板本地链路（"长方形"含"长方"，会被建模解析器误判为 box）
+    _BOARD_2D_WORDS = ('矩形', '长方形', '直线', '线段', '圆弧', '多段线', '多边形', '椭圆', '样条')
+
+    # 指向 BIMBase 3D 组件的关键词（用于 modify/delete/move 的指向判断）
+    _MODELING_3D_KEYWORDS = ('bimbase', '软件', '组件', '构件', '桥墩', '圆柱', '正方体',
+                             '长方体', '球', '圆锥', '三棱柱', '锚锭', '承台', '桩基', '墩')
+
+    def _prefer_modeling(self, text: str):
+        """判断是否应优先走 AI_Modeling 3D 建模链路。
+        画板 2D 解析器可能误吞 3D 指令（如"生成一个圆柱""沿X轴布置门式桥墩"），
+        因此先问建模解析器。返回 (prefer: bool, mparsed)，prefer=True 时 mparsed 可直接执行。"""
+        mparsed = ai_modeling_bridge.parse_modeling_command(text)
+        if not ai_modeling_bridge.is_modeling_action(mparsed):
+            return False, mparsed
+        # 明确说"画板"或纯 2D 图形词的指令：保持画板本地链路
+        if '画板' in text:
+            return False, mparsed
+        if any(w in text for w in self._BOARD_2D_WORDS):
+            return False, mparsed
+        # "圆"单独出现（非圆柱/圆锥/圆球）是画板 2D 圆
+        if re.search(r'圆(?!柱|锥|球)', text):
+            return False, mparsed
+        act = mparsed.get('action')
+        if act in ('create', 'copy'):
+            # create/copy 只涉及 BIMBase 3D 组件，直接本地接管
+            return True, mparsed
+        # modify/delete/move 指向不明时：含组件类型或 3D 关键词 → 建模链路；否则维持现有行为
+        if act in ('modify', 'delete', 'move'):
+            if mparsed.get('component_type') in self._MODELING_3D_TYPES:
+                return True, mparsed
+            if any(kw in text.lower() for kw in self._MODELING_3D_KEYWORDS):
+                return True, mparsed
+        return False, mparsed
+
     def _should_use_local(self, text: str) -> bool:
         """
         v1.5 P3: 自动判断是否应该使用本地解析。
@@ -1392,7 +1507,18 @@ class AIPanel(QWidget):
         复杂/模糊指令 → False（走API）
         """
         bimbase_sync._log(f"[AI_PANEL] _should_use_local start: {text!r}")
-        # 0. 沿轴批量布置指令强制走本地解析，避免被AI覆盖
+        # 0. 3D 建模指令优先：画板 2D 解析器可能误吞 3D 指令（如"生成一个圆柱"
+        #    "沿X轴每隔500布置5个门式桥墩"），明确是建模指令时优先走建模链路
+        try:
+            prefer, _mp = self._prefer_modeling(text)
+        except Exception as e:
+            bimbase_sync._log(f"[AI_PANEL] _prefer_modeling exception: {e}")
+            prefer = False
+        if prefer:
+            bimbase_sync._log(f"[AI_PANEL] _should_use_local: prefer modeling for: {text!r}")
+            return True
+
+        # 1. 沿轴批量布置指令强制走本地解析，避免被AI覆盖
         if '沿' in text:
             try:
                 parsed = LocalCommandParser.parse(text)
@@ -1440,9 +1566,9 @@ class AIPanel(QWidget):
         if len(text) > 80:
             return False
 
-        # 6. 是明确的绘制/删除/修改操作 → 本地执行
+        # 6. 是明确的绘制/删除/修改/变换操作 → 本地执行
         action = parsed.get('action', '')
-        if action in ('create', 'delete', 'modify', 'agent', 'sync'):
+        if action in ('create', 'delete', 'modify', 'agent', 'sync', 'transform'):
             return True
 
         return False
@@ -1604,7 +1730,8 @@ class AIPanel(QWidget):
             "commands每项含action+参数:\n"
             "create:element类型(circle/rectangle/line/arc/point/polyline/polygon/ellipse/圆柱/正方体/长方体/直角三棱柱/引桥桥墩/索缆锚锭/门式桥墩/承台及桩基)+params坐标尺寸\n"
             "modify:target必须是字典{\"index\":\"selected\"}或{\"index\":N}或{\"element_type\":\"circle\"}+changes属性键值(支持+50/*2)\n"
-            "agent:tool(modify_component/sync_to_bimbase/sync_from_bimbase/delete_bimbase_component/query_state/regenerate_faces)+params; modify_component支持target/changes/path以及可选position{x,y,z}\n"
+            "agent:tool(modify_component/move_bimbase_component/sync_to_bimbase/sync_from_bimbase/delete_bimbase_component/query_state/regenerate_faces)+params; modify_component支持target/changes/path以及可选position{x,y,z}\n"
+            "移动/平移BIMBase组件必须用move_bimbase_component，params={\"target\":{\"mode\":\"selected\"},\"move\":{\"mode\":\"relative\",\"dx\":0,\"dy\":500,\"dz\":0}}(单位mm，也可用\"move\":{\"mode\":\"absolute\",\"x\":..,\"y\":..,\"z\":..})；不要把移动写成modify_component+position\n"
             "sync_to_bimbase的params必须带target:{\"mode\":\"selected\"}(同步选中)或{\"component\":true}(同步当前组件)，可选position{x,y,z}和write_position;只有用户明确要求同步全部时才省略target\n"
             "sync_from_bimbase:把BIMBase中选中的组件同步回画板(可识别元素),params为{}; delete_bimbase_component:删除BIMBase中选中的组件,params为{}\n"
             "transform:transform_type(translate/rotate/scale/mirror)+target字典+params\n"

@@ -25,6 +25,15 @@ if _bimbase_sync_dir in sys.path:
     sys.path.remove(_bimbase_sync_dir)
 sys.path.insert(0, _bimbase_sync_dir)
 
+# 兼容：本文件由 bimbase_sync.py 改名而来，改名前放置到 BIMBase 的实体，
+# 其序列化引用是 'bimbase_sync.XxxComponent'。若运行上下文中尚未加载同名模块，
+# 把本模块注册为 'bimbase_sync' 别名，让旧实体改参/复制时的类解析能找到
+# 本文件中的组件类；若 CADBoard 的同名 bimbase_sync 模块已加载则不覆盖，
+# 此时由 component_factory.resolve_legacy_component_class 按类名兜底解析。
+_self_mod = sys.modules.get(__name__)
+if _self_mod is not None and 'bimbase_sync' not in sys.modules:
+    sys.modules['bimbase_sync'] = _self_mod
+
 # pyp3d 导入（在 BIMBase 环境中可用）
 try:
     from pyp3d import (

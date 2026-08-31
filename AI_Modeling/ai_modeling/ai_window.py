@@ -503,6 +503,11 @@ class AIModelingWindow(QDialog):
             self.status_label.setText("本地执行删除...")
             self._execute_local_delete(parsed, text)
             return
+        elif parsed and parsed.get('action') == 'move':
+            self.mode_indicator.setText("⚡ 本地")
+            self.status_label.setText("本地执行移动...")
+            self._execute_local_move(parsed, text)
+            return
 
         # 2. 本地无法解析，调用 AI
         api_key = get_api_key()
@@ -553,6 +558,12 @@ class AIModelingWindow(QDialog):
                 # 未指定位置时：有阵列/路线则默认从原点开始，完全没有位置信息才弹窗
                 if arr or route_info:
                     base_x, base_y, base_z = 0, 0, 0
+                elif re.search(r'位置|坐标', original_text):
+                    # 用户给了坐标语境但没解析出坐标（如语音连读中文数字）：
+                    # 明确报错，不弹窗、不静默用默认位置
+                    self._append_system("❌ 无法识别坐标，请用阿拉伯数字如 500,200,100", "#d32f2f")
+                    self.status_label.setText("就绪")
+                    return
                 else:
                     coord = self._request_manual_coordinate(defaults=(0, 0, 0))
                     if coord is None:
@@ -571,12 +582,8 @@ class AIModelingWindow(QDialog):
                     if base_pos:
                         self._append_system(f"⚠️ 未从实体读取到位置，使用注册表中该组件记录的位置 ({base_pos[0]:.1f}, {base_pos[1]:.1f}, {base_pos[2]:.1f}) 作为基准", "#f57c00")
                 if base_pos is None:
-                    # 回退2：最近一次生成的组件
-                    base_pos = self._get_last_created_position()
-                    if base_pos:
-                        self._append_system(f"⚠️ 未检测到选中组件，使用最近一次生成位置 ({base_pos[0]:.1f}, {base_pos[1]:.1f}, {base_pos[2]:.1f}) 作为基准", "#f57c00")
-                if base_pos is None:
-                    self._append_system("❌ 未在 BIMBase 中选中有效组件，也无法从注册表获取位置", "#d32f2f")
+                    # 相对基准解析失败必须报错终止，不允许静默回退到原点/上次位置（防止"假成功"）
+                    self._append_system("❌ 相对布置失败：未在 BIMBase 中选中有效组件，无法确定相对基准，请先选中基准组件", "#d32f2f")
                     self.status_label.setText("就绪")
                     return
                 base_x, base_y, base_z = base_pos
@@ -702,11 +709,8 @@ class AIModelingWindow(QDialog):
                 if base_pos:
                     self._append_system("⚠️ 未从实体读取到位置，使用注册表中该组件记录的位置作为复制基准", "#f57c00")
             if base_pos is None:
-                base_pos = self._get_last_created_position()
-                if base_pos:
-                    self._append_system("⚠️ 未检测到选中组件，使用最近一次生成位置作为复制基准", "#f57c00")
-            if base_pos is None:
-                self._append_system("❌ 无法读取选中组件位置，也没有可回退的位置", "#d32f2f")
+                # 相对基准解析失败必须报错终止，不允许静默回退到上次位置（防止"假成功"）
+                self._append_system("❌ 相对布置失败：未在 BIMBase 中选中有效组件，无法确定相对基准，请先选中基准组件", "#d32f2f")
                 self.status_label.setText("就绪")
                 return
             bx, by, bz = base_pos
@@ -991,6 +995,153 @@ class AIModelingWindow(QDialog):
                             "#2E7D32" if ok else "#d32f2f")
         self.status_label.setText("就绪")
 
+    def _execute_local_move(self, parsed, original_text=""):
+        """本地执行移动命令：对目标实体施加平移变换，并同步注册表 placement"""
+        target = parsed.get('target') or {'mode': 'selected'}
+        move = parsed.get('move')
+        if not move:
+            self._append_system("❌ 未解析到移动参数（方向+距离 或 目标坐标）", "#d32f2f")
+            self.status_label.setText("就绪")
+            return
+
+        # 1. 解析目标实体（选中 / 注册表按类型或第N个/最后一个查找）
+        eid, record = self._resolve_move_target(parsed, target)
+        if eid is None:
+            self._append_system("❌ 未找到要移动的组件，请先在 BIMBase 中选中目标组件", "#d32f2f")
+            self.status_label.setText("就绪")
+            return
+
+        # 2. 计算平移增量（mm）
+        new_pos = None
+        if move.get('mode') == 'absolute':
+            cur = self._get_entity_position(eid)
+            if cur is None and record:
+                p = record.get('placement') or {}
+                cur = (float(p.get('x', 0)), float(p.get('y', 0)), float(p.get('z', 0)))
+            if cur is None:
+                self._append_system("❌ 无法读取目标组件当前位置，绝对移动失败", "#d32f2f")
+                self.status_label.setText("就绪")
+                return
+            new_pos = (float(move.get('x', 0)), float(move.get('y', 0)), float(move.get('z', 0)))
+            dx, dy, dz = new_pos[0] - cur[0], new_pos[1] - cur[1], new_pos[2] - cur[2]
+        else:
+            dx = float(move.get('dx', 0))
+            dy = float(move.get('dy', 0))
+            dz = float(move.get('dz', 0))
+
+        # 3. 施加平移变换
+        try:
+            try:
+                from pyp3d import python_transformation_operation, trans
+            except ImportError:
+                from pyp3d import python_transformation_operation, translate as trans
+            python_transformation_operation(eid, trans(dx, dy, dz))
+        except Exception as e:
+            _log(f"_execute_local_move transform error: {e}")
+            self._append_system(f"❌ 移动失败: {e}", "#d32f2f")
+            self.status_label.setText("就绪")
+            return
+
+        # 4. 同步注册表 placement
+        if record is not None:
+            try:
+                p = record.get('placement') or {}
+                if new_pos is None:
+                    new_pos = (float(p.get('x', 0)) + dx,
+                               float(p.get('y', 0)) + dy,
+                               float(p.get('z', 0)) + dz)
+                record['placement'] = {
+                    'x': float(new_pos[0]),
+                    'y': float(new_pos[1]),
+                    'z': float(new_pos[2]),
+                }
+                self._registry.save()
+            except Exception as e:
+                _log(f"_execute_local_move registry update error: {e}")
+
+        if move.get('mode') == 'absolute':
+            self._append_system(f"✅ 已移动到 ({new_pos[0]}, {new_pos[1]}, {new_pos[2]})", "#2E7D32")
+        else:
+            self._append_system(f"✅ 已移动 ({dx}, {dy}, {dz}) mm", "#2E7D32")
+        self.status_label.setText("就绪")
+
+    def _resolve_move_target(self, parsed, target):
+        """按 target/component_type 解析要移动的实体。
+        返回 (entity_id, registry_record)；失败返回 (None, None)。"""
+        mode = target.get('mode', 'selected')
+        comp_type = parsed.get('component_type')
+
+        # 选中模式且未按类型指定时，直接使用当前选中实体
+        if mode == 'selected' and not comp_type:
+            try:
+                from ai_modeling.bimbase_modifier import get_selected_entity_ids, get_selected_instance_keys
+                eids = get_selected_entity_ids()
+                if eids:
+                    record = None
+                    keys = get_selected_instance_keys()
+                    if keys:
+                        record = self._registry.get(keys[0])
+                    if record is None:
+                        record = self._registry.get_by_entity_id(eids[0])
+                    return eids[0], record
+            except Exception as e:
+                _log(f"_resolve_move_target selected error: {e}")
+            return None, None
+
+        # 注册表查找：按类型过滤（如有），支持 第N个 / 最后一个
+        items = list(self._registry.all_records().items())
+        if comp_type:
+            items = [(k, r) for k, r in items if r.get('component_type') == comp_type]
+        items.sort(key=lambda kv: kv[1].get('created_at', ''))
+        if not items:
+            return None, None
+        if mode == 'index':
+            idx = int(target.get('index', 0))
+            if not (0 <= idx < len(items)):
+                return None, None
+            _, record = items[idx]
+        else:
+            _, record = items[-1]
+        eid = self._find_entity_by_id_string(record.get('entity_id'))
+        return eid, record
+
+    def _find_entity_by_id_string(self, eid_str):
+        """把注册表中的 "ModelId=..;ElementId=.." 字符串还原为场景中的实体对象"""
+        if not eid_str or not isinstance(eid_str, str):
+            return None
+        try:
+            mid = eid_val = None
+            for part in eid_str.split(';'):
+                k, _, v = part.partition('=')
+                if k.strip() == 'ModelId':
+                    mid = int(v)
+                elif k.strip() == 'ElementId':
+                    eid_val = int(v)
+            if eid_val is None:
+                return None
+            from pyp3d import get_all_entityid
+            for e in get_all_entityid() or []:
+                ee = getattr(e, '_ElementId', None)
+                em = getattr(e, '_ModelId', None)
+                if ee == eid_val and (mid is None or em == mid):
+                    return e
+        except Exception as e:
+            _log(f"_find_entity_by_id_string error: {e}")
+        return None
+
+    def _get_entity_position(self, eid):
+        """读取实体当前位置：复用 bimbase_modifier 的 \\a_transformation 提取链路"""
+        try:
+            from ai_modeling.bimbase_modifier import _read_params_from_entity
+            params = _read_params_from_entity(eid)
+            if params and params.get('x') is not None:
+                return (float(params.get('x', 0)),
+                        float(params.get('y', 0)),
+                        float(params.get('z', 0)))
+        except Exception as e:
+            _log(f"_get_entity_position error: {e}")
+        return None
+
     def _call_ai(self, text):
         """调用 DeepSeek AI"""
         self.mode_indicator.setText("☁ AI")
@@ -1035,7 +1186,10 @@ class AIModelingWindow(QDialog):
             "修改组件: {\"action\": \"modify\", \"target\": {\"mode\":\"selected\"}, "
             "\"changes\": {\"radius\":400, \"height\":1000}, "
             "\"preserve_position\": false}\n"
-            "删除组件: {\"action\": \"delete\", \"target\": {\"mode\":\"selected\"}}\n\n"
+            "删除组件: {\"action\": \"delete\", \"target\": {\"mode\":\"selected\"}}\n"
+            "移动组件: {\"action\": \"move\", \"target\": {\"mode\":\"selected\"}, "
+            "\"move\": {\"mode\":\"relative\",\"dx\":0,\"dy\":0,\"dz\":500}} "
+            "或 {\"mode\":\"absolute\",\"x\":1000,\"y\":2000,\"z\":0}}\n\n"
             "## 路线说明\n"
             "route 用于沿一条路线等距布置组件，被放置的组件会自动旋转使其轴线/长边与路线切线方向一致。\n"
             "mode 可以是 line（直线）、arc（圆弧）、selected_line（读取 BIMBase 中已选中的直线/直线组件）、selected_curve（读取已选中的曲线/圆弧组件）。\n"
@@ -1164,6 +1318,9 @@ class AIModelingWindow(QDialog):
                 return
             elif action == 'delete':
                 self._execute_local_delete(data, "AI指令")
+                return
+            elif action == 'move':
+                self._execute_local_move(data, "AI指令")
                 return
             else:
                 self._append_system(f"⚠️ 未知操作: {action}", "#999")

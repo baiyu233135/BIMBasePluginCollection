@@ -860,6 +860,13 @@ class AICommandExecutor:
             try:
                 if transform_type == 'translate':
                     elem.translate(params.get('dx', 0), params.get('dy', 0))
+                elif transform_type == 'move_to':
+                    # 绝对移动：以元素基准点（锚点/x/cx/x1）平移到指定坐标，Z 保持不变
+                    px = float(params.get('x', 0.0))
+                    py = float(params.get('y', 0.0))
+                    pz = float(getattr(elem, 'pdf_anchor_z',
+                                       getattr(elem, 'z_start', 0.0)) or 0.0)
+                    BIMBaseAgent._apply_position_to_element(elem, {'x': px, 'y': py, 'z': pz})
                 elif transform_type == 'rotate':
                     cx = params.get('cx', 0)
                     cy = params.get('cy', 0)
@@ -875,26 +882,49 @@ class AICommandExecutor:
                     x2, y2 = params.get('x2', 100), params.get('y2', 0)
                     elem.mirror(x1, y1, x2, y2)
             except Exception as e:
-                pass
+                # 单个元素变换失败不中断批量操作，但至少写日志便于排查
+                bimbase_sync._log(f"[_do_transform] {transform_type} failed for elem "
+                                  f"{getattr(elem, 'id', '?')[:8]}: {e}")
 
         self.board.viewport.update()
-        return True, f"已{transform_type} {len(elems)} 个元素"
+        type_names = {'translate': '平移', 'move_to': '移动', 'rotate': '旋转',
+                      'scale': '缩放', 'mirror': '镜像'}
+        return True, f"已{type_names.get(transform_type, transform_type)} {len(elems)} 个元素"
 
     def _do_sync(self, cmd):
-        """同步到BIMBase。支持指定坐标，避免 PDF 识别来源元素弹窗。"""
+        """同步到BIMBase。支持指定坐标，避免 PDF 识别来源元素弹窗。
+        只同步可同步元素（3D实体/已关联组件等），并校验同步结果，避免"假成功"。"""
         position = cmd.get('position')
         target = cmd.get('target', {})
         elems = []
         if target:
             elems = self._resolve_target(target)
         if not elems:
-            # 默认同步当前选中的元素；没有选中则同步全部
+            # 默认同步当前选中的元素（不再静默回退到同步全部）
             elems = [e for e in self.board.elements if getattr(e, 'selected', False)]
         if not elems:
-            elems = list(self.board.elements)
+            return False, "请先在画板中选中要同步的元素（需为 3D实体 或已关联组件）"
+
+        # 选中面元素时映射回源组件（sync_all 会过滤面元素，与 board._sync_to_bimbase 一致）
+        mapped = []
+        seen_ids = set()
+        for e in elems:
+            cid = getattr(e, 'face_info', {}).get('component_id')
+            src = None
+            if cid:
+                src = next((s for s in self.board.elements if s.id == cid), None)
+            tgt = src if src is not None else e
+            if tgt.id not in seen_ids:
+                seen_ids.add(tgt.id)
+                mapped.append(tgt)
+
+        # 只保留可同步元素（与 bimbase_sync._sync_element 的跳过规则一致）
+        syncable = [e for e in mapped if self._is_syncable_element(e)]
+        if not syncable:
+            return False, "选中的元素不是可同步组件，请先勾选 3D实体/关联组件，或使用实体命令绘制"
 
         if position:
-            for elem in elems:
+            for elem in syncable:
                 try:
                     BIMBaseAgent._apply_position_to_element(elem, position)
                     # 用户已明确给出坐标，视为已放置，避免 _sync_element 弹窗
@@ -904,9 +934,40 @@ class AICommandExecutor:
                     bimbase_sync._log(f"[_do_sync] apply position failed for {elem.id[:8]}: {e}")
             self.board.viewport.update()
 
-        self.board._sync_to_bimbase()
+        if not bimbase_sync.is_bimbase_available():
+            return False, "未在BIMBase环境中运行，无法同步"
+        # 直接调用同步函数并校验返回值（不走 _sync_to_bimbase 的弹窗链路）；
+        # 坐标已通过 _apply_position_to_element 写入元素锚点，origin 传 None 避免重复偏移
+        try:
+            count, errors, replaced, manual, skip_count = bimbase_sync.sync_to_bimbase(
+                self.board, syncable, origin=None)
+        except Exception as e:
+            bimbase_sync._log(f"[_do_sync] sync_to_bimbase exception: {e}")
+            return False, f"同步到 BIMBase 失败: {e}"
         pos_msg = f" 坐标={position}" if position else ""
-        return True, f"已触发同步到 BIMBase{pos_msg}"
+        bimbase_sync._log(f"[_do_sync] result: success={count}, manual={len(manual)}, "
+                          f"skipped={skip_count}, errors={errors}{pos_msg}")
+        if count > 0:
+            return True, f"已同步 {count} 个元素到 BIMBase{pos_msg}"
+        if manual:
+            return True, f"已生成 {len(manual)} 个组件，请在 BIMBase 3D 视图中点击放置{pos_msg}"
+        detail = f"（{errors[0]}）" if errors else ""
+        return False, f"同步未生效：0 个元素成功{detail}{pos_msg}"
+
+    @staticmethod
+    def _is_syncable_element(elem):
+        """判断画板元素是否可同步到 BIMBase（与 bimbase_sync._sync_element 的跳过规则一致）：
+        3D实体、已关联/缓存组件、PDF识别来源、BIMBase来源均可同步；
+        普通 2D 图元（无组件关联的线/圆/矩形等）不可同步。"""
+        if getattr(elem, 'is_3d', False):
+            return True
+        if getattr(elem, 'component_type', '') or getattr(elem, '_cached_component_type', None):
+            return True
+        if getattr(elem, 'pdf_recognized', False):
+            return True
+        if getattr(elem, '_bimbase_datakey', None) is not None:
+            return True
+        return False
 
     def _do_face_edit(self, cmd):
         """面编辑操作"""

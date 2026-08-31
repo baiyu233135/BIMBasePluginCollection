@@ -124,21 +124,34 @@ class ComponentRegistry:
             pass
 
     def _load_from_file(self):
-        """从JSON文件恢复参数映射（无实例对象）"""
+        """从JSON文件恢复参数映射（无实例对象）。
+        容错策略：JSON整体损坏则放弃本次加载（不崩溃、保留原文件供排查）；
+        单条记录损坏只跳过该记录，不影响其他记录。"""
         if not os.path.exists(self._file_path):
             return
         try:
             with open(self._file_path, 'r', encoding='utf-8') as f:
                 loaded = json.load(f)
-            for eid, info in loaded.items():
-                if eid not in self._registry:
-                    self._registry[eid] = {
-                        'instance': None,
-                        'params': info.get('params', {}),
-                        'component_type': info.get('component_type', ''),
-                    }
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[ComponentRegistry] 加载 {self._file_path} 失败（JSON损坏？）: {e}")
+            return
+        if not isinstance(loaded, dict):
+            print(f"[ComponentRegistry] 注册表顶层不是字典，已忽略: {self._file_path}")
+            return
+        for eid, info in loaded.items():
+            if eid in self._registry:
+                continue
+            try:
+                if not isinstance(info, dict):
+                    raise ValueError(f"记录不是字典: {type(info).__name__}")
+                self._registry[eid] = {
+                    'instance': None,
+                    'params': info.get('params', {}),
+                    'component_type': info.get('component_type', ''),
+                }
+            except Exception as e:
+                # 跳过坏记录并提示，不静默丢失其他记录
+                print(f"[ComponentRegistry] 跳过损坏记录 {eid}: {e}")
 
 
 def get_registry():

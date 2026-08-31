@@ -1956,8 +1956,9 @@ class BIMBaseSync:
                     if _holder is not None:
                         _log(f"  element {elem.id}: sibling of cached component, delegate to holder {_holder.id}")
                         return self._sync_element(_holder)
-            # 跳过非组件的原始 DWG/画板线条：没有 component_type 且不是 PDF 识别来源的原始几何
-            if not comp_type_for_skip and not getattr(elem, 'pdf_recognized', False):
+            # 跳过非组件的原始 DWG/画板线条：没有 component_type、未勾选 3D实体 且不是 PDF 识别来源的原始几何
+            if (not comp_type_for_skip and not getattr(elem, 'pdf_recognized', False)
+                    and not getattr(elem, 'is_3d', False)):
                 et = getattr(elem, 'element_type', '')
                 if hasattr(et, 'name'):
                     et_name = et.name.lower()
@@ -2840,7 +2841,7 @@ class BIMBaseSync:
             'SweepBoxComponent', 'Circle3DComponent', 'Arc3DComponent',
             'Ellipse3DComponent', 'Line3DComponent', 'Point3DComponent',
             'Polygon3DComponent', 'Polyline3DComponent',
-            '直角三棱柱', '圆柱', '正方体', '长方体', '引桥桥墩', '索缆锚锭',
+            '直角三棱柱', '圆柱', '正方体', '长方体', '球体', '引桥桥墩', '索缆锚锭',
             '门式桥墩', '承台及桩基',
         }
 
@@ -3060,6 +3061,11 @@ class BIMBaseSync:
             if dist < best_dist:
                 best_dist = dist
                 best = params
+
+        if best is None and candidates:
+            # 无法从参数提取位置时（如实体类组件缺少坐标字段），
+            # 回退到第一个候选，与上方 elem_pos 为 None 的处理保持一致
+            best = candidates[0]
 
         if best:
             apply_component_params_to_element(elem, best, comp_type)

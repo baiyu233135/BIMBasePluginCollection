@@ -71,13 +71,14 @@ _ACTION_METHODS = {
     'copy': '_execute_local_copy',
     'modify': '_execute_local_modify',
     'delete': '_execute_local_delete',
+    'move': '_execute_local_move',
 }
 
 
 def execute_modeling_action(parsed, original_text=""):
     """
     在 AI_Modeling 窗口的上下文中执行结构化建模命令（通用版）。
-    支持 create / copy / modify / delete 四种本地动作，
+    支持 create / copy / modify / delete / move 五种本地动作，
     每次都新建一个临时 AI 窗口、执行、关闭，以获得确定性的返回结果，
     避免与已有的 AI 窗口引用冲突。
 
@@ -146,7 +147,12 @@ def execute_modeling_action(parsed, original_text=""):
                 after = _count_entities()
                 _log(f"execute_modeling_action[{action}]: entity count after={after}")
                 if action == 'create':
-                    if after > before:
+                    # before < 0：实体计数不可用（pyp3d 计数接口失败），
+                    # 执行无异常即视为成功（否则放置成功也会误报"未检测到新实体"）
+                    if before < 0:
+                        result[0] = True
+                        result[1] = "AI_Modeling 执行完成（实体计数不可用，按无异常判定）"
+                    elif after > before:
                         result[0] = True
                         result[1] = f"AI_Modeling 执行完成，新增 {after - before} 个实体"
                     else:
@@ -168,9 +174,12 @@ def execute_modeling_action(parsed, original_text=""):
                     else:
                         result[0] = False
                         result[1] = "AI_Modeling 删除后实体数量异常增加"
-                else:  # modify：不引起实体数变化，无异常即视为成功
+                else:  # modify/move：不引起实体数变化，无异常即视为成功
                     result[0] = True
-                    result[1] = "AI_Modeling 修改执行完成"
+                    if action == 'move':
+                        result[1] = "AI_Modeling 移动执行完成"
+                    else:
+                        result[1] = "AI_Modeling 修改执行完成"
             except Exception as e:
                 result[0] = False
                 result[1] = f"AI_Modeling 执行失败: {e}"
@@ -208,7 +217,7 @@ def execute_parsed_command(parsed, original_text=""):
 def execute_text_command(text):
     """
     在 AI_Modeling 窗口的上下文中执行自然语言命令。
-    支持 create / copy / modify / delete 四种本地动作。
+    支持 create / copy / modify / delete / move 五种本地动作。
     返回: (success: bool, message: str)
     """
     try:

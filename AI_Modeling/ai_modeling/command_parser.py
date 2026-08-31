@@ -29,6 +29,7 @@ class ModelingCommandParser:
         '上色': 'modify', '涂色': 'modify', '涂成': 'modify', '染成': 'modify', '刷成': 'modify',
         '删除': 'delete', '移除': 'delete', '删掉': 'delete',
         '复制': 'copy', '拷贝': 'copy',
+        '移动': 'move', '平移': 'move', '挪': 'move',
     }
 
     # 方向映射（相对坐标）
@@ -73,6 +74,18 @@ class ModelingCommandParser:
     @classmethod
     def _replace_chinese_numerals(cls, text):
         """把文本中的汉字数字（零一二两三四五六七八九十百千万）替换为阿拉伯数字"""
+        # 坐标语境的连读中文数字（语音识别常见）："在五百二百一百的位置"→"在500,200,100的位置"
+        # 在 百/千/万 单位后紧跟新数字的位置切段（"五百二十"的"二十"是十位延续，不会切断）。
+        # 仅接受恰好 3 段（三维坐标），2 段歧义太大（"五百二十"=520 还是 500,200）不拆，
+        # 交给上层报"无法识别坐标"
+        m = re.search(r'(?:在|到|位于|坐标)\s*([零一二两三四五六七八九十百千万]{2,})\s*的?\s*(?=位置|坐标)', text)
+        if m:
+            segs = re.split(r'(?<=[百千万])(?=[一二两三四五六七八九])', m.group(1))
+            if len(segs) == 3:
+                vals = [cls._cn_section_to_int(s) for s in segs]
+                if all(v is not None for v in vals):
+                    text = text[:m.start(1)] + ','.join(str(v) for v in vals) + text[m.end(1):]
+
         def _conv(m):
             s = m.group(0)
             if '万' in s:
@@ -115,6 +128,8 @@ class ModelingCommandParser:
             'route': None,
             'path': None,
             'target': None,
+            # 移动参数：{'mode':'relative','dx','dy','dz'} 或 {'mode':'absolute','x','y','z'}
+            'move': None,
             'preserve_position': False,
             # 默认把放置坐标写入组件的 偏移X/Y/Z 参数；用户要求"不写入"时置 False
             'write_position': True,
@@ -131,7 +146,11 @@ class ModelingCommandParser:
 
         # 1. 检测操作（"画板"含"画"字，先从动作检测文本中剔除，避免"删除画板组件"误判为创建）
         action_text = text.replace('画板', '')
+        # “不要移动/不移动/位置不变”是修改时保留位置的语境，其中的“移动”不解析为 move
+        preserve_hint = cls._detect_preserve_position(text)
         for cn, en in cls.ACTION_MAP.items():
+            if en == 'move' and preserve_hint:
+                continue
             if cn.lower() in action_text:
                 result['action'] = en
                 break
@@ -171,6 +190,16 @@ class ModelingCommandParser:
         if result['action'] == 'copy':
             result['target'] = cls._parse_target(text)
             result['position'] = cls._extract_position(text)
+            cls._apply_unit_factor(result, unit_factor)
+            return result
+
+        # 4c. 移动操作
+        if result['action'] == 'move':
+            result['target'] = cls._parse_target(text)
+            move = cls._extract_move(text)
+            if move is None:
+                return None
+            result['move'] = move
             cls._apply_unit_factor(result, unit_factor)
             return result
 
@@ -487,6 +516,10 @@ class ModelingCommandParser:
         path = result.get('path') or {}
         if path.get('spacing') is not None:
             path['spacing'] = _scale(path['spacing'])
+        move = result.get('move') or {}
+        for k in ('dx', 'dy', 'dz', 'x', 'y', 'z'):
+            if k in move:
+                move[k] = _scale(move[k])
 
     @classmethod
     def _extract_color(cls, text):
@@ -537,9 +570,25 @@ class ModelingCommandParser:
                 pos['z'] = 0
                 return pos
 
+        # 显式轴向相对偏移："y轴方向500" / "Y方向500"（"轴"可省，但省略时必须有"方向"）/
+        # "向x轴正方向500" / "沿z轴500"
+        # 优先级高于"上面/前面"等方向词（两者同时出现时以显式轴向为准）
+        m = re.search(r'(?:向|沿)?\s*([xyz])\s*'
+                      r'(?:轴\s*(?:(?:正|负)\s*方向?|方向)?|(?:正|负)\s*方向|方向)'
+                      r'\s*(\d+\.?\d*)', text)
+        if m:
+            sign = -1 if '负' in m.group(0) else 1
+            pos['mode'] = 'relative'
+            pos['axis'] = m.group(1)
+            pos['distance'] = float(m.group(2)) * sign
+            # "这个组件/该组件/选中的组件"等均以 BIMBase 当前选中实体为相对基准
+            pos['base'] = 'selected'
+            return pos
+
         # 相对坐标: "在选中的实体上方500mm" / "在当前位置前方1000" / "上方，500毫米的地方"
-        # (?<!当) 防止把"当前"中的"前"误判为方向词
-        rel_pattern = r'在?(?:选中|当前|它|该组件)?(?:的)?\s*(?<!当)(上|下|左|右|上方|下方|左边|右边|前方|后方|前|后|之上|之下)[^\d]{0,4}(\d+\.?\d*)\s*(?:mm)?'
+        # (?<!当) 防止把"当前"中的"前"误判为方向词；
+        # (?!\s*个) 防止把"上面布置一个圆柱"中"一个"转换出的数量"1"误判为距离
+        rel_pattern = r'在?(?:选中|当前|它|该组件)?(?:的)?\s*(?<!当)(上|下|左|右|上方|下方|左边|右边|前方|后方|前|后|之上|之下)[^\d]{0,4}(\d+\.?\d*)(?!\s*个)\s*(?:mm)?'
         m = re.search(rel_pattern, text)
         if m:
             dir_text = m.group(1)
@@ -548,6 +597,9 @@ class ModelingCommandParser:
             pos['mode'] = 'relative'
             pos['axis'] = axis
             pos['distance'] = distance * sign
+            # "这个组件/该组件/选中的组件"等均以 BIMBase 当前选中实体为相对基准
+            if '选中' in text or '当前' in text or re.search(r'(?:这个|该|此)\s*(?:组件|构件|实体)', text):
+                pos['base'] = 'selected'
             return pos
 
         # "沿当前选中组件5000布置..."：无方向词时默认沿 X 正方向偏移（数字已统一换算为 mm）
@@ -564,6 +616,56 @@ class ModelingCommandParser:
             return pos
 
         return pos
+
+    @classmethod
+    def _extract_move(cls, text):
+        """
+        提取移动参数（单位已在 parse 入口归一化为 mm）。
+        返回:
+          {'mode': 'absolute', 'x':.., 'y':.., 'z':..}   —— "移动到(1000,2000,0)"（带"到"字）
+          {'mode': 'relative', 'dx':.., 'dy':.., 'dz':..} —— "移动(100,200,0)" / "向左移动500"
+          无法识别时返回 None
+        """
+        coord3 = r'\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)'
+        coord2 = r'\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)'
+
+        # 绝对移动："移动到(1000,2000,0)"
+        m = re.search(r'(?:移动|平移|挪)\s*到\s*' + coord3, text)
+        if m:
+            return {'mode': 'absolute',
+                    'x': float(m.group(1)), 'y': float(m.group(2)), 'z': float(m.group(3))}
+        m = re.search(r'(?:移动|平移|挪)\s*到\s*' + coord2, text)
+        if m:
+            return {'mode': 'absolute',
+                    'x': float(m.group(1)), 'y': float(m.group(2)), 'z': 0.0}
+
+        # 相对位移："移动(100,200,0)"（不带"到"字，与"移动到(...)"区分）
+        m = re.search(r'(?:移动|平移|挪)(?!\s*到)\s*' + coord3, text)
+        if m:
+            return {'mode': 'relative',
+                    'dx': float(m.group(1)), 'dy': float(m.group(2)), 'dz': float(m.group(3))}
+
+        # 轴向移动："向Y轴平移500" / "沿X轴负方向移动200" / "向Z轴正方向移动1000"
+        # （正/负方向词可选，默认正方向；单位已在入口归一化为 mm）
+        m = re.search(r'(?:向|沿)\s*([xyz])\s*轴\s*(?:(正|负)\s*方向?|方向)?\s*'
+                      r'(?:移动|平移|挪)?\s*(\d+\.?\d*)', text)
+        if m:
+            sign = -1 if m.group(2) == '负' else 1
+            move = {'mode': 'relative', 'dx': 0.0, 'dy': 0.0, 'dz': 0.0}
+            move['d' + m.group(1)] = float(m.group(3)) * sign
+            return move
+
+        # 方向+距离："向左移动500" / "向上平移2000"（方向词取自 DIRECTION_MAP，长词优先）
+        dir_words = sorted(cls.DIRECTION_MAP.keys(), key=len, reverse=True)
+        dir_pat = r'(' + '|'.join(re.escape(w) for w in dir_words) + r')\s*(?:移动|平移|挪)\s*(\d+\.?\d*)'
+        m = re.search(dir_pat, text)
+        if m:
+            axis, sign = cls.DIRECTION_MAP.get(m.group(1), ('z', 1))
+            move = {'mode': 'relative', 'dx': 0.0, 'dy': 0.0, 'dz': 0.0}
+            move['d' + axis] = float(m.group(2)) * sign
+            return move
+
+        return None
 
     @classmethod
     def _extract_array(cls, text):

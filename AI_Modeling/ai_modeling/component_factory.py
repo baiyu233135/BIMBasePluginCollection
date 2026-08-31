@@ -518,6 +518,22 @@ def create_component(component_type, params=None):
         return None
 
 
+def resolve_legacy_component_class(class_name):
+    """旧实体（'bimbase_sync.XxxComponent' 序列化引用）的类解析兜底。
+    当 CADBoard 的同名 bimbase_sync 模块已加载、aim_bimbase_sync 的别名未注册时，
+    按类名字符串在 aim_bimbase_sync 中查找组件类；找不到返回 None。"""
+    if not class_name:
+        return None
+    try:
+        import aim_bimbase_sync
+        cls = getattr(aim_bimbase_sync, class_name, None)
+        if isinstance(cls, type):
+            return cls
+    except Exception as e:
+        _log(f"resolve_legacy_component_class({class_name}) failed: {e}")
+    return None
+
+
 def _infer_component_type_from_comp(comp):
     """从组件实例推断 component_type key"""
     if comp is None:
@@ -552,6 +568,13 @@ def _infer_component_type_from_comp(comp):
     for key, cls in COMPONENT_CLASSES.items():
         if type(comp) is cls:
             return key
+    # 旧实体兜底：组件类来自改名前的 bimbase_sync 且别名未注册时，
+    # 按类名在 aim_bimbase_sync 中解析，再反查 component_type
+    legacy_cls = resolve_legacy_component_class(type_name)
+    if legacy_cls is not None:
+        for key, cls in COMPONENT_CLASSES.items():
+            if legacy_cls is cls:
+                return key
     return None
 
 

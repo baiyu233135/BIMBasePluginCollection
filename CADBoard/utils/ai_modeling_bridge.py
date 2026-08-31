@@ -18,7 +18,7 @@ _PARSER_MODULE = None
 _PARSER_LOAD_FAILED = False
 
 # 可本地执行的建模动作
-MODELING_ACTIONS = ('create', 'copy', 'modify', 'delete')
+MODELING_ACTIONS = ('create', 'copy', 'modify', 'delete', 'move')
 
 
 def _log(msg):
@@ -74,8 +74,11 @@ def is_modeling_action(parsed):
         return False
     if parsed.get('action') not in MODELING_ACTIONS:
         return False
-    # create 必须有组件类型；copy/modify/delete 允许针对选中组件
+    # create 必须有组件类型；copy/modify/delete/move 允许针对选中组件
     if parsed.get('action') == 'create' and not parsed.get('component_type'):
+        return False
+    # move 必须带移动参数（{'mode':'relative',dx..} 或 {'mode':'absolute',x..}）
+    if parsed.get('action') == 'move' and not isinstance(parsed.get('move'), dict):
         return False
     return True
 
