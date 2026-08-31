@@ -11,7 +11,7 @@
             </Button>
             <Button name="自动配置环境">
                 <command>setup_env.py</command>
-                <iconPath>CAD画板.ico</iconPath>
+                <iconPath>配置环境.ico</iconPath>
             </Button>
             <Button name="桥梁病害识别">
                 <command>bridge_disease_launcher.py</command>
