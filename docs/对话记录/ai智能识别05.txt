@@ -190,3 +190,22 @@ BIMBase 里不可见（零高度几何退化 + 首次放置在原点后只原地
 遗留：首次在原点放置的 Circle3DComponent 残留给用户手动删除；画板手动同步
 按钮路径有 +100 高度兜底，未加零高度检查（仅 AI 链路加了）。
 提交：<见本次 git log 最新提交>
+
+七、补记：第六轮修复（2026-08-31 深夜，AI同步移动画板元素 + 位置不更新）
+--------------------------------------------------------------------------
+现象：AI 同步带坐标时画板上的圆被拖走；BIMBase 里二次同步位置不更新
+（replace 原地假更新）；圆同步落到原点（扁圆躺在 0,0,0）。
+根因：① _do_sync 用 _apply_position_to_element 把目标坐标写进元素锚点；
+② _make_component_by_type 用 elem.x/y 取位置，CircleElement 只有 cx/cy →
+恒为 0；③ 已有实例+新坐标走 inst.replace()，位置参数被内核重实例化冲掉。
+修复：
+  - ai_executor._do_sync：坐标"快照→临时应用→同步→finally恢复"，画板元素
+    不再移动；同步后清理临时 pdf_anchor；
+  - bimbase_sync：位置参数变化时删除旧实例重新放置（按旧参数全键匹配删除，
+    匹配不上则降级残留+日志）；_make_component_by_type 位置读取 cx/cy、x1/y1
+    逐属性回退。
+验证：离线冒烟 7 项 + test_cached_component_ops 11 + test_ai_modeling_bridge
+27 全过。圆柱几何核实：Circle3DComponent 是实心 Sweep 圆柱，"扁圆"观感是
+r=50/h=20 比例+位置 bug 叠加，几何本身无需改。
+遗留：手动改过参数的组件重新同步时旧实例可能残留（日志有提示）。
+提交：<见本次 git log 最新提交>

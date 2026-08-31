@@ -77,6 +77,12 @@ get_entity_property = None
 get_entityid_from_boxselection = None
 get_current_entityId = None
 BPDataKey_isvaid = None
+# 实例删除 API（位置变化重新放置时删除旧实例用；不可用时仅降级为残留旧实例+日志）
+delete_data_bydatakey = None
+try:
+    from pyp3d import delete_data_bydatakey
+except ImportError as e:
+    _log(f"delete_data_bydatakey import failed: {e}")
 
 try:
     from pyp3d import (
@@ -1923,6 +1929,66 @@ class BIMBaseSync:
         _log(f"sync_all() done: {success_count} success, {error_count} errors, {skip_count} skipped, {len(self.replaced_bimbase_origins)} re-placed (BIMBase origin)")
         return error_count == 0
 
+    @staticmethod
+    def _position_params_changed(old_params, new_params):
+        """比较新旧参数中的位置键，判断组件放置位置是否变化"""
+        pos_keys = ('x', 'y', 'z', 'z_bottom', 'z_top', 'cx', 'cy', 'x1', 'y1', 'x2', 'y2')
+        for k in pos_keys:
+            if k in old_params and k in new_params:
+                try:
+                    if abs(float(old_params[k]) - float(new_params[k])) > 1e-6:
+                        return True
+                except (TypeError, ValueError):
+                    continue
+        return False
+
+    def _delete_instance_by_params(self, old_params):
+        """按注册时的旧参数扫描匹配已放置实例并删除（尽力而为，找不到仅记日志）。
+        用于位置变化时的重新放置：避免旧组件残留在原位置。"""
+        if get_all_instancekey is None or get_noumKV_from_instancekey is None:
+            return False
+        if delete_data_bydatakey is None:
+            _log("  _delete_instance_by_params: delete_data_bydatakey unavailable, old instance kept")
+            return False
+        match_keys = [k for k in ('cx', 'cy', 'x', 'y', 'z_bottom', 'z_top', 'radius', '半径', '边长')
+                      if k in old_params]
+        if len(match_keys) < 2:
+            return False
+
+        def _num(v):
+            v = getattr(v, 'value', v)  # Attr 对象取 .value
+            return float(v)
+
+        try:
+            for ik in get_all_instancekey() or []:
+                try:
+                    kv = get_noumKV_from_instancekey(ik)
+                    if not isinstance(kv, dict):
+                        continue
+                    matched = 0
+                    for k in match_keys:
+                        if k not in kv:
+                            matched = -1
+                            break
+                        try:
+                            if abs(_num(kv[k]) - float(old_params[k])) > 1e-6:
+                                matched = -1
+                                break
+                        except Exception:
+                            matched = -1
+                            break
+                        matched += 1
+                    if matched == len(match_keys):
+                        delete_data_bydatakey(ik)
+                        _log(f"  deleted old instance for re-place (matched {matched} keys: {match_keys})")
+                        return True
+                except Exception:
+                    continue
+        except Exception as e:
+            _log(f"  _delete_instance_by_params error: {e}")
+        _log("  _delete_instance_by_params: no matching instance found, old instance kept")
+        return False
+
     def _sync_element(self, elem):
         try:
             # 组件类型，后续多处使用
@@ -1976,7 +2042,15 @@ class BIMBaseSync:
                 _log(f"  found existing instance for {elem.id}, type={comp_type}")
                 # 重新构建当前参数
                 _, new_params, _ = self._make_component(elem)
-                if new_params:
+                # 位置变化检测：replace 原地更新不会移动实际组件（内核重实例化会冲掉
+                # 参数写入，docs/05 实锤），位置变了必须删除旧实例并走下方重新放置路径
+                pos_changed = bool(new_params) and self._position_params_changed(
+                    info.get('params') or {}, new_params)
+                if pos_changed:
+                    _log(f"  position changed for {elem.id[:8]} ({comp_type}), "
+                         f"delete old instance and re-place at new position")
+                    self._delete_instance_by_params(info.get('params') or {})
+                if new_params and not pos_changed:
                     # 写入新参数到已有实例
                     for k, v in new_params.items():
                         if k in inst:
@@ -2227,8 +2301,9 @@ class BIMBaseSync:
 
     def _make_component_by_type(self, elem, comp_type=None, elem_type=None):
         """根据 comp_type 或 elem_type 创建对应组件"""
-        x = getattr(elem, 'x', 0)
-        y = getattr(elem, 'y', 0)
+        # 圆/圆弧等元素用 cx/cy、线用 x1/y1，逐属性回退取位置，避免圆被读成 (0,0)
+        x = getattr(elem, 'x', getattr(elem, 'cx', getattr(elem, 'x1', 0)))
+        y = getattr(elem, 'y', getattr(elem, 'cy', getattr(elem, 'y1', 0)))
         z = getattr(elem, 'z', 0)
         z_start = getattr(elem, 'z_start', 0)
         z_end = getattr(elem, 'z_end', 0)

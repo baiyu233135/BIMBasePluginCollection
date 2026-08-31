@@ -133,7 +133,7 @@ class LocalCommandParser:
         Phase 4增强: 解析自然语言，返回AI指令格式或None
         支持: 画图/删除/修改属性/变换/同步/面编辑
         """
-        text = text.strip().lower().replace('，', ',').replace('（', '(').replace('）', ')')
+        text = text.strip().lower().replace('，', ',').replace('（', '(').replace('）', ')').replace('：', ':')
 
         # Agent 快捷指令（无需操作关键词）
         if '重新生成面' in text or 'regenerate face' in text or '生成面' in text:
@@ -186,6 +186,10 @@ class LocalCommandParser:
             position = cls._extract_position(text)
             if position:
                 result['position'] = position
+            elif re.search(r'\d+\s*,\s*\d+|[:：]\s*[\d零一二两三四五六七八九十百千万]', text):
+                # 明显带坐标意图但没解析出来（如全角标点/异常分隔）：
+                # 标记给执行器明确报错，不静默用元素当前位置同步（防"假成功"）
+                result['position_unrecognized'] = True
             return result
 
         # 3.5 移动操作（相对/绝对），复用 transform/translate 链路
@@ -683,12 +687,13 @@ class LocalCommandParser:
         兼容“放在bimbase(500,0,0)”“放在(500,0,0)”等写法。"""
         import re
         # 允许在坐标前出现可选的 bimbase 前缀（不区分大小写，已在外部 lower），
-        # 兼容"同步到bimbase的50,20,30"这类"bimbase的"写法
+        # 兼容"同步到bimbase的50,20,30"、"bimbase：500，200，100"（全角冒号已在入口归一为半角）等写法
+        bp = r'(?:bimbase\s*的?\s*:?\s*)?'  # bimbase 前缀（可带"的"/冒号）
         patterns = [
-            r'(?:放在|在|坐标|位置|同步到|到)\s*(?:bimbase\s*的?)?\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)',
-            r'(?:放在|在|坐标|位置|同步到|到)\s*(?:bimbase\s*的?)?\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)',
-            r'(?:放在|在|坐标|位置|同步到|到)\s*(?:bimbase\s*的?)?(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)',
-            r'(?:放在|在|坐标|位置|同步到|到)\s*(?:bimbase\s*的?)?(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)',
+            rf'(?:放在|在|坐标|位置|同步到|到)\s*{bp}\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)',
+            rf'(?:放在|在|坐标|位置|同步到|到)\s*{bp}\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)',
+            rf'(?:放在|在|坐标|位置|同步到|到)\s*{bp}(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)',
+            rf'(?:放在|在|坐标|位置|同步到|到)\s*{bp}(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)',
             # 兜底：裸三维/二维坐标，如 "(500,0,0)"
             r'\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)',
             r'\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)',

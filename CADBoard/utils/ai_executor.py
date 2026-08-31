@@ -895,6 +895,9 @@ class AICommandExecutor:
         """同步到BIMBase。支持指定坐标，避免 PDF 识别来源元素弹窗。
         只同步可同步元素（3D实体/已关联组件等），并校验同步结果，避免"假成功"。"""
         position = cmd.get('position')
+        # 原文明显带坐标意图但解析失败：明确报错，不静默用元素当前位置同步（防"假成功"）
+        if not position and cmd.get('position_unrecognized'):
+            return False, "未能识别同步坐标，请用阿拉伯数字如 500,200,100（半角逗号分隔）"
         target = cmd.get('target', {})
         elems = []
         if target:
@@ -923,36 +926,130 @@ class AICommandExecutor:
         if not syncable:
             return False, "选中的元素不是可同步组件，请先勾选 3D实体/关联组件，或使用实体命令绘制"
 
+        # 逐元素前置校验：勾了 3D实体 但高度信息全 0 的几何派生元素同步后不可见，明确报错
+        zero_height = [e for e in syncable if self._is_zero_height_solid(e)]
+        if zero_height:
+            names = '、'.join(self._elem_label(e) for e in zero_height)
+            return False, f"3D实体高度为0，请先在属性面板设置 Z起始/Z终止（或厚度）: {names}"
+
+        # AI 同步坐标只作为放置参数：临时应用到元素上供同步链路读取，同步完成后恢复，
+        # 画板元素保持原地不动
+        pos_snapshots = []
         if position:
             for elem in syncable:
                 try:
+                    pos_snapshots.append((elem, self._snapshot_elem_position(elem, position)))
                     BIMBaseAgent._apply_position_to_element(elem, position)
                     # 用户已明确给出坐标，视为已放置，避免 _sync_element 弹窗
                     if hasattr(elem, 'pdf_recognized'):
                         elem.pdf_recognized = False
                 except Exception as e:
                     bimbase_sync._log(f"[_do_sync] apply position failed for {elem.id[:8]}: {e}")
-            self.board.viewport.update()
 
-        if not bimbase_sync.is_bimbase_available():
-            return False, "未在BIMBase环境中运行，无法同步"
-        # 直接调用同步函数并校验返回值（不走 _sync_to_bimbase 的弹窗链路）；
-        # 坐标已通过 _apply_position_to_element 写入元素锚点，origin 传 None 避免重复偏移
         try:
-            count, errors, replaced, manual, skip_count = bimbase_sync.sync_to_bimbase(
-                self.board, syncable, origin=None)
-        except Exception as e:
-            bimbase_sync._log(f"[_do_sync] sync_to_bimbase exception: {e}")
-            return False, f"同步到 BIMBase 失败: {e}"
+            if not bimbase_sync.is_bimbase_available():
+                return False, "未在BIMBase环境中运行，无法同步"
+            # 直接调用同步函数并校验返回值（不走 _sync_to_bimbase 的弹窗链路）；
+            # 坐标已临时写入元素锚点，origin 传 None 避免重复偏移
+            try:
+                count, errors, replaced, manual, skip_count = bimbase_sync.sync_to_bimbase(
+                    self.board, syncable, origin=None)
+            except Exception as e:
+                bimbase_sync._log(f"[_do_sync] sync_to_bimbase exception: {e}")
+                return False, f"同步到 BIMBase 失败: {e}"
+        finally:
+            # 恢复画板元素位置（含本次新增的 pdf_anchor 锚点），画板上看不出变化
+            for elem, snap in pos_snapshots:
+                self._restore_elem_position(elem, snap)
+            if pos_snapshots:
+                self.board.viewport.update()
         pos_msg = f" 坐标={position}" if position else ""
-        bimbase_sync._log(f"[_do_sync] result: success={count}, manual={len(manual)}, "
+        total = len(syncable)
+        bimbase_sync._log(f"[_do_sync] result: success={count}/{total}, manual={len(manual)}, "
                           f"skipped={skip_count}, errors={errors}{pos_msg}")
         if count > 0:
-            return True, f"已同步 {count} 个元素到 BIMBase{pos_msg}"
+            msg = f"已同步 {count}/{total} 个元素到 BIMBase{pos_msg}"
+            if count < total or skip_count:
+                msg += f"（跳过/失败 {total - count} 个）"
+            return True, msg
         if manual:
             return True, f"已生成 {len(manual)} 个组件，请在 BIMBase 3D 视图中点击放置{pos_msg}"
         detail = f"（{errors[0]}）" if errors else ""
-        return False, f"同步未生效：0 个元素成功{detail}{pos_msg}"
+        return False, f"同步未生效：0/{total} 个元素成功{detail}{pos_msg}"
+
+    # 几何派生 3D 组件类型（高度取自 z_start/z_end/厚度/高度，而非组件参数）
+    _GEOM_DERIVED_3D_TYPES = {'Circle3DComponent', 'SweepBoxComponent', 'Line3DComponent',
+                              'Arc3DComponent', 'Ellipse3DComponent', 'Point3DComponent',
+                              'Polygon3DComponent', 'Polyline3DComponent'}
+
+    @classmethod
+    def _is_zero_height_solid(cls, elem):
+        """勾了 3D实体 但高度信息全 0 的几何派生元素（同步后不可见）。
+        参数化组件（引桥桥墩/圆柱等）高度来自组件参数，不在此检查范围。"""
+        if not getattr(elem, 'is_3d', False):
+            return False
+        ct = getattr(elem, 'component_type', '') or getattr(elem, '_cached_component_type', '')
+        if ct and ct not in cls._GEOM_DERIVED_3D_TYPES:
+            return False  # 参数化组件：高度由 墩高/高度 等参数决定
+        if getattr(elem, 'component_params', None):
+            return False
+        zs = float(getattr(elem, 'z_start', 0) or 0)
+        ze = float(getattr(elem, 'z_end', 0) or 0)
+        th = float(getattr(elem, 'thickness', 0) or 0)
+        h = float(getattr(elem, 'height', 0) or 0)
+        return ze <= zs and th <= 0 and h <= 0
+
+    @staticmethod
+    def _elem_label(elem):
+        """元素的可读名称（用于同步结果逐元素说明）"""
+        ct = getattr(elem, 'component_type', '')
+        if ct:
+            return ct
+        et = getattr(elem, 'element_type', '')
+        return getattr(et, 'value', None) or str(et) or elem.id[:8]
+
+    # 位置快照覆盖的属性（pdf_anchor 是同步时可能新增的锚点，恢复时需删除而非置旧值）
+    _POS_ATTRS = ('pdf_anchor_x', 'pdf_anchor_y', 'pdf_anchor_z',
+                  'z_start', 'z_end', 'x', 'y', 'cx', 'cy')
+
+    @classmethod
+    def _snapshot_elem_position(cls, elem, position):
+        """记录元素当前位置状态，供同步后恢复（AI 同步坐标只作放置参数，不动画板元素）"""
+        px = float(position.get('x', position.get('cx', 0)))
+        py = float(position.get('y', position.get('cy', 0)))
+        old_x = float(getattr(elem, 'pdf_anchor_x',
+                              getattr(elem, 'x', getattr(elem, 'cx',
+                                                         getattr(elem, 'x1', 0.0)))))
+        old_y = float(getattr(elem, 'pdf_anchor_y',
+                              getattr(elem, 'y', getattr(elem, 'cy',
+                                                         getattr(elem, 'y1', 0.0)))))
+        attrs = {}
+        for k in cls._POS_ATTRS:
+            if hasattr(elem, k):
+                attrs[k] = getattr(elem, k)
+        return {'dx': px - old_x, 'dy': py - old_y, 'attrs': attrs}
+
+    @classmethod
+    def _restore_elem_position(cls, elem, snap):
+        """恢复 _snapshot_elem_position 记录的元素位置：
+        几何用 translate 反向平移恢复；标量属性恢复旧值，同步前不存在的锚点属性删除。"""
+        try:
+            dx, dy = snap['dx'], snap['dy']
+            if (dx or dy) and hasattr(elem, 'translate') and callable(elem.translate):
+                try:
+                    elem.translate(-dx, -dy)
+                except Exception:
+                    pass
+            for k in cls._POS_ATTRS:
+                try:
+                    if k in snap['attrs']:
+                        setattr(elem, k, snap['attrs'][k])
+                    elif hasattr(elem, k):
+                        delattr(elem, k)  # 同步过程新增的锚点，恢复时删除
+                except Exception:
+                    pass
+        except Exception as e:
+            bimbase_sync._log(f"[_do_sync] restore position failed for {elem.id[:8]}: {e}")
 
     @staticmethod
     def _is_syncable_element(elem):
