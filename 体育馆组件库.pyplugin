@@ -1,0 +1,95 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<BIMPyPlugin>
+    <BfaLibName/>
+    <PluginVersion>1.0.0</PluginVersion>
+    <LoadStatus>true</LoadStatus>
+    <Category name="体育馆组件库">
+        <Panel name="屋盖与桁架">
+            <Button name="上盖张弦梁">
+                <command>体育馆//成功//01_上盖张弦梁.py</command>
+                <iconPath>上盖张弦梁.ico</iconPath>
+            </Button>
+            <Button name="边屋盖">
+                <command>体育馆//成功//02_边屋盖.py</command>
+                <iconPath>边屋盖.ico</iconPath>
+            </Button>
+            <Button name="中屋盖">
+                <command>体育馆//成功//03_中屋盖.py</command>
+                <iconPath>中屋盖.ico</iconPath>
+            </Button>
+            <Button name="中部桁架">
+                <command>体育馆//成功//04_中部桁架.py</command>
+                <iconPath>中部桁架.ico</iconPath>
+            </Button>
+            <Button name="边部桁架">
+                <command>体育馆//成功//05_边部桁架.py</command>
+                <iconPath>边部桁架.ico</iconPath>
+            </Button>
+            <Button name="行人架">
+                <command>体育馆//成功//06_行人架.py</command>
+                <iconPath>行人架.ico</iconPath>
+            </Button>
+        </Panel>
+        <Panel name="看台与座位">
+            <Button name="直段下看台">
+                <command>体育馆//成功//15_直段下看台.py</command>
+                <iconPath>直段下看台.ico</iconPath>
+            </Button>
+            <Button name="直段上看台">
+                <command>体育馆//成功//16_直段上看台.py</command>
+                <iconPath>直段上看台.ico</iconPath>
+            </Button>
+            <Button name="曲段下看台">
+                <command>体育馆//成功//17_曲段下看台.py</command>
+                <iconPath>曲段下看台.ico</iconPath>
+            </Button>
+            <Button name="曲段上看台">
+                <command>体育馆//成功//18_曲段上看台.py</command>
+                <iconPath>曲段上看台.ico</iconPath>
+            </Button>
+            <Button name="座位">
+                <command>体育馆//成功//座位.py</command>
+                <iconPath>座位.ico</iconPath>
+            </Button>
+        </Panel>
+        <Panel name="外墙">
+            <Button name="体育馆外墙(有门)">
+                <command>体育馆//成功//07_体育馆外墙(有门).py</command>
+                <iconPath>体育馆外墙(有门).ico</iconPath>
+            </Button>
+            <Button name="体育馆外墙(无门)">
+                <command>体育馆//成功//08_体育馆外墙(无门).py</command>
+                <iconPath>体育馆外墙(无门).ico</iconPath>
+            </Button>
+            <Button name="体育馆外墙(斜)">
+                <command>体育馆//成功//14_体育馆外墙(斜).py</command>
+                <iconPath>体育馆外墙(斜).ico</iconPath>
+            </Button>
+        </Panel>
+        <Panel name="场地与附属">
+            <Button name="足球场">
+                <command>体育馆//成功//09_足球场.PY</command>
+                <iconPath>足球场.ico</iconPath>
+            </Button>
+            <Button name="大屏及支架">
+                <command>体育馆//成功//10_大屏及支架.py</command>
+                <iconPath>大屏及支架.ico</iconPath>
+            </Button>
+            <Button name="外楼梯">
+                <command>体育馆//成功//11_外楼梯.py</command>
+                <iconPath>外楼梯.ico</iconPath>
+            </Button>
+            <Button name="外栏杆">
+                <command>体育馆//成功//12_外栏杆.py</command>
+                <iconPath>外栏杆.ico</iconPath>
+            </Button>
+            <Button name="无障碍坡道">
+                <command>体育馆//成功//13_无障碍坡道.py</command>
+                <iconPath>无障碍坡道.ico</iconPath>
+            </Button>
+        </Panel>
+    </Category>
+    <Name>体育馆组件库</Name>
+    <PluginModule>F:\临时\体育馆组件库</PluginModule>
+    <PluginSDKVersion>1.6.2</PluginSDKVersion>
+</BIMPyPlugin>

@@ -23,8 +23,30 @@ def create_fence_icon(path, color):
     img.save(path, sizes=[(16, 16), (32, 32), (64, 64)])
 
 
+def create_grooved_plate_icon(path, color):
+    """被插板:带凹槽的板"""
+    img = Image.new("RGBA", (SIZE, SIZE), (255, 255, 255, 0))
+    draw = ImageDraw.Draw(img)
+    draw.rectangle([6, 18, 58, 46], outline=color, width=4)   # 板
+    for x in (18, 30, 42):                                     # 凹槽
+        draw.line([(x, 22), (x, 42)], fill=color, width=3)
+    img.save(path, sizes=[(16, 16), (32, 32), (64, 64)])
+
+
+def create_toothed_plate_icon(path, color):
+    """凸插板:带凸起的板"""
+    img = Image.new("RGBA", (SIZE, SIZE), (255, 255, 255, 0))
+    draw = ImageDraw.Draw(img)
+    draw.rectangle([6, 12, 58, 28], outline=color, width=4)   # 板
+    for x in (14, 29, 44):                                     # 凸起(齿)
+        draw.rectangle([x, 28, x + 7, 50], outline=color, width=3)
+    img.save(path, sizes=[(16, 16), (32, 32), (64, 64)])
+
+
 if __name__ == "__main__":
     base = os.path.dirname(os.path.abspath(__file__))
     create_fence_icon(os.path.join(base, "铁路封闭网.ico"), (0, 150, 60, 255))
     create_fence_icon(os.path.join(base, "铁路封闭网_原版.ico"), (200, 120, 0, 255))
-    print("图标已生成：铁路封闭网.ico（绿）、铁路封闭网_原版.ico（橙）")
+    create_grooved_plate_icon(os.path.join(base, "被插板.ico"), (60, 110, 180, 255))
+    create_toothed_plate_icon(os.path.join(base, "凸插板.ico"), (170, 90, 50, 255))
+    print("图标已生成：铁路封闭网.ico（绿）、铁路封闭网_原版.ico（橙）、被插板.ico（蓝）、凸插板.ico（棕）")

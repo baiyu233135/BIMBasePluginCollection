@@ -13,6 +13,14 @@
                 <command>铁路封闭网_原版.py</command>
                 <iconPath>铁路封闭网_原版.ico</iconPath>
             </Button>
+            <Button name="被插板">
+                <command>被插板.py</command>
+                <iconPath>被插板.ico</iconPath>
+            </Button>
+            <Button name="凸插板">
+                <command>凸插板.py</command>
+                <iconPath>凸插板.ico</iconPath>
+            </Button>
         </Panel>
     </Category>
     <Name>组件成品</Name>
