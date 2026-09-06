@@ -21,6 +21,10 @@
                 <command>凸插板.py</command>
                 <iconPath>凸插板.ico</iconPath>
             </Button>
+            <Button name="隧道">
+                <command>隧道.py</command>
+                <iconPath>隧道.ico</iconPath>
+            </Button>
         </Panel>
     </Category>
     <Name>组件成品</Name>

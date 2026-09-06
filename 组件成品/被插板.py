@@ -11,6 +11,7 @@ class 被插板(Component):
         self['凹槽深度'] = Attr(500,obvious = True)
         self['凹槽间隔'] = Attr(400,obvious = True)
         self['凹槽排数'] = Attr('1',obvious = True)   # 字符串型,避免面板显示 mm 后缀
+        self['排列间距'] = Attr(0,obvious = True)   # 数字型(带 mm 单位),中心距;0=所有排重叠到板中心
         
         self['被插板'] = Attr(None,show = True)
         self.replace()
@@ -31,12 +32,18 @@ class 被插板(Component):
         except (TypeError, ValueError):
             n = 1
 
+        # 排列间距(中心距):字面含义,0=所有排重叠到板中心;非法输入按 0 处理
+        try:
+            gap = float(str(self['排列间距']).strip())
+        except (TypeError, ValueError):
+            gap = 0
+        pitch = max(gap, 0)
+
         # 超界整体缩放:只缩放凹槽开口(长×宽,保持比例),深度不随排列参数变化,
         # 仅在深度超过板厚时钳到板厚(通槽)
-        # 宽度向:n≥2 时槽宽 ≤ 排距(防并槽);n=1 时槽宽 ≤ 2×排距(仅防超出板边)
+        # 宽度向:n≥2 且排距>0 时槽宽 ≤ 排距(防并槽);单排/重叠排仅防超出板边
         # 长度向:槽长 ≤ 间隔
-        pitch = W / (n + 1)
-        w_max = pitch if n >= 2 else 2 * pitch
+        w_max = pitch if (n >= 2 and pitch > 0) else W
         s = 1.0
         if w > 0:
             s = min(s, 0.9 * w_max / w)
@@ -44,6 +51,13 @@ class 被插板(Component):
             s = min(s, 0.9 * long / l)
         l, w = l * s, w * s
         h = min(h, H)
+        if n >= 2 and pitch > 0:
+            max_span = W - w                          # 最外两排中心距上限(两端留槽宽)
+            if (n - 1) * pitch > max_span:
+                pitch = max(max_span / (n - 1), 1)    # 排距超出板宽时压缩到能放下
+                if w > 0.9 * pitch:                   # 压缩后排距变小,开口再缩一次防并槽
+                    s2 = 0.9 * pitch / w
+                    l, w = l * s2, w * s2
 
         sec_long = Section(Vec2(0,0),Vec2(L,0),Vec2(L,W),Vec2(0,W))
         Long = Sweep(sec_long, Line(Vec3(0,0,0), Vec3(0,0,H)))
@@ -58,8 +72,8 @@ class 被插板(Component):
             offsets = [0] + [long*i for i in range(1, x//2 + 1)]
             offsets += [-o for o in offsets[1:]]
         short = []
-        for j in range(n):               # 排中心均布:W/(n+1) 等分,边距=排距
-            yc = W * (j + 1) / (n + 1)
+        for j in range(n):               # 排组整体居中:排中心 = 板宽中心 + (j-(n-1)/2)×排距
+            yc = W / 2 + (j - (n - 1) / 2.0) * pitch
             row_unit = trans(L/2, yc, 0) * short_base
             for dx in offsets:
                 short.append(trans(dx, 0, 0) * row_unit)

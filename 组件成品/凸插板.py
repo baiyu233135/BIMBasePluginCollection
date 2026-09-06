@@ -10,7 +10,6 @@ class 凸插板(Component):
         self['凸起宽度'] = Attr(600,obvious = True)
         self['凸起高度'] = Attr(500,obvious = True)
         self['凸起间隔'] = Attr(400,obvious = True)
-        self['突起排数'] = Attr('2',obvious = True)   # 字符串型,避免面板显示 mm 后缀
 
         self['凸插板'] = Attr(None,show = True)
         self.replace()
@@ -25,21 +24,12 @@ class 凸插板(Component):
         w = self['凸起宽度']
         h = self['凸起高度']
         long = self['凸起间隔']
-        # 突起排数为字符串型,容错解析为正整数(非法输入回退 1)
-        try:
-            n = max(1, int(float(str(self['突起排数']).strip())))
-        except (TypeError, ValueError):
-            n = 1
 
-        # 超界整体缩放(与被插板同规则):只缩放凸起开口(长×宽,保持比例),
-        # 凸起高度不随排列参数变化
-        # 宽度向:n≥2 时凸起宽 ≤ 排距(防并排);n=1 时 ≤ 2×排距(仅防超出板边)
-        # 长度向:凸起长 ≤ 间隔
-        pitch = W / (n + 1)
-        w_max = pitch if n >= 2 else 2 * pitch
+        # 超界整体缩放:单排居中,凸起开口(长×宽)保持比例;凸起高度不缩放
+        # 宽度向:凸起宽 ≤ 板宽;长度向:凸起长 ≤ 间隔
         s = 1.0
         if w > 0:
-            s = min(s, 0.9 * w_max / w)
+            s = min(s, 0.9 * W / w)
         if l > 0:
             s = min(s, 0.9 * long / l)
         l, w = l * s, w * s
@@ -56,11 +46,11 @@ class 凸插板(Component):
             upper = plate
         Long = Combine(base10, upper)
 
-        # 凸起:向下伸出板底
+        # 凸起:沿板宽中心单排,顶面与板底贴合(z 从 -h 到 0,不再悬空)
         sec_short = Section(Vec2(-l/2,-w/2),Vec2(l/2,-w/2),Vec2(l/2,w/2),Vec2(-l/2,w/2))
         bump_base = Sweep(sec_short, Line(Vec3(0,0,0), Vec3(0,0,h)))
         line = L - 2 * long              # 两端留空后的可用长度
-        x = max(1, int(line // long))    # 每排凸起个数
+        x = max(1, int(line // long))    # 凸起个数
         if x % 2 == 0:                   # 偶数：中心两侧 ±long/2 起排
             offsets = [long/2 + long*i for i in range(x//2)]
             offsets += [-o for o in offsets]
@@ -68,11 +58,9 @@ class 凸插板(Component):
             offsets = [0] + [long*i for i in range(1, x//2 + 1)]
             offsets += [-o for o in offsets[1:]]
         bumps = []
-        for j in range(n):               # 排中心均布:W/(n+1) 等分,边距=排距
-            yc = W * (j + 1) / (n + 1)
-            row_unit = trans(L/2, yc, -H) * bump_base
-            for dx in offsets:
-                bumps.append(trans(dx, 0, 0) * row_unit)
+        row_unit = trans(L/2, W/2, -h) * bump_base
+        for dx in offsets:
+            bumps.append(trans(dx, 0, 0) * row_unit)
         Short = Combine(*bumps)
 
         self['凸插板'] = Combine(Long, Short)
