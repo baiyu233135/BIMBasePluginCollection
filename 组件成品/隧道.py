@@ -57,10 +57,10 @@ class 隧道(Component):
         sec_lu = Section(Vec2(-W/2+x1,40),Vec2(-W/2+x1,-60),Vec2(W/2-x1,-60),Vec2(W/2-x1,40),Vec2(-W/2+x1,40))
         lumian = Loft(sec_lu,trans(0,0,L)*sec_lu)
         lu = lumian-trans(-W/2+x1+100,-10,0)*Z-trans(W/2-x1-100,-10,0)*Z
-        luc = Combine(lu,all_dun,wai).color(0,0,0,1)
+        luc = Combine(lu,all_dun,wai).color(0,1,1,1)
 
         sb = scale(W/10000*200,5,L)*Cube()
-        all_sb = Combine(trans(W/2-x1-300,40,0)*sb,trans(-W/2+x1+150,40,0)*sb,trans(-100,40,0)*sb).color(1,1,1,1)  # 三条设备带:白色
+        all_sb = Combine(trans(W/2-x1-300,40,0)*sb,trans(-W/2+x1+150,40,0)*sb,trans(-100,40,0)*sb)
 
         self['隧道'] = Combine(luc,all_sb)
 
