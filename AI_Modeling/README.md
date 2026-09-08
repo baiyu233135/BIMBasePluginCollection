@@ -4,16 +4,16 @@
 
 > 用一句话说：对它说"在(1000,2000,500)生成一个半径300高800的圆柱"，构件就出现在模型里。
 
-自 CADBoard 1.2.0 起，本模块的能力已**并入 CADBoard 画板右侧 AI 面板**（日常使用走画板），本目录保留独立运行入口与全部引擎代码。
+自 速构智维 1.2.0 起，本模块的能力已**并入 速构智维 画板右侧 AI 面板**（日常使用走画板），本目录保留独立运行入口与全部引擎代码。
 
 ## 两条使用入口
 
-**① CADBoard 集成入口（推荐，日常用法）**
+**① 速构智维 集成入口（推荐，日常用法）**
 
 ```
-CADBoard 画板 → 工具栏「AI助手」→ utils/ai_panel.py
+速构智维 画板 → 工具栏「AI助手」→ utils/ai_panel.py
   → 2D 解析失败 → utils/ai_modeling_bridge.py（动态加载本目录 command_parser.py）
-  → 命中 → CADBoard/ai_modeling_launcher.py::execute_modeling_action()
+  → 命中 → 速构智维/ai_modeling_launcher.py::execute_modeling_action()
   → 在屏幕外隐藏的临时 AIModelingWindow 事件循环中执行 pyp3d 放置
 ```
 
@@ -70,11 +70,11 @@ pyp3d 的实体创建 API 经 NamedPipe 到 BIMBase C++ 端，`BPParametricCompo
 
 ### 3. 同名模块冲突治理
 
-CADBoard 与本模块曾各有 `bimbase_sync.py`，pyp3d 按模块名解析组件类会拿错类导致崩溃。治理：
+速构智维 与本模块曾各有 `bimbase_sync.py`，pyp3d 按模块名解析组件类会拿错类导致崩溃。治理：
 
 - 本模块组件类文件改名 `aim_bimbase_sync.py`；
 - 加载时若 `bimbase_sync` 未被占用则注册别名，兼容旧工程实体反序列化；
-- CADBoard 侧 launcher 执行前快照 `sys.path`/`sys.modules`，finally 恢复。
+- 速构智维 侧 launcher 执行前快照 `sys.path`/`sys.modules`，finally 恢复。
 
 ### 4. 组件注册表（跨会话记忆）
 
@@ -94,7 +94,7 @@ CADBoard 与本模块曾各有 `bimbase_sync.py`，pyp3d 按模块名解析组�
 ## 使用说明
 
 1. **配置**（首次）：编辑 `ai_modeling_config.json` 填 DeepSeek `api_key`（语音另需百度两个 Key），或在面板点 ⚙️ 配置填写。
-2. **打开面板**：CADBoard 画板工具栏「AI助手」（推荐）；或 `python AI_Modeling/main.py` 独立窗口。
+2. **打开面板**：速构智维 画板工具栏「AI助手」（推荐）；或 `python AI_Modeling/main.py` 独立窗口。
 3. **输入指令**：打字 / 🎤 语音 / 复杂指令交给 AI 兜底（可勾"AI优先"）。
 4. **指令示例**：
    - 创建：`放一个半径2高5的圆柱`、`在(1000,2000,500)生成半径300高800的圆柱`
@@ -119,13 +119,15 @@ CADBoard 与本模块曾各有 `bimbase_sync.py`，pyp3d 按模块名解析组�
 
 ## 报错与调试
 
-- **日志**：`ai_modeling_debug.log`（主日志）、`ai_modeling_config_debug.log`（配置）、`ai_modeling.log`（入口生命周期）、`CADBoard/ai_modeling_launcher.log`（launcher 侧）。
+- **日志**：`ai_modeling_debug.log`（主日志）、`ai_modeling_config_debug.log`（配置）、`ai_modeling.log`（入口生命周期）、`速构智维/ai_modeling_launcher.log`（launcher 侧）。
 - **报错记录**：`docs/报错处理记录.md` 5 条：
   1. 放置返回无效实体 → 七级兜底已覆盖；注意模态对话框阻塞问题
   2. DeepSeek 调用失败 → 查 api_key/api_base/model，看日志 HTTP 码
   3. 本地解析失败 → 用标准句式（"创建一个半径5高10的圆柱"），避免方言
   4. 语音识别失败 → 麦克风占用/百度 Key/环境嘈杂（代码对 err_no 6/3300/3301/3302 有针对性提示）
   5. 窗口重复创建 → 已有全局单例缓存机制
+  6. **双重偏移（2026-09 修复）**：`place_component_at` 烘焙坐标进「偏移X/Y/Z」后，`create_geometry` 走恒等变换；但它失败时兜底的 `_PlaceToDirect`/`place_to` 又叠加了一遍 `translate(x,y,z)` → 组件落到 2 倍坐标。修复：烘焙后兜底路径一律用恒等变换（`component_factory.py`）。教训：**"坐标烘焙"与"变换放置"二选一，任何路径都不能两个都用**。
+  7. **P3DInstanceKey 会话污染（2026-09 教训）**：对 `P3DInstanceKey` 做 `str()`/repr 会抛 `_data` 异常并污染整个 SDK 会话（后续所有 `get_noumKV` 全挂，需重启 BIMBase）。诊断/日志代码严禁对 key 做字符串化。
 
 ## 目录结构
 
@@ -158,7 +160,7 @@ AI_Modeling/
 ## 与「AI建模/」的区别
 
 - `AI建模/` 是早期版本（范围外）：打开 ChatGLM 网页，用户手动复制代码再运行；
-- `AI_Modeling/` 是新版引擎：DeepSeek API 直连 + 本地解析，无需手动复制代码，能力已并入 CADBoard 画板 AI 面板。
+- `AI_Modeling/` 是新版引擎：DeepSeek API 直连 + 本地解析，无需手动复制代码，能力已并入 速构智维 画板 AI 面板。
 
 ## 文档
 

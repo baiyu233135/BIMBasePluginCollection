@@ -2,7 +2,7 @@
 """
 测试 place_to 和 replace_noumenon 功能
 在 BIMBase 底部命令行中输入：
-    exec(open(r'C:\ProgramData\PKPM\BIMBase\Plugins\Pro\V1.6\pythonplugin\CADBoard\test_place_to.py').read())
+    exec(open(r'C:\ProgramData\PKPM\BIMBase\Plugins\Pro\V1.6\pythonplugin\AI_Modeling\test_place_to.py').read())
 """
 import sys
 import os
@@ -10,7 +10,7 @@ import math
 import traceback
 
 # 确保当前目录在路径中
-plugin_dir = r'C:\ProgramData\PKPM\BIMBase\Plugins\Pro\V1.6\pythonplugin\CADBoard'
+plugin_dir = r'C:\ProgramData\PKPM\BIMBase\Plugins\Pro\V1.6\pythonplugin\AI_Modeling'
 if plugin_dir not in sys.path:
     sys.path.insert(0, plugin_dir)
 

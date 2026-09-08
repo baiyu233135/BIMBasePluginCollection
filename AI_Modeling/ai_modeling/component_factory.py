@@ -766,6 +766,7 @@ def place_component_at(comp, x, y, z, bake=True):
         return False, "组件为 None"
 
     # 方案0（官方首选）：create_geometry + 平移变换
+    baked = False  # 初始化，防止 _bake_offset_attrs 抛异常时后续兜底引用未定义
     try:
         _log(f"place_component_at: trying create_geometry at ({x},{y},{z})")
         # 先把放置坐标烘焙进组件的 偏移X/Y/Z 参数（属性面板可见），
@@ -802,11 +803,13 @@ def place_component_at(comp, x, y, z, bake=True):
     original_argv = _set_argv_for_place()
     try:
         # 方案1：绕过 interface 覆盖的 _PlaceToDirect，直接设置 transformation 后创建实例
+        # 关键：若方案0已把坐标烘焙进几何（baked=True），此处必须用恒等变换，
+        # 否则烘焙坐标 + 平移变换叠加 = 双重偏移（组件落到 2 倍坐标处）
         if _PlaceToDirect is not None:
             try:
                 _log(f"place_component_at: trying _PlaceToDirect({x},{y},{z})")
                 before = _count_entities()
-                _PlaceToDirect(comp, translate(float(x), float(y), float(z)))
+                _PlaceToDirect(comp, translate(0.0, 0.0, 0.0) if baked else translate(float(x), float(y), float(z)))
                 if _verify_new_entity(before):
                     _log("place_component_at: _PlaceToDirect SUCCESS (verified)")
                     _record_placement(comp, x, y, z)
@@ -815,12 +818,12 @@ def place_component_at(comp, x, y, z, bake=True):
             except Exception as e:
                 _log(f"place_component_at: _PlaceToDirect failed: {e}")
 
-        # 方案1b：原生 place_to 直接放置
+        # 方案1b：原生 place_to 直接放置（同理：baked 时用恒等变换）
         if place_to is not None:
             try:
                 _log(f"place_component_at: trying place_to({x},{y},{z})")
                 before = _count_entities()
-                place_to(comp, translate(float(x), float(y), float(z)))
+                place_to(comp, translate(0.0, 0.0, 0.0) if baked else translate(float(x), float(y), float(z)))
                 if _verify_new_entity(before):
                     _log("place_component_at: place_to SUCCESS (verified)")
                     _record_placement(comp, x, y, z)
