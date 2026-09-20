@@ -1,5 +1,5 @@
 {
-  "dashscope_api_key": "***REMOVED***",
+  "dashscope_api_key": "",
   "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
   "model": "qwen-vl-max",
   "temperature": 0.2,

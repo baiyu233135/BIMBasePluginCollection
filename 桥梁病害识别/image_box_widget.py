@@ -22,6 +22,7 @@ class ImageBoxLabel(QLabel):
     boxDrawn = pyqtSignal(tuple)          # 框选出新区块 (x1,y1,x2,y2) 照片像素坐标
     deleteRequested = pyqtSignal(int)     # 选中框上按了 Delete 键
     selectionCleared = pyqtSignal()       # 取消选中（再点一次选中的框 / 单击空白处）
+    calibrationDrawn = pyqtSignal(tuple)  # 标定模式下拖出参照物框 (x1,y1,x2,y2) 照片像素坐标
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -34,6 +35,27 @@ class ImageBoxLabel(QLabel):
         self._selected = -1
         self._drag_start = None   # 照片像素坐标
         self._drag_cur = None
+        self._calibration_mode = False   # 参照物标定模式：拖拽结果走 calibrationDrawn
+        self._calibration_box = None     # 已标定的参照物框 (x1,y1,x2,y2)，青色绘制
+
+    # ---------- 标定模式 ----------
+
+    def set_calibration_mode(self, enabled: bool):
+        """进入/退出参照物标定模式。标定模式下拖拽不选中框、不产生病害记录。"""
+        self._calibration_mode = bool(enabled)
+        if not self._calibration_mode:
+            self._drag_start = None
+            self._drag_cur = None
+        self.setCursor(Qt.CrossCursor if enabled else Qt.ArrowCursor)
+        self.update()
+
+    def get_calibration_mode(self):
+        return self._calibration_mode
+
+    def set_calibration_box(self, bbox):
+        """设置/清除已标定的参照物框（照片像素坐标，None 清除），青色持久绘制"""
+        self._calibration_box = tuple(bbox) if bbox else None
+        self.update()
 
     # ---------- 数据接口 ----------
 
@@ -45,6 +67,7 @@ class ImageBoxLabel(QLabel):
         self._selected = -1
         self._drag_start = None
         self._drag_cur = None
+        self._calibration_box = None   # 换照片后旧的参照物框不再适用
         if self._pixmap is None:
             self.setText("无法加载照片")
         else:
@@ -136,13 +159,31 @@ class ImageBoxLabel(QLabel):
             p.setPen(QColor(255, 255, 255))
             p.drawText(label_rect, Qt.AlignCenter, label)
 
-        # 正在拖拽的框（青色虚线）
+        # 已标定的参照物框（青色实线 + 标签，区别于病害红框）
+        if self._calibration_box is not None:
+            cx1, cy1, cx2, cy2 = self._calibration_box
+            cal_color = QColor(0, 200, 255)
+            p.setPen(QPen(cal_color, 3))
+            cr = QRect(int(ox + cx1 * scale), int(oy + cy1 * scale),
+                       max(1, int((cx2 - cx1) * scale)), max(1, int((cy2 - cy1) * scale)))
+            p.drawRect(cr)
+            metrics = p.fontMetrics()
+            cal_label = "参照物标定"
+            tw = metrics.width(cal_label) + 8
+            th = metrics.height() + 4
+            label_rect = QRect(cr.left(), cr.bottom() + 2, tw, th)
+            p.fillRect(label_rect, cal_color)
+            p.setPen(QColor(255, 255, 255))
+            p.drawText(label_rect, Qt.AlignCenter, cal_label)
+
+        # 正在拖拽的框（青色虚线；标定模式下为实线）
         if self._drag_start is not None and self._drag_cur is not None:
             x1, y1 = self._drag_start
             x2, y2 = self._drag_cur
             r = QRect(int(ox + min(x1, x2) * scale), int(oy + min(y1, y2) * scale),
                       max(1, int(abs(x2 - x1) * scale)), max(1, int(abs(y2 - y1) * scale)))
-            p.setPen(QPen(QColor(0, 200, 255), 2, Qt.DashLine))
+            pen_style = Qt.SolidLine if self._calibration_mode else Qt.DashLine
+            p.setPen(QPen(QColor(0, 200, 255), 2, pen_style))
             p.drawRect(r)
 
         p.end()
@@ -153,6 +194,13 @@ class ImageBoxLabel(QLabel):
         if event.button() == Qt.LeftButton and self._pixmap is not None:
             pt = self._to_photo(event.pos())
             if pt is not None:
+                if self._calibration_mode:
+                    # 标定模式：始终开始拖拽参照物框，不做框选/点选联动
+                    self._drag_start = pt
+                    self._drag_cur = pt
+                    self.update()
+                    super().mousePressEvent(event)
+                    return
                 hit = self._hit_test(*pt)
                 if hit >= 0:
                     if hit == self._selected:
@@ -193,7 +241,11 @@ class ImageBoxLabel(QLabel):
                     ya = int(max(0, min(y1, y2)))
                     xb = int(min(pw, max(x1, x2)))
                     yb = int(min(ph, max(y1, y2)))
-                    self.boxDrawn.emit((xa, ya, xb, yb))
+                    if self._calibration_mode:
+                        # 标定框只用于换算比例，不算病害记录
+                        self.calibrationDrawn.emit((xa, ya, xb, yb))
+                    else:
+                        self.boxDrawn.emit((xa, ya, xb, yb))
                 elif self._selected >= 0:
                     # 空白处单击（未拖动）→ 取消选中
                     self._selected = -1
@@ -202,6 +254,10 @@ class ImageBoxLabel(QLabel):
         super().mouseReleaseEvent(event)
 
     def keyPressEvent(self, event):
+        if self._calibration_mode:
+            # 标定模式下 Delete 不误删病害记录
+            super().keyPressEvent(event)
+            return
         if event.key() == Qt.Key_Delete and self._selected >= 0:
             self.deleteRequested.emit(self._selected)
             return

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BIMPyPlugin>
+    <BfaLibName/>
+    <PluginVersion>1.0.0</PluginVersion>
+    <LoadStatus>true</LoadStatus>
+    <Category name="隧道病害识别">
+        <Panel name="隧道病害识别">
+            <Button name="自动环境配置">
+                <command>环境配置_launcher.py</command>
+                <iconPath>环境配置.ico</iconPath>
+            </Button>
+            <Button name="隧道病害识别">
+                <command>tunnel_disease_launcher.py</command>
+                <iconPath>隧道病害识别.ico</iconPath>
+            </Button>
+            <Button name="隧道组件">
+                <command>隧道组件_launcher.py</command>
+                <iconPath>隧道组件.ico</iconPath>
+            </Button>
+            <Button name="一键清理">
+                <command>一键清理_launcher.py</command>
+                <iconPath>环境配置.ico</iconPath>
+            </Button>
+        </Panel>
+        <Panel name="3D打印软件">
+            <Button name="导入Stl">
+                <command>Stl插件//导入Stl.py</command>
+                <iconPath>导入.ico</iconPath>
+            </Button>
+            <Button name="导出FBX">
+                <command>Stl插件//仅导出Stl.py</command>
+                <iconPath>导出.ico</iconPath>
+            </Button>
+            <Button name="导出FBX并打开切片">
+                <command>Stl插件//导出Stl.py</command>
+                <iconPath>插件管理.ico</iconPath>
+            </Button>
+            <Button name="FBX转STL工具">
+                <command>Stl插件//test_button.py</command>
+                <iconPath>转STL.ico</iconPath>
+            </Button>
+        </Panel>
+    </Category>
+    <Name>隧道病害识别</Name>
+    <PluginModule>C:\ProgramData\PKPM\BIMBase\Plugins\Pro\V1.6\pythonplugin\隧道病害识别\</PluginModule>
+    <PluginSDKVersion>1.6.2</PluginSDKVersion>
+</BIMPyPlugin>

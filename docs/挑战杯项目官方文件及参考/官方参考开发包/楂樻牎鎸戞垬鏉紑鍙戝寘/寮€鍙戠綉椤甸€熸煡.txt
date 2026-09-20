@@ -1,0 +1,8 @@
+1.快速了解BIMBase界面
+https://zhuanlan.zhihu.com/p/716448617
+2.C++二次开发文档
+https://doc.pkpm.cn/docs/asd/asd-38352688c1bff4
+3.Python二次开发文档
+https://doc.pkpm.cn/docs/bimbasechajian/bimbasechajian-1fg8snu6kt7q1
+4.大模型API申请网站总览
+https://zhuanlan.zhihu.com/p/709505644

@@ -28,6 +28,20 @@ from report_generator import ReportGenerator
 from disease_marker import MarkerRecord, get_marker_manager
 from bimbase_query import get_component_query
 from image_box_widget import ImageBoxLabel
+from dimension_utils import calc_scale, box_dimensions
+
+
+def _log_dim(msg: str):
+    """尺寸标定/计算日志，写入 bridge_disease_debug.log（前缀 [DIM]）"""
+    try:
+        log_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "bridge_disease_debug.log"
+        )
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(f"[{datetime.now().strftime('%H:%M:%S')}] [DIM] {msg}\n")
+    except Exception:
+        pass
 
 # 桥梁构件类型（含基本几何体）
 COMPONENT_CLASSES = [
@@ -61,6 +75,8 @@ class DiseaseDialog(QDialog):
         self._selected_component = None  # 当前选中的BIMBase组件 {key, params, comp_type}
         self._view_record_indices = []   # 图片上第 i 个框 → self.records 的记录下标
         self._marker_manager = get_marker_manager()
+        self._photo_scales = {}          # photo_path → 标定比例 scale（mm/px，参照物框选标定）
+        self._photo_calib_boxes = {}     # photo_path → 参照物框 bbox（重载照片时重绘青色框）
 
         self._init_ui()
         self._update_key_status()
@@ -171,6 +187,32 @@ class DiseaseDialog(QDialog):
         f.addRow(self.lbl_scan_result)
         layout.addWidget(group_comp)
 
+        # === 尺寸标定（参照物框选标定） ===
+        group_calib = QGroupBox("尺寸标定")
+        vc = QVBoxLayout(group_calib)
+        self.btn_calibrate = QPushButton("📐 框选参照物标定")
+        self.btn_calibrate.setMinimumHeight(32)
+        self.btn_calibrate.setStyleSheet(
+            "QPushButton{background:#00838F;color:white;font-weight:bold;}"
+        )
+        self.btn_calibrate.setToolTip(
+            "在当前照片上拖框覆盖一个已知实际长度的参照物（如标尺、裂缝测宽卡），\n"
+            "输入其实际长度后，该照片上所有病害框自动换算实际尺寸。"
+        )
+        self.btn_calibrate.clicked.connect(self._on_calibrate)
+        vc.addWidget(self.btn_calibrate)
+
+        self.btn_clear_calib = QPushButton("清除标定")
+        self.btn_clear_calib.setToolTip("清除当前照片的标定比例，相关记录恢复为未标定状态")
+        self.btn_clear_calib.clicked.connect(self._on_clear_calibration)
+        vc.addWidget(self.btn_clear_calib)
+
+        self.lbl_calib_status = QLabel("当前照片未标定")
+        self.lbl_calib_status.setStyleSheet("color:#666;font-size:11px;")
+        self.lbl_calib_status.setWordWrap(True)
+        vc.addWidget(self.lbl_calib_status)
+        layout.addWidget(group_calib)
+
         # === 添加病害 ===
         group_disease = QGroupBox("3. 添加病害记录")
         f2 = QFormLayout(group_disease)
@@ -236,6 +278,7 @@ class DiseaseDialog(QDialog):
         self.image_view.boxDrawn.connect(self._on_image_box_drawn)
         self.image_view.deleteRequested.connect(self._on_image_box_delete)
         self.image_view.selectionCleared.connect(self._on_image_selection_cleared)
+        self.image_view.calibrationDrawn.connect(self._on_calibration_drawn)
         self.scroll.setWidget(self.image_view)
         layout.addWidget(self.scroll, 1)
 
@@ -243,9 +286,9 @@ class DiseaseDialog(QDialog):
         group = QGroupBox("已录入病害列表")
         v = QVBoxLayout(group)
         self.table = QTableWidget()
-        self.table.setColumnCount(7)
+        self.table.setColumnCount(8)
         self.table.setHorizontalHeaderLabels(
-            ["#", "病害类型", "构件类型", "严重程度", "位置", "尺寸", "备注"]
+            ["#", "病害类型", "构件类型", "严重程度", "位置", "尺寸", "尺寸(mm)", "备注"]
         )
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -305,6 +348,10 @@ class DiseaseDialog(QDialog):
 
         # 显示预览（原图，红框由叠加层绘制）
         self.image_view.set_photo(path)
+        # 该照片若已标定过，重绘青色参照物框
+        if path in self._photo_calib_boxes:
+            self.image_view.set_calibration_box(self._photo_calib_boxes[path])
+        self._refresh_calib_status()
 
     def _update_key_status(self):
         """更新界面上的 API Key 配置状态提示"""
@@ -623,6 +670,7 @@ class DiseaseDialog(QDialog):
         QMessageBox.information(self, "已添加", f"已添加记录：{disease} ({severity})")
 
     def _refresh_table(self):
+        self._update_record_dimensions()
         self.table.setRowCount(len(self.records))
         for i, r in enumerate(self.records):
             self.table.setItem(i, 0, QTableWidgetItem(str(i + 1)))
@@ -631,9 +679,148 @@ class DiseaseDialog(QDialog):
             self.table.setItem(i, 3, QTableWidgetItem(r["severity"]))
             self.table.setItem(i, 4, QTableWidgetItem(r["position"]))
             self.table.setItem(i, 5, QTableWidgetItem(r["size"]))
-            self.table.setItem(i, 6, QTableWidgetItem(r["note"]))
+            length_mm = r.get("length_mm")
+            width_mm = r.get("width_mm")
+            if length_mm is not None and width_mm is not None:
+                dim_text = f"{length_mm:.0f}×{width_mm:.0f}"
+            else:
+                dim_text = "-"
+            self.table.setItem(i, 6, QTableWidgetItem(dim_text))
+            self.table.setItem(i, 7, QTableWidgetItem(r.get("note", "")))
         self.table.resizeColumnsToContents()
         self.lbl_count.setText(f"共 {len(self.records)} 条记录")
+
+    # ============================================================
+    # 尺寸标定（参照物框选标定）与尺寸字段刷新
+    # ============================================================
+
+    def _get_photo_scale(self, photo_path):
+        """取某张照片的标定比例（mm/px），未标定返回 None"""
+        return self._photo_scales.get(photo_path)
+
+    def _update_record_dimensions(self, photo_path=None):
+        """刷新记录的几何尺寸字段 length_mm / width_mm / area_mm2。
+
+        有标定的照片：bbox 像素宽高 × scale 换算（area 为外接矩形面积×scale²，
+        真实病害面积偏小）；无标定或框退化时三个字段置 None。
+        只新增字段，不改任何现有字段语义。
+        """
+        for r in self.records:
+            if photo_path is not None and r.get("photo") != photo_path:
+                continue
+            bbox = r.get("bbox")
+            scale = self._get_photo_scale(r.get("photo", ""))
+            if bbox and len(bbox) == 4 and scale is not None:
+                length_mm, width_mm, area_mm2 = box_dimensions(bbox, scale)
+            else:
+                length_mm, width_mm, area_mm2 = None, None, None
+            r["length_mm"] = length_mm
+            r["width_mm"] = width_mm
+            r["area_mm2"] = area_mm2
+
+    def _refresh_calib_status(self):
+        """按当前照片更新标定状态标签"""
+        if not self.current_image_path:
+            self.lbl_calib_status.setText("尚未导入照片")
+            return
+        scale = self._get_photo_scale(self.current_image_path)
+        if scale is None:
+            self.lbl_calib_status.setText("当前照片未标定")
+        else:
+            self.lbl_calib_status.setText(
+                f"当前照片已标定：{scale:.4f} mm/px"
+                f"（{1.0 / scale:.2f} px/mm）\n对该照片所有病害框生效"
+            )
+
+    def _on_calibrate(self):
+        """进入参照物框选标定模式：下一张拖拽即为标定框（青色，不进 records）"""
+        try:
+            if not self.current_image_path:
+                QMessageBox.warning(self, "提示", "请先导入照片")
+                return
+            self.image_view.set_calibration_mode(True)
+            self.btn_calibrate.setText("拖框覆盖参照物…")
+            self.btn_calibrate.setEnabled(False)
+            _log_dim(f"进入标定模式 photo={self.current_image_path}")
+        except Exception as e:
+            _log_dim(f"进入标定模式失败: {e}")
+            self.image_view.set_calibration_mode(False)
+            self.btn_calibrate.setText("📐 框选参照物标定")
+            self.btn_calibrate.setEnabled(True)
+
+    def _on_calibration_drawn(self, bbox):
+        """标定框拖出后：退出标定模式，询问参照物实际长度并建立比例"""
+        try:
+            self.image_view.set_calibration_mode(False)
+            self.btn_calibrate.setText("📐 框选参照物标定")
+            self.btn_calibrate.setEnabled(True)
+
+            if not self.current_image_path:
+                return
+            x1, y1, x2, y2 = bbox
+            w, h = x2 - x1, y2 - y1
+
+            ref_len, ok = QInputDialog.getDouble(
+                self, "参照物实际长度",
+                f"标定框：宽 {w} px × 高 {h} px（比例按长边 {max(w, h)} px 计算）\n\n"
+                f"请输入该参照物的实际长度（mm）：",
+                100.0, 0.0001, 1000000.0, 3
+            )
+            if not ok:
+                _log_dim(f"标定取消 photo={self.current_image_path} bbox={bbox}")
+                return
+
+            scale = calc_scale(ref_len, bbox)
+            if scale is None:
+                QMessageBox.warning(self, "标定失败", "参照物长度或框选范围非法，请重新标定。")
+                _log_dim(f"标定失败 ref_len={ref_len} bbox={bbox}")
+                return
+
+            self._photo_scales[self.current_image_path] = scale
+            self._photo_calib_boxes[self.current_image_path] = bbox
+            self.image_view.set_calibration_box(bbox)
+            self._refresh_calib_status()
+            self._update_record_dimensions(photo_path=self.current_image_path)
+            self._refresh_table()
+            _log_dim(
+                f"标定成功 photo={self.current_image_path} bbox={bbox} "
+                f"ref_len={ref_len}mm 长边={max(w, h)}px scale={scale:.6f} mm/px "
+                f"({1.0 / scale:.2f} px/mm)"
+            )
+            QMessageBox.information(
+                self, "标定完成",
+                f"标定成功：{scale:.4f} mm/px（{1.0 / scale:.2f} px/mm）\n\n"
+                f"比例按标定框长边 {max(w, h)} px = {ref_len} mm 计算，\n"
+                f"对该照片所有病害框生效。误差来源：照片畸变、"
+                f"参照物与病害不在同一景深。"
+            )
+        except Exception as e:
+            _log_dim(f"标定异常: {e}")
+            try:
+                self.image_view.set_calibration_mode(False)
+                self.btn_calibrate.setText("📐 框选参照物标定")
+                self.btn_calibrate.setEnabled(True)
+            except Exception:
+                pass
+
+    def _on_clear_calibration(self):
+        """清除当前照片的标定比例，该照片全部记录尺寸字段恢复 None"""
+        try:
+            if not self.current_image_path:
+                QMessageBox.warning(self, "提示", "请先导入照片")
+                return
+            if self.current_image_path not in self._photo_scales:
+                QMessageBox.information(self, "提示", "当前照片未标定")
+                return
+            del self._photo_scales[self.current_image_path]
+            self._photo_calib_boxes.pop(self.current_image_path, None)
+            self.image_view.set_calibration_box(None)
+            self._refresh_calib_status()
+            self._update_record_dimensions(photo_path=self.current_image_path)
+            self._refresh_table()
+            _log_dim(f"清除标定 photo={self.current_image_path}")
+        except Exception as e:
+            _log_dim(f"清除标定失败: {e}")
 
     # ============================================================
     # 标注图红框同步
@@ -970,6 +1157,14 @@ class DiseaseDialog(QDialog):
                 ai_diagnosed=r.get("ai_diagnosed", False),
                 severity=severity,
             ))
+            # 几何尺寸字段（参照物标定换算；MarkerRecord 数据类未声明，
+            # 以动态属性附加，报告端 getattr 读取，不影响 to_dict 持久化结构）
+            try:
+                mr_list[-1].length_mm = r.get("length_mm")
+                mr_list[-1].width_mm = r.get("width_mm")
+                mr_list[-1].area_mm2 = r.get("area_mm2")
+            except Exception:
+                pass
 
         default_name = f"桥梁病害诊断报告_{datetime.now().strftime('%Y%m%d')}.docx"
         path, _ = QFileDialog.getSaveFileName(

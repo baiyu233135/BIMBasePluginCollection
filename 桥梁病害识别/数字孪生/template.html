@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>常泰长江大桥数字孪生 — 主跨 1176m 双塔斜拉桥</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:"Microsoft YaHei",sans-serif; background:#0d1520; color:#dfe6ee; overflow:hidden; }
+  #app { display:flex; height:100vh; }
+  #panel { width:310px; min-width:310px; background:#171e28; border-right:1px solid #2a3546;
+           padding:14px; overflow-y:auto; }
+  #panel h1 { font-size:17px; color:#7ec8ff; margin-bottom:2px; }
+  #panel .sub { font-size:11px; color:#8a97a8; margin-bottom:12px; line-height:1.6; }
+  .sec { background:#1d2634; border:1px solid #2a3546; border-radius:8px; padding:10px; margin-bottom:10px; }
+  .sec h2 { font-size:13px; color:#a8c6e8; margin-bottom:8px; }
+  .kv { font-size:12px; line-height:1.9; color:#b7c6d8; }
+  .kv b { color:#7ec8ff; display:inline-block; width:64px; }
+  .grp { font-size:12px; color:#ffd54f; margin:6px 0 2px; }
+  .ck { display:inline-flex; align-items:center; width:48%; font-size:12px; color:#c6d3e2;
+        margin:2px 0; cursor:pointer; user-select:none; }
+  .ck input { accent-color:#3d9bff; margin-right:5px; }
+  .row { display:flex; align-items:center; margin-bottom:6px; font-size:12px; }
+  .row label { width:78px; color:#9fb0c4; }
+  .row input[type=range] { flex:1; accent-color:#3d9bff; }
+  .row .val { width:52px; text-align:right; color:#7ec8ff; font-family:Consolas,monospace; }
+  button { width:100%; padding:8px 0; margin-top:6px; border:none; border-radius:6px;
+           font-size:13px; font-weight:bold; cursor:pointer; color:#fff; }
+  button.b1 { background:#1565C0; } button.b2 { background:#2E7D32; }
+  button.b3 { background:#6A4CA0; } button.b4 { background:#455A64; }
+  button:hover { filter:brightness(1.15); }
+  #stats { font-size:12px; color:#b7c6d8; line-height:1.8; }
+  #stats b { color:#ffd54f; }
+  .chip { display:inline-block; padding:1px 8px; border-radius:10px; margin:2px 3px 0 0;
+          font-size:11px; color:#fff; }
+  #hint { font-size:11px; color:#6d7c8f; line-height:1.7; }
+  #view { flex:1; position:relative; }
+  canvas { display:block; }
+  #detail { position:absolute; top:14px; right:14px; width:330px; background:rgba(20,28,40,.95);
+            border:1px solid #3d9bff; border-radius:10px; padding:12px; display:none;
+            box-shadow:0 4px 20px rgba(0,0,0,.6); }
+  #detail h3 { font-size:15px; margin-bottom:8px; }
+  #detail img { width:100%; border-radius:6px; margin-bottom:8px; }
+  #detail .kv b { color:#7ec8ff; }
+  #dclose { position:absolute; top:6px; right:10px; cursor:pointer; color:#8a97a8; font-size:16px; }
+  #scalebar { position:absolute; left:16px; bottom:16px; font-size:11px; color:#c6d3e2;
+              background:rgba(20,28,40,.75); padding:6px 10px; border-radius:6px;
+              border:1px solid #2a3546; pointer-events:none; }
+  #scalebar .bar { height:5px; background:#7ec8ff; margin-bottom:3px; border-radius:2px; }
+  #msg { position:absolute; bottom:14px; left:50%; transform:translateX(-50%);
+         background:rgba(30,40,55,.92); padding:8px 18px; border-radius:20px; font-size:12px;
+         display:none; border:1px solid #2a3546; }
+  #file { display:none; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="panel">
+    <h1>常泰长江大桥数字孪生</h1>
+    <div class="sub">主跨 1176m 双塔斜拉桥 · 塔高 352m · 公铁双层<br>与「桥梁病害识别」插件投影同源</div>
+
+    <div class="sec">
+      <h2>工程概况</h2>
+      <div class="kv">
+        <b>桥梁全长</b>2440 m（主航道桥）<br>
+        <b>跨径布置</b>(142+490+1176+490+142) m<br>
+        <b>桥型</b>双塔双索面钢桁梁斜拉桥<br>
+        <b>主塔</b>空间钻石型，总高 352 m<br>
+        <b>主梁</b>双层钢桁梁，宽 39 m / 高 16 m<br>
+        <b>上层</b>双向 6 车道高速公路（Z≈+70 m）<br>
+        <b>下层</b>双线城际铁路 + 4 车道公路<br>
+        <b>墩位里程</b>-1220 / -1078 / -588 / +588 / +1078 / +1220
+      </div>
+    </div>
+
+    <div class="sec">
+      <h2>构件显隐</h2>
+      <div id="layers"></div>
+    </div>
+
+    <div class="sec">
+      <h2>病害数据</h2>
+      <button class="b2" onclick="document.getElementById('file').click()">📂 导入 JSON</button>
+      <button class="b3" onclick="loadDemo()">✨ 载入示例数据</button>
+      <button class="b4" onclick="togglePatches()" id="btnToggle">👁 隐藏病害</button>
+      <button class="b4" onclick="viewHome()">⌂ 复位视角</button>
+      <input type="file" id="file" accept=".json" onchange="onFile(event)">
+      <div id="stats" style="margin-top:8px">尚未导入数据</div>
+    </div>
+
+    <div class="sec">
+      <h2>投影参数</h2>
+      <div class="row"><label>照片覆盖</label><input type="range" id="pCov" min="1" max="30" step="0.5" value="5"><span class="val" id="vCov"></span></div>
+    </div>
+
+    <div class="sec" id="hint">
+      <h2>操作说明</h2>
+      左键拖动旋转 · 滚轮缩放 · 右键平移<br>
+      点击彩色贴片 → 查看病害详情，视角围绕该病害旋转<br>
+      双击桥梁任意构件 → 旋转中心移到该点<br>
+      ⌂ 复位视角 回到全桥总览<br>
+      「照片覆盖」= 一张照片实际拍到的构件面尺寸（米），<br>
+      按 bbox 像素比例换算病害贴片大小<br>
+      病害定位：按 stake_m（或照片名 K12+345 桩号）<br>
+      确定沿桥里程，按 component 关键词路由到<br>
+      塔 / 墩 / 承台 / 索 / 下层桥面 / 上层桥面<br>
+      数据来自插件「导出网页数据」按钮
+    </div>
+  </div>
+  <div id="view">
+    <div id="detail"><span id="dclose" onclick="hideDetail()">✕</span>
+      <h3 id="dtitle"></h3><img id="dimg" alt="">
+      <div class="kv" id="dbody"></div>
+    </div>
+    <div id="scalebar"><div class="bar" id="sbar"></div><span id="stext">200 m</span></div>
+    <div id="msg"></div>
+  </div>
+</div>
+
+<script>
+/*__THREE_JS__*/
+</script>
+<script>
+/*__ORBIT_JS__*/
+</script>
+<script>
+/* ================= 常泰长江大桥 · 真实尺度参数（米制） ================= */
+// 孔跨布置 (142+490+1176+490+142)=2440m，里程 X：负值一侧到正值一侧
+const SPAN = {
+  X_END:1220,             // 半桥长（边墩里程 ±1220）
+  X_AUX:1078,             // 辅助墩距中
+  X_TOWER:588,            // 主塔距中
+  LEN:2440,
+  TOWER_H:361.6,          // 主塔总高（自承台顶，组件库放样值；设计铭牌 352m）
+  CAIS_TOP:4,             // 承台顶高程
+  TRUSS_W:39, TRUSS_H:16, // 桁宽 / 桁高
+  CABLE_PAIRS:20          // 每塔每侧拉索对数
+};
+// 桥面高程：跨中 +69，主塔处 +64（轻微竖曲线），边跨线性降到 +55
+function deckZ(x) {
+  const ax = Math.abs(x);
+  if (ax <= SPAN.X_TOWER) return 64 + 5*(1 - (ax/SPAN.X_TOWER)*(ax/SPAN.X_TOWER));
+  return 64 - 9*(ax - SPAN.X_TOWER)/(SPAN.X_END - SPAN.X_TOWER);
+}
+const TOWER_XS = [-SPAN.X_TOWER, SPAN.X_TOWER];
+const PIER_XS  = [-SPAN.X_AUX, SPAN.X_AUX, -SPAN.X_END, SPAN.X_END];   // 辅助墩 + 边墩
+/* ---- 主塔放样参数（源自组件库 主塔.py，单位 m；TZ 为绝对高程，塔底坐于承台顶 +4m） ---- */
+const TZ = { PAD_TOP: 7, BELLY: 55.5, COL_BOT: 244.7, COL_TOP: 350.6, TIP: 365.6 };
+// 塔面沿世界 Y(横桥向) 的半宽：垫座 10 → 下段 23→32.5 → 钻石段角柱外缘 32.5→6.5 → 上段柱 6.5
+function towerSurfY(z) {
+  if (z <= TZ.PAD_TOP) return 10;
+  if (z <= TZ.BELLY) return 23 + 9.5*(z - TZ.PAD_TOP)/(TZ.BELLY - TZ.PAD_TOP);
+  if (z <= TZ.COL_BOT) return 32.5 - 26*(z - TZ.BELLY)/(TZ.COL_BOT - TZ.BELLY);
+  return 6.5;
+}
+
+const DISEASE_COLORS = {"裂缝":0xff2222, "渗水":0x2266ff, "剥落":0xffa500,
+                        "露筋":0xcc44ff, "蜂窝麻面":0x8d6e63, "锈蚀":0x795548,
+                        "已修复":0x66bb6a, "其他":0x9e9e9e};
+const DISEASE_CSS = {"裂缝":"#ff2222","渗水":"#2266ff","剥落":"#ffa500","露筋":"#cc44ff",
+                     "蜂窝麻面":"#8d6e63","锈蚀":"#795548","已修复":"#66bb6a","其他":"#9e9e9e"};
+function diseaseColor(d) { return DISEASE_COLORS[d] !== undefined ? DISEASE_COLORS[d] : 0x00e676; }
+
+/* ================= 三维场景 ================= */
+const view = document.getElementById('view');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0d1520);
+scene.fog = new THREE.Fog(0x0d1520, 3500, 12000);
+const camera = new THREE.PerspectiveCamera(55, 2, 0.5, 30000);
+camera.up.set(0, 0, 1);      // Z 轴为竖直方向（与桩号/高程习惯一致）
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(window.devicePixelRatio);
+view.appendChild(renderer.domElement);
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+
+scene.add(new THREE.AmbientLight(0xffffff, .7));
+const dl = new THREE.DirectionalLight(0xffffff, .85);
+dl.position.set(600, -800, 1200);
+scene.add(dl);
+const dl2 = new THREE.DirectionalLight(0x8899bb, .4);
+dl2.position.set(-500, 900, 600);
+scene.add(dl2);
+const axes = new THREE.AxesHelper(120);
+scene.add(axes);   // X 红=里程方向 · Y 绿=横桥向 · Z 蓝=高程
+
+let bridgeGroup = null, patchGroup = null, patchesVisible = true;
+let currentData = null;
+const LAYER = {};   // 中文名 → THREE.Group
+
+const MAT = {
+  steel:   new THREE.MeshLambertMaterial({color:0x7f8c99}),   // 钢桁梁/钢塔
+  truss:   new THREE.MeshLambertMaterial({color:0x8899aa}),
+  cable:   new THREE.MeshLambertMaterial({color:0xffd54f}),
+  conc:    new THREE.MeshLambertMaterial({color:0x9aa4ad}),   // 混凝土
+  pier:    new THREE.MeshLambertMaterial({color:0xaab4bd}),
+  road:    new THREE.MeshLambertMaterial({color:0x2b2f33}),
+  line:    new THREE.MeshBasicMaterial({color:0xffffff}),
+  rail:    new THREE.MeshLambertMaterial({color:0x555b60}),
+  bed:     new THREE.MeshLambertMaterial({color:0x6e777f}),
+  barrier: new THREE.MeshLambertMaterial({color:0xc7ccd1}),
+  net:     new THREE.MeshBasicMaterial({color:0x66ccff, wireframe:true, transparent:true, opacity:.4}),
+  water:   new THREE.MeshLambertMaterial({color:0x1a4a6e, transparent:true, opacity:.55}),
+  bearing: new THREE.MeshLambertMaterial({color:0x444a50})
+};
+function B(w,h,d,mat,x,y,z){ const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);
+  m.position.set(x,y,z); return m; }
+
+/* 两矩形截面（w 沿 X 纵桥向，d 沿 Y 横桥向，中心可平移）之间的放样体，非索引几何保证平面法线 */
+function rectLoft(x1,y1,z1, w1,d1, x2,y2,z2, w2,d2, mat) {
+  const s = [[-1,-1],[1,-1],[1,1],[-1,1]];
+  const P = [];
+  s.forEach(q => P.push(x1+q[0]*w1/2, y1+q[1]*d1/2, z1));
+  s.forEach(q => P.push(x2+q[0]*w2/2, y2+q[1]*d2/2, z2));
+  const F = [0,2,1, 0,3,2,  4,5,6, 4,6,7,                 // 底、顶
+             0,1,5, 0,5,4,  1,2,6, 1,6,5,                 // -Y、+X 侧面
+             2,3,7, 2,7,6,  3,0,4, 3,4,7];                // +Y、-X 侧面
+  const pos = [];
+  for (let i = 0; i < F.length; i++) pos.push(P[F[i]*3], P[F[i]*3+1], P[F[i]*3+2]);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.computeVertexNormals();
+  return new THREE.Mesh(geo, mat);
+}
+
+function disposeGroup(g) {
+  if (!g) return;
+  g.traverse(o => {
+    if (o.geometry) o.geometry.dispose();
+    if (o.material && Object.values(MAT).indexOf(o.material) < 0)
+      (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>m.dispose());
+  });
+  scene.remove(g);
+}
+
+/* ---------------- 构件：主塔（空间钻石型，按组件库 主塔.py 放样参数重建） ----------------
+   两块八边形垫座 → 下段 46×29.5→65×42.4（钻石肚，z 7→55.5）→ 四根角斜柱收腰形成
+   菱形镂空（z 55.5→244.7）→ 13×13 上段单柱（→350.6）→ 0.5×0.5 收尖锥顶（→365.6） */
+function buildTower(x0) {
+  const g = new THREE.Group();
+  // ① 底座：两块 40(X)×20(Y)×3m 切角八边形垫座，横桥向 ±16.5m（按源文件 ZD1/ZD2 推算）
+  const oct = new THREE.Shape();
+  [[-15,-10],[15,-10],[20,-5],[20,5],[15,10],[-15,10],[-20,5],[-20,-5]]
+    .forEach((p, i) => { if (i === 0) oct.moveTo(p[0], p[1]); else oct.lineTo(p[0], p[1]); });
+  oct.closePath();
+  for (const s of [-1, 1]) {
+    const pad = new THREE.Mesh(new THREE.ExtrudeGeometry(oct, {depth:3, bevelEnabled:false}), MAT.conc);
+    pad.position.set(x0, s*16.5, SPAN.CAIS_TOP);
+    g.add(pad);
+  }
+  // ② 下段钻石肚：29.5(X)×46(Y) → 42.4(X)×65(Y)，向外扩
+  g.add(rectLoft(x0,0,TZ.PAD_TOP, 29.5,46, x0,0,TZ.BELLY, 42.4,65, MAT.conc));
+  // ③ 钻石段：四根角斜柱自肚顶四角（半宽 21.2/32.5 内收 5m）收腰至上段柱底四角，
+  //    柱间四面均留出菱形镂空开口
+  for (const sx of [-1,1]) for (const sy of [-1,1])
+    g.add(rectLoft(x0+sx*16.2, sy*27.5, TZ.BELLY,   10,10,
+                   x0+sx*3,    sy*3,    TZ.COL_BOT, 7,7, MAT.steel));
+  // ④ 上段单柱 13×13
+  g.add(rectLoft(x0,0,TZ.COL_BOT, 13,13, x0,0,TZ.COL_TOP, 13,13, MAT.steel));
+  // ⑤ 收尖锥顶 13×13 → 0.5×0.5
+  g.add(rectLoft(x0,0,TZ.COL_TOP, 13,13, x0,0,TZ.TIP, 0.5,0.5, MAT.steel));
+  return g;
+}
+
+/* ---------------- 构件：双层钢桁梁（N 型桁架，沿 2440m 连续） ---------------- */
+function buildTruss() {
+  const g = new THREE.Group();
+  const HY = SPAN.TRUSS_W/2;                    // 半宽 19.5
+  const PANEL = 14.5;                           // 节间长
+  // 上下弦杆（分段箱梁，跟随桥面高程）
+  const step = 20;
+  for (let x = -SPAN.X_END; x < SPAN.X_END; x += step) {
+    const z1 = deckZ(x), z2 = deckZ(x+step), zm = (z1+z2)/2;
+    const len = Math.hypot(step, z2-z1);
+    const ang = Math.atan2(z2-z1, step);
+    for (const s of [-1, 1]) {
+      const top = new THREE.Mesh(new THREE.BoxGeometry(len, 1.6, 1.8), MAT.truss);
+      top.position.set(x+step/2, s*HY, zm-0.9); top.rotation.y = -ang; g.add(top);
+      const bot = new THREE.Mesh(new THREE.BoxGeometry(len, 1.6, 1.8), MAT.truss);
+      bot.position.set(x+step/2, s*HY, zm-SPAN.TRUSS_H+0.9); bot.rotation.y = -ang; g.add(bot);
+    }
+  }
+  // N 型腹杆（斜撑 + 竖杆），两侧桁架片
+  const diagGeo = new THREE.BoxGeometry(1, 1, 1);
+  for (let x = -SPAN.X_END; x < SPAN.X_END; x += PANEL) {
+    const z1 = deckZ(x), z2 = deckZ(x+PANEL);
+    for (const s of [-1, 1]) {
+      // 斜杆：(x, z1底) → (x+PANEL, z2顶)
+      const p1 = new THREE.Vector3(x, s*HY, z1-SPAN.TRUSS_H+1.5);
+      const p2 = new THREE.Vector3(x+PANEL, s*HY, z2-1.5);
+      const len = p1.distanceTo(p2);
+      const d = new THREE.Mesh(diagGeo, MAT.truss);
+      d.scale.set(1.1, 0.9, len);
+      d.position.copy(p1).lerp(p2, .5);
+      d.lookAt(p2);   // +Z 轴指向 p2，盒体长轴即斜杆方向
+      g.add(d);
+      // 竖杆
+      const v = new THREE.Mesh(diagGeo, MAT.truss);
+      v.scale.set(1.1, 0.9, SPAN.TRUSS_H-3);
+      v.position.set(x, s*HY, z1-SPAN.TRUSS_H/2);
+      g.add(v);
+    }
+  }
+  // 横梁（上下层桥面横撑，间距 PANEL）
+  for (let x = -SPAN.X_END; x <= SPAN.X_END; x += PANEL*2) {
+    const z = deckZ(x);
+    g.add(B(1.2, SPAN.TRUSS_W, 1.4, MAT.truss, x, 0, z-1.4));
+    g.add(B(1.2, SPAN.TRUSS_W, 1.4, MAT.truss, x, 0, z-SPAN.TRUSS_H+1.6));
+  }
+  return g;
+}
+
+/* ---------------- 构件：斜拉索（竖琴/扇形简化，每塔两侧各 CABLE_PAIRS 对） ---------------- */
+function buildCables() {
+  const g = new THREE.Group();
+  const geo = new THREE.CylinderGeometry(0.45, 0.45, 1, 6, 1, true);
+  geo.translate(0, 0.5, 0);   // 原点在索底端，+Y 拉伸
+  TOWER_XS.forEach(tx => {
+    for (const dir of [-1, 1]) {          // 塔两侧锚区
+      for (const face of [-1, 1]) {       // 双索面（横桥向两侧）
+        for (let i = 0; i < SPAN.CABLE_PAIRS; i++) {
+          const ax = tx + dir * (30 + i * 21);          // 桥面锚点里程
+          if (Math.abs(ax) > SPAN.X_END - 10) continue;
+          const az = deckZ(ax) + 0.6;
+          const tz = 250 + i * 5;                         // 塔端锚于上段单柱 250→345m 均布
+          const top = new THREE.Vector3(tx, face*6.5, tz); // 柱面（13×13，半宽 6.5）
+          const bot = new THREE.Vector3(ax, face*(SPAN.TRUSS_W/2 - 0.8), az);
+          const len = top.distanceTo(bot);
+          const cable = new THREE.Mesh(geo, MAT.cable);
+          cable.scale.set(1, len, 1);
+          cable.position.copy(bot);
+          cable.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),
+            top.clone().sub(bot).normalize());
+          g.add(cable);
+        }
+      }
+    }
+  });
+  return g;
+}
+
+/* ---------------- 构件：支座（塔、墩处小块体） ---------------- */
+function buildBearings() {
+  const g = new THREE.Group();
+  const xs = TOWER_XS.concat(PIER_XS);
+  xs.forEach(x => {
+    const z = deckZ(x);
+    for (const s of [-1, 1]) {
+      g.add(B(4, 3, 2.4, MAT.bearing, x, s*(SPAN.TRUSS_W/2 - 2), z - SPAN.TRUSS_H - 1.2));
+    }
+  });
+  return g;
+}
+
+/* ---------------- 构件：上层路面及交通标线 ---------------- */
+function buildRoadway() {
+  const g = new THREE.Group();
+  const step = 20;
+  for (let x = -SPAN.X_END; x < SPAN.X_END; x += step) {
+    const z1 = deckZ(x), z2 = deckZ(x+step), zm = (z1+z2)/2;
+    const len = Math.hypot(step, z2-z1);
+    const deck = new THREE.Mesh(new THREE.BoxGeometry(len, SPAN.TRUSS_W-2, 0.5), MAT.road);
+    deck.position.set(x+step/2, 0, zm-0.25);
+    deck.rotation.y = -Math.atan2(z2-z1, step);
+    g.add(deck);
+    // 车道虚线（上层双向 6 车道：中央分隔 + 两侧各 3 车道）
+    if ((x/step) % 2 === 0) {
+      [-9.75, -3.25, 3.25, 9.75].forEach(y => {
+        const dash = new THREE.Mesh(new THREE.BoxGeometry(6, 0.3, 0.06), MAT.line);
+        dash.position.set(x+step/2, y, zm+0.04);
+        g.add(dash);
+      });
+      // 中央分隔带
+      const med = new THREE.Mesh(new THREE.BoxGeometry(len, 1.2, 0.9), MAT.bed);
+      med.position.set(x+step/2, 0, zm+0.45);
+      g.add(med);
+    }
+  }
+  return g;
+}
+
+/* ---------------- 构件：下层轨道底座 ---------------- */
+function buildTrackBed() {
+  const g = new THREE.Group();
+  const step = 20;
+  for (let x = -SPAN.X_END; x < SPAN.X_END; x += step) {
+    const z1 = deckZ(x)-SPAN.TRUSS_H, z2 = deckZ(x+step)-SPAN.TRUSS_H;
+    const len = Math.hypot(step, z2-z1);
+    // 铁路底座（双线，中置）+ 下层公路面板（两侧各 2 车道）
+    const bed = new THREE.Mesh(new THREE.BoxGeometry(len, 13, 1.2), MAT.bed);
+    bed.position.set(x+step/2, 0, (z1+z2)/2+0.6);
+    bed.rotation.y = -Math.atan2(z2-z1, step);
+    g.add(bed);
+    for (const s of [-1, 1]) {
+      const rd = new THREE.Mesh(new THREE.BoxGeometry(len, 11.5, 0.5), MAT.road);
+      rd.position.set(x+step/2, s*12.75, (z1+z2)/2+0.25);
+      rd.rotation.y = -Math.atan2(z2-z1, step);
+      g.add(rd);
+    }
+  }
+  return g;
+}
+
+/* ---------------- 构件：轨道（下层双线条钢轨） ---------------- */
+function buildRails() {
+  const g = new THREE.Group();
+  const step = 20;
+  const geo = new THREE.BoxGeometry(1, 0.18, 0.22);
+  for (let x = -SPAN.X_END; x < SPAN.X_END; x += step) {
+    const z1 = deckZ(x)-SPAN.TRUSS_H+1.2, z2 = deckZ(x+step)-SPAN.TRUSS_H+1.2;
+    const len = Math.hypot(step, z2-z1);
+    [-3.1, -1.7, 1.7, 3.1].forEach(y => {   // 双线的四条钢轨
+      const r = new THREE.Mesh(geo, MAT.rail);
+      r.scale.x = len;
+      r.position.set(x+step/2, y, (z1+z2)/2);
+      r.rotation.y = -Math.atan2(z2-z1, step);
+      g.add(r);
+    });
+  }
+  return g;
+}
+
+/* ---------------- 下部结构：门式桥墩（辅助墩位，双柱+盖梁）、边墩 ---------------- */
+function buildPiers() {
+  const g = new THREE.Group();
+  [-SPAN.X_AUX, SPAN.X_AUX].forEach(x => {       // 门式桥墩 ×2
+    const top = deckZ(x) - SPAN.TRUSS_H;
+    g.add(B(6, SPAN.TRUSS_W-6, 7, MAT.pier, x, 0, top-3.5));       // 盖梁
+    for (const s of [-1, 1]) {
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(3.2, 3.8, top-7-2, 12), MAT.pier);
+      col.rotation.x = Math.PI/2;   // 圆柱轴向 → 竖直 Z
+      col.position.set(x, s*12, (top-7+2)/2);
+      g.add(col);
+    }
+    g.add(B(10, SPAN.TRUSS_W-4, 2, MAT.conc, x, 0, 1));            // 底系梁/基础
+  });
+  [-SPAN.X_END, SPAN.X_END].forEach(x => {       // 边墩 ×2
+    const top = deckZ(x) - SPAN.TRUSS_H;
+    g.add(B(8, SPAN.TRUSS_W-4, top-2, MAT.pier, x, 0, (top-2)/2+2));
+    g.add(B(12, SPAN.TRUSS_W, 2, MAT.conc, x, 0, 1));
+  });
+  return g;
+}
+
+/* ---------------- 下部结构：承台及桩基（主塔大型承台，部分水下） ---------------- */
+function buildFoundations() {
+  const g = new THREE.Group();
+  TOWER_XS.forEach(tx => {
+    // 大型沉井承台（圆柱形，顶面 +4m，部分在水面下）
+    const cais = new THREE.Mesh(new THREE.CylinderGeometry(34, 36, 10, 24), MAT.conc);
+    cais.rotation.x = Math.PI/2;
+    cais.position.set(tx, 0, SPAN.CAIS_TOP - 5);
+    g.add(cais);
+    // 塔座（承台到塔柱的过渡）
+    g.add(B(30, 46, 3, MAT.conc, tx, 0, SPAN.CAIS_TOP + 1.5));
+    // 桩基阵列（承台下方圆柱阵列，简化 6×4）
+    for (let i = 0; i < 6; i++) for (let j = 0; j < 4; j++) {
+      const pile = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 40, 8), MAT.conc);
+      pile.rotation.x = Math.PI/2;
+      pile.position.set(tx - 25 + i*10, -16.5 + j*11, SPAN.CAIS_TOP - 10 - 20);
+      g.add(pile);
+    }
+  });
+  return g;
+}
+
+/* ---------------- 附属设施：新泽西护栏（桥面两侧连续矮墙） ---------------- */
+function buildBarriers() {
+  const g = new THREE.Group();
+  const step = 20;
+  const geo = new THREE.BoxGeometry(1, 0.6, 1.1);
+  for (let x = -SPAN.X_END; x < SPAN.X_END; x += step) {
+    const z1 = deckZ(x), z2 = deckZ(x+step);
+    const len = Math.hypot(step, z2-z1);
+    for (const s of [-1, 1]) {
+      const b = new THREE.Mesh(geo, MAT.barrier);
+      b.scale.x = len;
+      b.position.set(x+step/2, s*(SPAN.TRUSS_W/2 - 0.6), (z1+z2)/2 + 0.55);
+      b.rotation.y = -Math.atan2(z2-z1, step);
+      g.add(b);
+    }
+  }
+  return g;
+}
+
+/* ---------------- 附属设施：铁路封闭网（下层铁路两侧网格） ---------------- */
+function buildFenceNet() {
+  const g = new THREE.Group();
+  const step = 29;
+  const geo = new THREE.PlaneGeometry(1, 2.6);
+  for (let x = -SPAN.X_END; x < SPAN.X_END; x += step) {
+    const z = (deckZ(x)+deckZ(x+step))/2 - SPAN.TRUSS_H + 2.5;
+    for (const s of [-1, 1]) {
+      const p = new THREE.Mesh(geo, MAT.net);
+      p.scale.x = step;
+      p.position.set(x+step/2, s*7.2, z);
+      p.rotation.x = s > 0 ? -Math.PI/2 : Math.PI/2;   // 法线朝横桥向外侧
+      g.add(p);
+    }
+  }
+  return g;
+}
+
+/* ---------------- 附属设施：接触网（沿铁路立柱+横臂，间距约 50m） ---------------- */
+function buildCatenary() {
+  const g = new THREE.Group();
+  const poleGeo = new THREE.CylinderGeometry(0.25, 0.3, 7, 6);
+  const wireGeo = new THREE.CylinderGeometry(0.06, 0.06, 100, 4);
+  for (let x = -SPAN.X_END; x < SPAN.X_END; x += 50) {
+    const z = deckZ(x) - SPAN.TRUSS_H + 1.2;
+    for (const s of [-1, 1]) {
+      const pole = new THREE.Mesh(poleGeo, MAT.rail);
+      pole.rotation.x = Math.PI/2;
+      pole.position.set(x, s*6.6, z+3.5);
+      g.add(pole);
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.25, 4.6, 0.25), MAT.rail);   // 横臂沿横桥向
+      arm.position.set(x, s*4.3, z+6.4);
+      g.add(arm);
+    }
+  }
+  // 接触线（双线贯通）
+  const step = 100;
+  for (let x = -SPAN.X_END; x < SPAN.X_END; x += step) {
+    const z1 = deckZ(x)-SPAN.TRUSS_H+7.4, z2 = deckZ(x+step)-SPAN.TRUSS_H+7.4;
+    const len = Math.hypot(step, z2-z1);
+    for (const y of [-2.4, 2.4]) {
+      const w = new THREE.Mesh(wireGeo, MAT.cable);
+      w.scale.y = len/100;
+      w.rotation.z = Math.PI/2 + Math.atan2(z2-z1, step);
+      w.rotation.x = 0;
+      w.position.set(x+step/2, y, (z1+z2)/2);
+      g.add(w);
+    }
+  }
+  return g;
+}
+
+/* ---------------- 环境：水面 / 标尺 ---------------- */
+function buildEnv(g) {
+  const water = new THREE.Mesh(new THREE.PlaneGeometry(4200, 700), MAT.water);
+  water.position.set(0, 0, 0);       // 高程 0m（江面）
+  g.add(water);
+}
+
+/* ================= 场景组装 + 构件显隐 ================= */
+const LAYER_GROUPS = [
+  ['上部结构', ['主塔','钢桁梁','斜拉索','支座','轨道底座','路面及标线']],
+  ['下部结构', ['门式桥墩','承台及桩基']],
+  ['附属设施', ['新泽西护栏','铁路封闭网','轨道','接触网']]
+];
+
+function namedGroup(name, children) {
+  const g = new THREE.Group(); g.name = name;
+  (Array.isArray(children) ? children : [children]).forEach(c => g.add(c));
+  LAYER[name] = g;
+  return g;
+}
+
+function buildBridge() {
+  disposeGroup(bridgeGroup);
+  bridgeGroup = new THREE.Group();
+  bridgeGroup.add(namedGroup('主塔',     [buildTower(-SPAN.X_TOWER), buildTower(SPAN.X_TOWER)]));
+  bridgeGroup.add(namedGroup('钢桁梁',   buildTruss()));
+  bridgeGroup.add(namedGroup('斜拉索',   buildCables()));
+  bridgeGroup.add(namedGroup('支座',     buildBearings()));
+  bridgeGroup.add(namedGroup('轨道底座', buildTrackBed()));
+  bridgeGroup.add(namedGroup('路面及标线', buildRoadway()));
+  bridgeGroup.add(namedGroup('门式桥墩', buildPiers()));
+  bridgeGroup.add(namedGroup('承台及桩基', buildFoundations()));
+  bridgeGroup.add(namedGroup('新泽西护栏', buildBarriers()));
+  bridgeGroup.add(namedGroup('铁路封闭网', buildFenceNet()));
+  bridgeGroup.add(namedGroup('轨道',     buildRails()));
+  bridgeGroup.add(namedGroup('接触网',   buildCatenary()));
+  buildEnv(bridgeGroup);
+  scene.add(bridgeGroup);
+}
+
+/* 面板复选框 */
+(function buildLayerUI() {
+  const box = document.getElementById('layers');
+  LAYER_GROUPS.forEach(([grp, names]) => {
+    const t = document.createElement('div');
+    t.className = 'grp'; t.textContent = grp;
+    box.appendChild(t);
+    names.forEach(n => {
+      const lb = document.createElement('label');
+      lb.className = 'ck';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.checked = true;
+      cb.onchange = () => { if (LAYER[n]) LAYER[n].visible = cb.checked; };
+      lb.appendChild(cb);
+      lb.appendChild(document.createTextNode(n));
+      box.appendChild(lb);
+    });
+  });
+})();
+
+/* ================= 病害贴片：bbox → 平面网格贴片 ================= */
+// 桩号解析：优先 stake_m 字段；否则从照片名解析 K12+345 形式
+// （约定：K12+220 对应里程 X=-1220m，即 X = K值 - 12220）
+function parseStakeM(rec) {
+  if (typeof rec.stake_m === 'number' && isFinite(rec.stake_m)) return rec.stake_m;
+  const name = rec.photo_name || '';
+  const m = /[A-Za-z]?K(\d+)\s*\+\s*(\d+(?:\.\d+)?)/i.exec(name);
+  if (m) return (parseInt(m[1], 10) * 1000 + parseFloat(m[2])) - 12220;
+  return null;
+}
+
+/* 按构件关键词路由贴片面 */
+function routeFace(rec) {
+  const c = rec.component || '';
+  if (c.indexOf('承台') >= 0 || c.indexOf('基础') >= 0) return '承台';
+  if (c.indexOf('塔') >= 0) return '塔柱';
+  if (c.indexOf('索') >= 0) return '斜拉索';
+  if (c.indexOf('墩') >= 0) return '墩身';
+  if (c.indexOf('轨') >= 0 || c.indexOf('下层') >= 0) return '下层桥面';
+  return '上层桥面';   // 默认 / 路面 / 桥面 / 护栏等
+}
+
+function nearestOf(xs, x) {
+  let best = xs[0], bd = Math.abs(x - xs[0]);
+  for (let i = 1; i < xs.length; i++) {
+    const d = Math.abs(x - xs[i]);
+    if (d < bd) { bd = d; best = xs[i]; }
+  }
+  return best;
+}
+
+/* 生成一处病害贴片：平面网格 + 同色边框线。
+   尺寸 = 照片覆盖（米）× bbox 像素比例；桥面/承台贴片水平，塔/墩/索贴片竖直。 */
+function buildPatch(rec, stake) {
+  const b = rec.bbox, pw = rec.photo_w || 640, ph = rec.photo_h || 480;
+  const cov = +pCov.value;
+  const OFF = 0.4;                       // 离面 0.4m，防 z-fighting
+  const wU = Math.max((b[2]-b[0])/pw, .02) * cov;
+  const hV = Math.max((b[3]-b[1])/ph, .02) * cov;
+  const uC = ((b[0]+b[2])/2/pw - .5);    // bbox 横向中心（-0.5~0.5）
+  const face = routeFace(rec);
+  const h = (typeof rec.height_m === 'number' && isFinite(rec.height_m)) ? rec.height_m : null;
+  let center, horizontal;
+
+  if (face === '塔柱') {
+    const tx = nearestOf(TOWER_XS, stake);
+    const z = Math.max(TZ.PAD_TOP + 1, Math.min(h !== null ? h : 80, TZ.COL_TOP - 2));
+    let px = tx, py;
+    if (z > TZ.BELLY && z <= TZ.COL_BOT) {
+      // 钻石段：贴到该高程角斜柱外侧面（X 跟随角柱中心，Y 取角柱外缘）
+      const t = (z - TZ.BELLY) / (TZ.COL_BOT - TZ.BELLY);
+      const s = Math.sign(stake - tx) || 1;
+      px = tx + s * (16.2 - 13.2*t);
+      py = (27.5 - 24.5*t) + (5 - 1.5*t) + OFF;
+    } else {
+      py = towerSurfY(z) + OFF;   // 垫座/下段/上段柱：按该高程截面半宽外贴
+    }
+    center = new THREE.Vector3(px, py, z);
+    horizontal = false;
+  } else if (face === '墩身') {
+    const px = nearestOf(PIER_XS, stake);
+    const top = deckZ(px) - SPAN.TRUSS_H;
+    const z = Math.max(4, Math.min(h !== null ? h : 20, top - 4));
+    center = new THREE.Vector3(px, 16.2 + OFF, z);
+    horizontal = false;
+  } else if (face === '承台') {
+    const tx = nearestOf(TOWER_XS, stake);
+    const dx = Math.max(-20, Math.min(stake - tx, 20));
+    center = new THREE.Vector3(tx + dx, uC * 40, SPAN.CAIS_TOP + OFF);
+    horizontal = true;
+  } else if (face === '斜拉索') {
+    const tx = nearestOf(TOWER_XS, stake);
+    const dir = Math.sign(stake - tx) || 1;
+    const i = Math.max(0, Math.min(SPAN.CABLE_PAIRS - 1,
+      Math.round((Math.abs(stake - tx) - 30) / 21)));
+    const ax = tx + dir * (30 + i * 21);
+    const az = deckZ(ax) + 0.6;
+    const tz = 250 + i * 5;
+    // 该索中段，向 +Y 索面外侧偏移
+    center = new THREE.Vector3((tx + ax)/2,
+      (6.5 + SPAN.TRUSS_W/2 - 0.8)/2 + OFF, (tz + az)/2);
+    horizontal = false;
+  } else if (face === '下层桥面') {
+    center = new THREE.Vector3(stake, uC * 24, deckZ(stake) - SPAN.TRUSS_H + 1.2 + OFF);
+    horizontal = true;
+  } else {   // 上层桥面（默认）
+    center = new THREE.Vector3(stake, uC * 30, deckZ(stake) + OFF);
+    horizontal = true;
+  }
+
+  const geo = new THREE.PlaneGeometry(wU, hV);
+  const mat = new THREE.MeshLambertMaterial({color:diseaseColor(rec.disease),
+    transparent:true, opacity:.55, side:THREE.DoubleSide, depthWrite:false});
+  const mesh = new THREE.Mesh(geo, mat);
+  if (!horizontal) mesh.rotation.x = -Math.PI/2;   // 竖直放置，法线朝 +Y
+  mesh.position.copy(center);
+  mesh.userData.record = rec; mesh.userData.face = face;
+
+  const pts = [];
+  if (horizontal) {
+    pts.push(new THREE.Vector3(-wU/2, -hV/2, 0), new THREE.Vector3(wU/2, -hV/2, 0),
+             new THREE.Vector3(wU/2, hV/2, 0), new THREE.Vector3(-wU/2, hV/2, 0));
+  } else {
+    pts.push(new THREE.Vector3(-wU/2, 0, -hV/2), new THREE.Vector3(wU/2, 0, -hV/2),
+             new THREE.Vector3(wU/2, 0, hV/2), new THREE.Vector3(-wU/2, 0, hV/2));
+  }
+  pts.forEach(p => p.add(center));
+  const edge = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts),
+    new THREE.LineBasicMaterial({color:diseaseColor(rec.disease)}));
+  edge.userData.record = rec; edge.userData.face = face;
+
+  const g = new THREE.Group();
+  g.add(mesh); g.add(edge);
+  g.userData.center = center.clone();
+  return g;
+}
+
+function buildPatches(data) {
+  disposeGroup(patchGroup);
+  patchGroup = new THREE.Group();
+  const recs = (data.records || []).filter(r => r.bbox && r.bbox.length === 4);
+  let auto = 0;
+  const n = recs.length;
+  recs.forEach(rec => {
+    let stake = parseStakeM(rec);
+    if (stake === null)   // 无桩号记录：沿桥均匀分布
+      stake = -1100 + (auto++) * (2200 / Math.max(1, n - 1));
+    stake = Math.max(-1210, Math.min(stake, 1210));
+    patchGroup.add(buildPatch(rec, stake));
+  });
+  patchGroup.visible = patchesVisible;
+  scene.add(patchGroup);
+  return n;
+}
+
+function updateStats(data, patchCount) {
+  const total = (data.records || []).length;
+  const cnt = {};
+  (data.records || []).forEach(r => { cnt[r.disease] = (cnt[r.disease]||0)+1; });
+  let html = `<b>${data.bridge_name || data.tunnel_name || '未命名桥梁'}</b> · ${total} 条记录 · 贴片 ${patchCount} 处<br>`;
+  Object.keys(cnt).forEach(d => {
+    const css = DISEASE_CSS[d] || '#00e676';
+    html += `<span class="chip" style="background:${css}">${d} ${cnt[d]}</span>`;
+  });
+  document.getElementById('stats').innerHTML = html;
+}
+
+function applyData(data) {
+  currentData = data;
+  const n = buildPatches(data);
+  updateStats(data, n);
+  showMsg(`已导入 ${(data.records||[]).length} 条病害记录`);
+}
+
+function togglePatches() {
+  patchesVisible = !patchesVisible;
+  if (patchGroup) patchGroup.visible = patchesVisible;
+  document.getElementById('btnToggle').textContent = patchesVisible ? '👁 隐藏病害' : '👁 显示病害';
+}
+
+function onFile(ev) {
+  const f = ev.target.files[0]; if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    try { applyData(JSON.parse(rd.result)); }
+    catch (e) { showMsg('JSON 解析失败：' + e.message); }
+  };
+  rd.readAsText(f, 'utf-8');
+  ev.target.value = '';
+}
+
+/* 示例数据：8 条病害，覆盖桥面/塔柱/墩身/斜拉索/承台/护栏/下层轨道等构件 */
+const DEMO_DATA = {
+  bridge_name: '常泰长江大桥',
+  records: [
+    {id:'demo01', disease:'裂缝', severity:'中等', component:'桥面铺装（上层）',
+     photo_name:'常泰_K11+200_上层桥面裂缝.jpg', stake_m:-1020,
+     position:'上层桥面 K11+200 行车道', size:'约 1.8m×0.5m', note:'纵向裂缝，雨后扩展',
+     ai_diagnosis:'沥青面层纵向疲劳裂缝，建议灌缝处理并纳入定期观测。',
+     time:'2024-09-01 10:24', bbox:[180,220,430,360], photo_w:640, photo_h:480},
+    {id:'demo02', disease:'剥落', severity:'严重', component:'主塔塔柱（左塔）',
+     photo_name:'常泰_K11+632_塔柱剥落.jpg', stake_m:-588, height_m:120,
+     position:'左塔柱外侧 高程 120m', size:'约 0.9m×0.7m', note:'混凝土保护层剥落',
+     ai_diagnosis:'保护层剥落伴钢筋外露风险，建议尽快修补并检测钢筋锈蚀。',
+     time:'2024-09-01 11:05', bbox:[250,150,420,300], photo_w:640, photo_h:480},
+    {id:'demo03', disease:'渗水', severity:'轻微', component:'门式桥墩墩身',
+     photo_name:'常泰_K11+142_墩身渗水.jpg', stake_m:-1078, height_m:20,
+     position:'辅助墩 K11+142 迎水面', size:'约 1.2m×1.8m', note:'渗水长渍，带白色析出物',
+     ai_diagnosis:'墩身渗水泛碱，建议查明水源并做表面封闭处理。',
+     time:'2024-09-02 09:12', bbox:[200,180,380,340], photo_w:640, photo_h:480},
+    {id:'demo04', disease:'锈蚀', severity:'中等', component:'斜拉索（右塔南侧）',
+     photo_name:'常泰_K12+808_斜拉索锈蚀.jpg', stake_m:620,
+     position:'右塔南侧第 2 根拉索中段', size:'约 0.4m×0.3m', note:'PE 护套破损处钢丝锈蚀',
+     ai_diagnosis:'拉索护套破损伴钢丝锈蚀，建议开窗检测索体并更换护套。',
+     time:'2024-09-02 14:40', bbox:[280,100,400,260], photo_w:640, photo_h:480},
+    {id:'demo05', disease:'蜂窝麻面', severity:'轻微', component:'主塔承台（右塔）',
+     photo_name:'常泰_K12+808_承台蜂窝麻面.jpg', stake_m:588, height_m:4,
+     position:'右塔承台顶面北侧', size:'约 1.5m×1.0m', note:'浇筑缺陷，骨料外露',
+     ai_diagnosis:'承台顶面蜂窝麻面，属表观缺陷，建议砂浆修补。',
+     time:'2024-09-03 08:55', bbox:[150,300,350,440], photo_w:640, photo_h:480},
+    {id:'demo06', disease:'露筋', severity:'中等', component:'新泽西护栏',
+     photo_name:'常泰_K12+520_护栏露筋.jpg', stake_m:300,
+     position:'上层桥面 K12+520 右侧护栏', size:'约 0.6m×0.2m', note:'护栏磕碰破损露筋',
+     ai_diagnosis:'护栏局部破损露筋，建议除锈后聚合物砂浆修补。',
+     time:'2024-09-03 10:30', bbox:[220,240,460,380], photo_w:640, photo_h:480},
+    {id:'demo07', disease:'裂缝', severity:'轻微', component:'下层轨道底座',
+     photo_name:'常泰_K12+020_轨道底座裂缝.jpg', stake_m:-200,
+     position:'下层铁路底座 K12+020', size:'约 0.8m×0.3m', note:'底座板横向裂缝',
+     ai_diagnosis:'轨道底座横向收缩裂缝，建议注浆封闭并观测发展。',
+     time:'2024-09-04 15:20', bbox:[240,200,400,320], photo_w:640, photo_h:480},
+    {id:'demo08', disease:'其他', severity:'轻微', component:'边墩',
+     photo_name:'常泰_K13+440_边墩杂物堆积.jpg', stake_m:1220, height_m:25,
+     position:'右边墩 K13+440 墩身', size:'约 1.0m×1.0m', note:'墩身杂物堆积/涂鸦',
+     ai_diagnosis:'墩身表面污损，建议清理并检查表观状况。',
+     time:'2024-09-04 16:02', bbox:[200,200,360,360], photo_w:640, photo_h:480}
+  ]
+};
+function loadDemo() { applyData(JSON.parse(JSON.stringify(DEMO_DATA))); }
+
+/* ================= 交互：点击详情 / 双击设旋转中心 / 复位 ================= */
+const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
+let downXY = null;
+function pickAt(e) {
+  const r = renderer.domElement.getBoundingClientRect();
+  mouse.x = ((e.clientX - r.left) / r.width) * 2 - 1;
+  mouse.y = -((e.clientY - r.top) / r.height) * 2 + 1;
+  ray.setFromCamera(mouse, camera);
+}
+renderer.domElement.addEventListener('pointerdown', e => { downXY = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener('pointerup', e => {
+  if (!downXY || Math.hypot(e.clientX - downXY[0], e.clientY - downXY[1]) > 5) return;
+  if (!patchGroup || !patchGroup.visible) return;
+  pickAt(e);
+  const hits = ray.intersectObjects(patchGroup.children, true);
+  if (hits.length) {
+    let o = hits[0].object;
+    while (o && !o.userData.center) o = o.parent;
+    if (o) controls.target.copy(o.userData.center);
+    showDetail(hits[0].object.userData.record, hits[0].object.userData.face);
+  }
+});
+renderer.domElement.addEventListener('dblclick', e => {
+  if (!bridgeGroup) return;
+  pickAt(e);
+  const hits = ray.intersectObjects(bridgeGroup.children, true);
+  if (hits.length) { controls.target.copy(hits[0].point); showMsg('旋转中心已移到点击处'); }
+});
+function viewHome(quiet) {
+  controls.target.set(0, 0, 55);
+  camera.position.set(60, -2400, 780);
+  controls.update();
+  if (!quiet) showMsg('视角已复位');
+}
+function showDetail(rec, face) {
+  document.getElementById('dtitle').textContent = `【${rec.disease||'未知'}】 ${rec.severity||''}`;
+  const img = document.getElementById('dimg');
+  if (rec.photo) { img.src = rec.photo; img.style.display = 'block'; }
+  else { img.style.display = 'none'; }
+  document.getElementById('dbody').innerHTML =
+    `<b>贴片面</b>${face||'-'}<br><b>构件</b>${rec.component||'-'} ${rec.component_no||''}<br>`+
+    `<b>位置</b>${rec.position||'-'}<br><b>尺寸</b>${rec.size||'-'}<br>`+
+    `<b>时间</b>${rec.time||'-'}<br><b>备注</b>${rec.note||'-'}<br>`+
+    (rec.ai_diagnosis ? `<b>AI诊断</b>${rec.ai_diagnosis}` : '');
+  document.getElementById('detail').style.display = 'block';
+}
+function hideDetail() { document.getElementById('detail').style.display = 'none'; }
+function showMsg(t) {
+  const m = document.getElementById('msg');
+  m.textContent = t; m.style.display = 'block';
+  clearTimeout(m._t); m._t = setTimeout(() => m.style.display = 'none', 3200);
+}
+
+/* 左下角标尺：随相机距离换算像素长度，取 1/2/5 整度数 */
+function updateScalebar() {
+  const d = camera.position.distanceTo(controls.target);
+  const wpp = 2 * d * Math.tan(camera.fov * Math.PI / 360) / view.clientHeight;  // 米/像素
+  const raw = wpp * 120, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const nice = mag * (raw/mag >= 5 ? 5 : raw/mag >= 2 ? 2 : 1);
+  document.getElementById('sbar').style.width = (nice / wpp) + 'px';
+  document.getElementById('stext').textContent = nice >= 1000 ? (nice/1000) + ' km' : nice + ' m';
+}
+
+const pCov = document.getElementById('pCov');
+function refreshLabels() { document.getElementById('vCov').textContent = (+pCov.value).toFixed(1) + 'm'; }
+pCov.addEventListener('input', () => {
+  refreshLabels();
+  if (currentData) { const n = buildPatches(currentData); updateStats(currentData, n); }
+});
+refreshLabels();
+
+function resize() {
+  const w = view.clientWidth, h = view.clientHeight;
+  renderer.setSize(w, h); camera.aspect = w/h; camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+buildBridge();
+viewHome(true);
+if (location.hash.indexOf('#demo') === 0) {   // 调试/截图用：#demo 自动载入示例数据
+  loadDemo();
+  if (location.hash === '#demo-close') {      // #demo-close 单塔近景
+    controls.target.set(-588, 0, 170);
+    camera.position.set(-150, -780, 330);
+    controls.update();
+  }
+  if (location.hash === '#demo-diamond') {    // #demo-diamond 钻石段特写
+    controls.target.set(-588, 8, 140);
+    camera.position.set(-430, -330, 200);
+    controls.update();
+  }
+}
+(function loop() {
+  requestAnimationFrame(loop);
+  controls.update();
+  updateScalebar();
+  renderer.render(scene, camera);
+})();
+</script>
+</body>
+</html>

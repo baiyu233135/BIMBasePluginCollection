@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>隧道数字孪生 — 参数化展示与病害可视化</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:"Microsoft YaHei",sans-serif; background:#10151c; color:#dfe6ee; overflow:hidden; }
+  #app { display:flex; height:100vh; }
+  #panel { width:300px; min-width:300px; background:#171e28; border-right:1px solid #2a3546;
+           padding:14px; overflow-y:auto; }
+  #panel h1 { font-size:17px; color:#7ec8ff; margin-bottom:2px; }
+  #panel .sub { font-size:11px; color:#8a97a8; margin-bottom:12px; }
+  .sec { background:#1d2634; border:1px solid #2a3546; border-radius:8px; padding:10px; margin-bottom:10px; }
+  .sec h2 { font-size:13px; color:#a8c6e8; margin-bottom:8px; }
+  .row { display:flex; align-items:center; margin-bottom:6px; font-size:12px; }
+  .row label { width:78px; color:#9fb0c4; }
+  .row input[type=range] { flex:1; accent-color:#3d9bff; }
+  .row .val { width:52px; text-align:right; color:#7ec8ff; font-family:Consolas,monospace; }
+  button { width:100%; padding:8px 0; margin-top:6px; border:none; border-radius:6px;
+           font-size:13px; font-weight:bold; cursor:pointer; color:#fff; }
+  button.b1 { background:#1565C0; } button.b2 { background:#2E7D32; }
+  button.b3 { background:#6A4CA0; } button.b4 { background:#455A64; }
+  button:hover { filter:brightness(1.15); }
+  #stats { font-size:12px; color:#b7c6d8; line-height:1.8; }
+  #stats b { color:#ffd54f; }
+  .chip { display:inline-block; padding:1px 8px; border-radius:10px; margin:2px 3px 0 0;
+          font-size:11px; color:#fff; }
+  #hint { font-size:11px; color:#6d7c8f; line-height:1.7; }
+  #view { flex:1; position:relative; }
+  canvas { display:block; }
+  #detail { position:absolute; top:14px; right:14px; width:330px; background:rgba(20,28,40,.95);
+            border:1px solid #3d9bff; border-radius:10px; padding:12px; display:none;
+            box-shadow:0 4px 20px rgba(0,0,0,.6); }
+  #detail h3 { font-size:15px; margin-bottom:8px; }
+  #detail img { width:100%; border-radius:6px; margin-bottom:8px; }
+  #detail .kv { font-size:12px; line-height:1.9; color:#c6d3e2; }
+  #detail .kv b { color:#7ec8ff; display:inline-block; width:64px; }
+  #dclose { position:absolute; top:6px; right:10px; cursor:pointer; color:#8a97a8; font-size:16px; }
+  #msg { position:absolute; bottom:14px; left:50%; transform:translateX(-50%);
+         background:rgba(30,40,55,.92); padding:8px 18px; border-radius:20px; font-size:12px;
+         display:none; border:1px solid #2a3546; }
+  #file { display:none; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="panel">
+    <h1>隧道数字孪生</h1>
+    <div class="sub">参数化隧道 · 病害三维可视化<br>与「隧道病害识别」插件投影同源</div>
+
+    <div class="sec">
+      <h2>隧道参数（mm）</h2>
+      <div class="row"><label>隧道净宽 W</label><input type="range" id="pW" min="4000" max="20000" step="100" value="10000"><span class="val" id="vW"></span></div>
+      <div class="row"><label>拱仰厚度 H</label><input type="range" id="pH" min="2000" max="12000" step="100" value="5000"><span class="val" id="vH"></span></div>
+      <div class="row"><label>衬砌厚度 w</label><input type="range" id="pw" min="200" max="800" step="10" value="350"><span class="val" id="vw"></span></div>
+      <div class="row"><label>底部高度 h</label><input type="range" id="ph" min="300" max="3000" step="50" value="800"><span class="val" id="vh"></span></div>
+      <div class="row"><label>隧道长度 L</label><input type="range" id="pL" min="5000" max="200000" step="1000" value="50000"><span class="val" id="vL"></span></div>
+      <div class="row"><label>照片覆盖</label><input type="range" id="pCov" min="1" max="30" step="0.5" value="5"><span class="val" id="vCov"></span></div>
+      <button class="b1" onclick="rebuild()">⟳ 重建隧道</button>
+    </div>
+
+    <div class="sec">
+      <h2>病害数据</h2>
+      <button class="b2" onclick="document.getElementById('file').click()">📂 导入 JSON</button>
+      <button class="b3" onclick="loadDemo()">✨ 载入示例数据</button>
+      <button class="b4" onclick="togglePatches()" id="btnToggle">👁 隐藏病害</button>
+      <button class="b4" onclick="viewHome()">⌂ 复位视角</button>
+      <input type="file" id="file" accept=".json" onchange="onFile(event)">
+      <div id="stats" style="margin-top:8px">尚未导入数据</div>
+    </div>
+
+    <div class="sec" id="hint">
+      <h2>操作说明</h2>
+      左键拖动旋转 · 滚轮缩放 · 右键平移<br>
+      点击彩色贴片 → 视角围绕该病害旋转<br>
+      双击隧道任意处 → 旋转中心移到该点<br>
+      ⌂ 复位视角 回到整隧道总览<br>
+      「照片覆盖」= 一张照片实际拍到的<br>墙面长度（沿隧道方向），按此比例换算<br>
+      病害位置；沿隧道位置按照片文件名<br>桩号（如 YK53+145.6）自动排布<br>
+      数据来自插件「导出网页数据」按钮
+    </div>
+  </div>
+  <div id="view">
+    <div id="detail"><span id="dclose" onclick="hideDetail()">✕</span>
+      <h3 id="dtitle"></h3><img id="dimg" alt="">
+      <div class="kv" id="dbody"></div>
+    </div>
+    <div id="msg"></div>
+  </div>
+</div>
+
+<script>
+/*__THREE_JS__*/
+</script>
+<script>
+/*__ORBIT_JS__*/
+</script>
+<script>
+/* ================= 精确圆数学（与 face_projection.py 严格一致） ================= */
+// 过三点 (-a,0),(0,m),(a,0) 的圆：圆心 (0,c)，半径 rho，s=+1 拱圈 / -1 仰拱
+function circleParams(a, m) {
+  const c = (m*m - a*a) / (2*m);
+  const rho = Math.abs(m - c);
+  const s = (m - c) > 0 ? 1 : -1;
+  return {c, rho, s};
+}
+// 弧长 u（距弧中点，左负右正）→ 截面点 (x,z)；内法线朝圆心（隧道内侧）
+function arcPoint(u, cp) {
+  const psi = u / cp.rho;
+  return {
+    x: cp.rho * Math.sin(psi),
+    z: cp.c + cp.s * cp.rho * Math.cos(psi),
+    nx: -Math.sin(psi),
+    nz: -cp.s * Math.cos(psi)
+  };
+}
+const DISEASE_COLORS = {"裂缝":0xff2222, "渗水":0x2266ff, "剥落":0xffa500,
+                        "露筋":0xcc44ff, "蜂窝麻面":0x8d6e63, "锈蚀":0x795548,
+                        "已修复":0x66bb6a, "其他":0x9e9e9e};
+const DISEASE_CSS = {"裂缝":"#ff2222","渗水":"#2266ff","剥落":"#ffa500","其他":"#9e9e9e"};
+function diseaseColor(d) { return DISEASE_COLORS[d] !== undefined ? DISEASE_COLORS[d] : 0x00e676; }
+
+/* ================= 三维场景 ================= */
+const view = document.getElementById('view');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x10151c);
+scene.fog = new THREE.Fog(0x10151c, 80000, 400000);
+const camera = new THREE.PerspectiveCamera(55, 2, 10, 2e6);
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(window.devicePixelRatio);
+view.appendChild(renderer.domElement);
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+
+scene.add(new THREE.AmbientLight(0xffffff, .75));
+const dl = new THREE.DirectionalLight(0xffffff, .8);
+dl.position.set(30000, 20000, 60000);
+scene.add(dl);
+const dl2 = new THREE.DirectionalLight(0x8899bb, .4);
+dl2.position.set(-20000, 40000, -30000);
+scene.add(dl2);
+scene.add(new THREE.AxesHelper(6000));
+
+let tunnelGroup = null, patchGroup = null, patchesVisible = true;
+let currentData = null;
+
+function getParams() {
+  return { W:+pW.value, H:+pH.value, w:+pw.value, h:+ph.value, L:+pL.value };
+}
+function refreshLabels() {
+  vW.textContent = pW.value; vH.textContent = pH.value; vw.textContent = pw.value;
+  vh.textContent = ph.value; vL.textContent = (pL.value/1000).toFixed(0)+'m';
+  vCov.textContent = (+pCov.value).toFixed(1)+'m';
+}
+['pW','pH','pw','ph','pL','pCov'].forEach(id => document.getElementById(id).addEventListener('input', refreshLabels));
+// 覆盖长度变化时实时重建病害贴片（隧道几何不变）
+pCov.addEventListener('input', () => {
+  if (currentData) { const n = buildPatches(currentData); updateStats(currentData, n); }
+});
+refreshLabels();
+
+function disposeGroup(g) {
+  if (!g) return;
+  g.traverse(o => {
+    if (o.geometry) o.geometry.dispose();
+    if (o.material) (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>m.dispose());
+  });
+  scene.remove(g);
+}
+
+/* 由截面点列（{x,z}）生成衬砌环 Shape（外轮廓 + 内洞），沿 Y 拉伸 0→L */
+function ringGeometry(P) {
+  const a = P.W/2, w = P.w;
+  const out = circleParams(a+w, P.H+w), inn = circleParams(a, P.H);
+  const invO = circleParams(a+w, -(P.h+w)), invI = circleParams(a, -P.h);
+  const phiO = Math.atan2(a+w, -out.s*out.c), phiI = Math.atan2(a, -inn.s*inn.c);
+  const shape = new THREE.Shape();
+  // 外轮廓：左起拱线 → 拱顶 → 右起拱线 → 右侧下降 → 仰拱底 → 左侧回升
+  shape.moveTo(-(a+w), 0);
+  for (let i = 1; i <= 48; i++) {
+    const p = arcPoint(-phiO*out.rho + 2*phiO*out.rho*i/48, out);
+    shape.lineTo(p.x, p.z);
+  }
+  shape.lineTo(a+w, -(P.h+w));
+  shape.lineTo(-(a+w), -(P.h+w));
+  shape.closePath();
+  // 内洞
+  const hole = new THREE.Path();
+  hole.moveTo(-a, 0);
+  for (let i = 1; i <= 48; i++) {
+    const p = arcPoint(-phiI*inn.rho + 2*phiI*inn.rho*i/48, inn);
+    hole.lineTo(p.x, p.z);
+  }
+  const psiI = Math.atan2(a, -invI.s*invI.c);
+  for (let i = 0; i <= 24; i++) {
+    const p = arcPoint(invI.rho*(psiI - 2*psiI*i/24), invI);  // +ψ0→-ψ0（右→左）
+    hole.lineTo(p.x, p.z);
+  }
+  hole.closePath();
+  shape.holes.push(hole);
+  const geo = new THREE.ExtrudeGeometry(shape, {depth:P.L, bevelEnabled:false, curveSegments:4});
+  geo.rotateX(Math.PI/2);      // (x,y,z)→(x,-z,y)：截面竖向→Z（向上）
+  geo.translate(0, P.L, 0);    // 拉伸沿 -Y 移回 [0,L]
+  return geo;
+}
+
+function buildTunnel(P) {
+  disposeGroup(tunnelGroup);
+  tunnelGroup = new THREE.Group();
+  const a = P.W/2, x1 = 1000, L = P.L;
+  const h1 = P.H/5000*200;                       // 检修道顶面高（组件公式）
+  const MAT = { lining:new THREE.MeshLambertMaterial({color:0x808080, side:THREE.DoubleSide}),
+                road:new THREE.MeshLambertMaterial({color:0x141414}),
+                line:new THREE.MeshLambertMaterial({color:0xffffff}),
+                walk:new THREE.MeshLambertMaterial({color:0x808080}) };
+  // 衬砌环（含仰拱）
+  tunnelGroup.add(new THREE.Mesh(ringGeometry(P), MAT.lining));
+  // 内部路面（顶面 z=40，宽 W-2*x1）
+  const road = new THREE.Mesh(new THREE.BoxGeometry(2*(a-x1), L, 100),
+                              MAT.road);
+  road.position.set(0, L/2, -10);
+  tunnelGroup.add(road);
+  // 三条设备带（白色，组件同位）
+  const sw = P.W/10000*200;
+  [a-x1-300, -(a-x1)+150, -100].forEach(cx => {
+    const sb = new THREE.Mesh(new THREE.BoxGeometry(sw, L, 6), MAT.line);
+    sb.position.set(cx, L/2, 43);
+    tunnelGroup.add(sb);
+  });
+  // 左右检修道（灰色，简化箱体）
+  [-(a-x1/2), (a-x1/2)].forEach(cx => {
+    const dk = new THREE.Mesh(new THREE.BoxGeometry(x1, L, h1+80), MAT.walk);
+    dk.position.set(cx, L/2, h1/2-40);
+    tunnelGroup.add(dk);
+  });
+  scene.add(tunnelGroup);
+  viewHome();   // 重建后回到总览视角
+}
+
+/* 病害 bbox → 弧面/平面彩色贴片 */
+function faceForRecord(rec, data) {
+  const comp = rec.component || '';
+  if (comp.indexOf('路面') >= 0) return '路面';
+  if (comp.indexOf('仰拱') >= 0) return '仰拱内壁';
+  if (comp.indexOf('衬砌') >= 0 || comp.indexOf('拱') >= 0) return '拱圈内壁';
+  return data.face || '拱圈内壁';
+}
+
+/* 从照片文件名解析桩号（如 赤水溪_YK53+145.6_... → 53145.6m → 53145600mm），
+   解析失败返回 null */
+function parseStakeMM(name) {
+  if (!name) return null;
+  const m = /[A-Za-z]?K(\d+)\s*\+\s*(\d+(?:\.\d+)?)/i.exec(name);
+  if (!m) return null;
+  return (parseInt(m[1], 10) * 1000 + parseFloat(m[2])) * 1000;
+}
+
+/* 病害 bbox → 弧面/平面彩色贴片。
+   比例：照片覆盖的实际墙面尺寸 = 照片覆盖长度（沿隧道方向，滑块可调），
+   横向按照片像素纵横比等比例换算——不再默认"照片铺满整个 50m 投影面"。
+   位置：vBase = 该照片桩号相对数据集最小桩号的沿隧道偏移。 */
+function buildPatch(rec, data, P, vBase) {
+  const b = rec.bbox, pw = rec.photo_w || 640, ph = rec.photo_h || 480;
+  const a = P.W/2, x1 = 1000;
+  const cov = (+pCov.value) * 1000;            // 照片覆盖长度（沿隧道方向，mm）
+  const OFF = 40;  // 离壁 40mm，防 z-fighting
+  const face = faceForRecord(rec, data);
+  const uSpanRaw = cov * pw / ph;              // 横向按像素纵横比换算
+  let posFn, uLen;
+  if (face === '拱圈内壁') {
+    const cp = circleParams(a, P.H);
+    uLen = Math.min(uSpanRaw, 2*cp.rho*Math.atan2(a, -cp.s*cp.c));
+    posFn = (u, v) => { const p = arcPoint(u, cp);
+      return new THREE.Vector3(p.x + p.nx*OFF, v, p.z + p.nz*OFF); };
+  } else if (face === '仰拱内壁') {
+    const cp = circleParams(a, -P.h);
+    uLen = Math.min(uSpanRaw, 2*cp.rho*Math.atan2(a, -cp.s*cp.c));
+    posFn = (u, v) => { const p = arcPoint(u, cp);
+      return new THREE.Vector3(p.x + p.nx*OFF, v, p.z + p.nz*OFF); };
+  } else {  // 路面顶面
+    uLen = Math.min(uSpanRaw, 2*(a-x1));
+    posFn = (u, v) => new THREE.Vector3(u, v, 40 + OFF);
+  }
+  const cU = ((b[0]+b[2])/2/pw - .5) * uLen;
+  const wU = Math.max((b[2]-b[0])/pw, .02) * uLen;
+  const hV = Math.max((b[3]-b[1])/ph, .02) * cov;
+  // 贴片中心钳制在隧道长度范围内，避免贴到洞口外
+  const cV = Math.max(hV/2 + 500, Math.min(vBase + (.5 - (b[1]+b[3])/2/ph) * cov,
+                                            P.L - hV/2 - 500));
+  const NX = 14, NY = 14, verts = [], idx = [];
+  for (let j = 0; j <= NY; j++) for (let i = 0; i <= NX; i++) {
+    const p = posFn(cU - wU/2 + wU*i/NX, cV - hV/2 + hV*j/NY);
+    verts.push(p.x, p.y, p.z);
+  }
+  for (let j = 0; j < NY; j++) for (let i = 0; i < NX; i++) {
+    const k = j*(NX+1)+i;
+    idx.push(k, k+1, k+NX+1, k, k+NX+1, k+NX);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+  geo.setIndex(idx); geo.computeVertexNormals();
+  const mat = new THREE.MeshLambertMaterial({color:diseaseColor(rec.disease),
+    transparent:true, opacity:.55, side:THREE.DoubleSide, depthWrite:false});
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.userData.record = rec; mesh.userData.face = face;
+  // 区域边框线，增强可见性
+  const edge = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints([
+    posFn(cU-wU/2, cV-hV/2), posFn(cU+wU/2, cV-hV/2),
+    posFn(cU+wU/2, cV+hV/2), posFn(cU-wU/2, cV+hV/2)
+  ]), new THREE.LineBasicMaterial({color:diseaseColor(rec.disease)}));
+  edge.userData.record = rec; edge.userData.face = face;
+  const g = new THREE.Group(); g.add(mesh); g.add(edge);
+  g.userData.center = posFn(cU, cV);   // 贴片中心（视角聚焦用）
+  return g;
+}
+
+function buildPatches(data) {
+  disposeGroup(patchGroup);
+  patchGroup = new THREE.Group();
+  const P = getParams();
+  const recs = (data.records || []).filter(r => r.bbox && r.bbox.length === 4);
+  // 桩号定位：以数据集中可解析的最小桩号为洞口锚点，按相对桩号沿隧道布置；
+  // 无桩号的记录、或只有一条有效定位（最小桩号=最大桩号，相对偏移恒为 0）
+  // 放隧道中段，避免贴在洞口；桩号范围超隧道长度时按比例压缩
+  const stakes = recs.map(r => parseStakeMM(r.photo_name || ''));
+  const valid = stakes.filter(s => s !== null);
+  const minS = valid.length ? Math.min.apply(null, valid) : 0;
+  const maxS = valid.length ? Math.max.apply(null, valid) : 0;
+  const singleAnchor = valid.length > 0 && maxS === minS;   // 全部同一桩号
+  const offs = stakes.map(s => (s !== null && !singleAnchor) ? s - minS : null);
+  const maxOff = Math.max(0, Math.max.apply(null, offs.map(o => o === null ? 0 : o)));
+  const posScale = maxOff > P.L * 0.9 ? P.L * 0.9 / maxOff : 1;
+  let n = 0;
+  recs.forEach((rec, i) => {
+    const vBase = offs[i] === null ? P.L/2
+      : Math.max(0, Math.min(offs[i] * posScale, P.L * 0.95));
+    patchGroup.add(buildPatch(rec, data, P, vBase)); n++;
+  });
+  patchGroup.visible = patchesVisible;
+  scene.add(patchGroup);
+  return n;
+}
+
+function updateStats(data, patchCount) {
+  const total = (data.records || []).length;
+  const cnt = {};
+  (data.records || []).forEach(r => { cnt[r.disease] = (cnt[r.disease]||0)+1; });
+  let html = `<b>${data.tunnel_name || '未命名隧道'}</b> · ${total} 条记录 · 贴片 ${patchCount} 处<br>`;
+  Object.keys(cnt).forEach(d => {
+    const css = DISEASE_CSS[d] || '#00e676';
+    html += `<span class="chip" style="background:${css}">${d} ${cnt[d]}</span>`;
+  });
+  document.getElementById('stats').innerHTML = html;
+}
+
+function applyData(data) {
+  currentData = data;
+  if (data.tunnel) {
+    const t = data.tunnel;
+    if (t['隧道净宽']) pW.value = t['隧道净宽'];
+    if (t['拱仰厚度']) pH.value = t['拱仰厚度'];
+    if (t['二次衬砌厚度']) pw.value = t['二次衬砌厚度'];
+    if (t['底部高度']) ph.value = t['底部高度'];
+    if (t['隧道长度']) pL.value = t['隧道长度'];
+    refreshLabels();
+  }
+  buildTunnel(getParams());
+  const n = buildPatches(data);
+  updateStats(data, n);
+  showMsg(`已导入 ${(data.records||[]).length} 条病害记录`);
+}
+
+function rebuild() {
+  buildTunnel(getParams());
+  if (currentData) { const n = buildPatches(currentData); updateStats(currentData, n); }
+}
+function togglePatches() {
+  patchesVisible = !patchesVisible;
+  if (patchGroup) patchGroup.visible = patchesVisible;
+  document.getElementById('btnToggle').textContent = patchesVisible ? '👁 隐藏病害' : '👁 显示病害';
+}
+
+function onFile(ev) {
+  const f = ev.target.files[0]; if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    try { applyData(JSON.parse(rd.result)); }
+    catch (e) { showMsg('JSON 解析失败：' + e.message); }
+  };
+  rd.readAsText(f, 'utf-8');
+  ev.target.value = '';
+}
+
+/* 示例数据：三种投影面各若干条（带桩号，沿隧道分布），无照片 */
+function loadDemo() {
+  const mk = (disease, sev, face, cu, cv, w, h, stake) => ({
+    id: Math.random().toString(36).slice(2,8), disease, severity: sev,
+    component: face === '路面' ? '路面' : '衬砌',
+    photo_name: '示例_YK10+' + stake + '_病害.jpg',
+    position: '示例数据（桩号 YK10+' + stake + '）', size: '约 '+w+'×'+h+' 像素', note: '示例记录',
+    ai_diagnosis: '示例诊断意见：建议纳入定期观测。', time: new Date().toLocaleString('zh-CN'),
+    bbox: [cu-w/2, cv-h/2, cu+w/2, cv+h/2], photo_w: 640, photo_h: 480
+  });
+  applyData({
+    tunnel_name: '示例隧道', face: '拱圈内壁',
+    tunnel: {'隧道净宽':10000,'拱仰厚度':5000,'二次衬砌厚度':350,'底部高度':800,'隧道长度':50000},
+    records: [
+      mk('裂缝','轻微','拱圈内壁', 300, 200, 120, 90,  '005'),
+      mk('剥落','中等','拱圈内壁', 420, 300, 150, 110, '012'),
+      mk('渗水','严重','仰拱内壁', 320, 260, 140, 100, '018'),
+      mk('裂缝','轻微','路面',     200, 240, 100, 80,  '025'),
+      mk('剥落','轻微','拱圈内壁', 150, 150, 90, 70,  '033')
+    ]
+  });
+}
+
+/* 点击贴片查看详情 */
+const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
+let downXY = null;
+renderer.domElement.addEventListener('pointerdown', e => { downXY = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener('pointerup', e => {
+  if (!downXY || Math.hypot(e.clientX-downXY[0], e.clientY-downXY[1]) > 5) return;
+  if (!patchGroup || !patchGroup.visible) return;
+  const r = renderer.domElement.getBoundingClientRect();
+  mouse.x = ((e.clientX-r.left)/r.width)*2 - 1;
+  mouse.y = -((e.clientY-r.top)/r.height)*2 + 1;
+  ray.setFromCamera(mouse, camera);
+  const hits = ray.intersectObjects(patchGroup.children, true);
+  if (hits.length) {
+    // 视角中心移到被点击的病害贴片，后续旋转围绕该病害进行
+    let o = hits[0].object;
+    while (o && !o.userData.center) o = o.parent;
+    if (o) controls.target.copy(o.userData.center);
+    showDetail(hits[0].object.userData.record, hits[0].object.userData.face);
+  }
+});
+// 双击隧道任意位置：把旋转中心设到点击处
+renderer.domElement.addEventListener('dblclick', e => {
+  if (!tunnelGroup) return;
+  const r = renderer.domElement.getBoundingClientRect();
+  mouse.x = ((e.clientX-r.left)/r.width)*2 - 1;
+  mouse.y = -((e.clientY-r.top)/r.height)*2 + 1;
+  ray.setFromCamera(mouse, camera);
+  const hits = ray.intersectObjects(tunnelGroup.children, true);
+  if (hits.length) { controls.target.copy(hits[0].point); showMsg('旋转中心已移到点击处'); }
+});
+// 复位视角：回到整隧道总览
+function viewHome() {
+  const P = getParams(), a = P.W/2;
+  controls.target.set(0, P.L/2, P.H*0.4);
+  camera.position.set(a*2.2, -P.L*0.25, P.H*1.6 + 4000);
+  controls.update();
+  showMsg('视角已复位');
+}
+function showDetail(rec, face) {
+  document.getElementById('dtitle').textContent = `【${rec.disease||'未知'}】 ${rec.severity||''}`;
+  const img = document.getElementById('dimg');
+  if (rec.photo) { img.src = rec.photo; img.style.display = 'block'; }
+  else { img.style.display = 'none'; }
+  document.getElementById('dbody').innerHTML =
+    `<b>投影面</b>${face||'-'}<br><b>构件</b>${rec.component||'-'} ${rec.component_no||''}<br>`+
+    `<b>位置</b>${rec.position||'-'}<br><b>尺寸</b>${rec.size||'-'}<br>`+
+    `<b>时间</b>${rec.time||'-'}<br><b>备注</b>${rec.note||'-'}<br>`+
+    (rec.ai_diagnosis ? `<b>AI诊断</b>${rec.ai_diagnosis}` : '');
+  document.getElementById('detail').style.display = 'block';
+}
+function hideDetail() { document.getElementById('detail').style.display = 'none'; }
+function showMsg(t) {
+  const m = document.getElementById('msg');
+  m.textContent = t; m.style.display = 'block';
+  clearTimeout(m._t); m._t = setTimeout(() => m.style.display = 'none', 3200);
+}
+
+function resize() {
+  const w = view.clientWidth, h = view.clientHeight;
+  renderer.setSize(w, h); camera.aspect = w/h; camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+buildTunnel(getParams());
+(function loop() { requestAnimationFrame(loop); controls.update(); renderer.render(scene, camera); })();
+</script>
+</body>
+</html>

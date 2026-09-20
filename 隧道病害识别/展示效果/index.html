@@ -1,0 +1,1340 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>隧道病害智能识别 · 效果展示</title>
+<style>
+  :root { --bg:#0f1420; --panel:#1a2130; --line:#2a3350; --txt:#e8ecf4; --sub:#9aa5bd; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--txt); font-family: "Microsoft YaHei","微软雅黑",sans-serif; }
+  header { padding: 34px 24px 18px; text-align: center; }
+  header h1 { font-size: 26px; letter-spacing: 1px; }
+  header p { color: var(--sub); margin-top: 6px; font-size: 13px; }
+  .banner { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; margin: 18px auto 8px; max-width: 1200px; padding: 0 16px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 26px; text-align: center; min-width: 130px; }
+  .stat .num { font-size: 28px; font-weight: 700; }
+  .stat .lab { color: var(--sub); font-size: 12px; margin-top: 4px; }
+  .chips { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin: 12px 0 4px; }
+  .chip { border-radius: 999px; padding: 4px 14px; font-size: 13px; color:#fff; }
+  .chip b { margin-left: 4px; }
+  .chip-裂缝 { background:#d33; } .chip-渗水 { background:#3355dd; }
+  .chip-剥落 { background:#e0912b; } .chip-其他 { background:#7a7f8a; }
+  section { max-width: 1400px; margin: 26px auto; padding: 0 18px; }
+  section h2 { font-size: 19px; border-left: 4px solid #4c8dff; padding-left: 10px; margin-bottom: 14px; }
+  .sec-count { color: var(--sub); font-size: 13px; font-weight: 400; margin-left: 8px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; transition: transform .15s, box-shadow .15s; }
+  .card:hover { transform: translateY(-3px); box-shadow: 0 8px 22px rgba(0,0,0,.45); }
+  .card img { width: 100%; height: 180px; object-fit: cover; display: block; cursor: zoom-in; }
+  .card figcaption { padding: 8px 10px 10px; }
+  .fname { font-size: 12px; color: var(--sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .meta { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; font-size: 12px; }
+  .badge { border-radius: 6px; padding: 2px 8px; }
+  .badge.ok { background: rgba(60,180,90,.18); color:#6fdc8c; }
+  .badge.warn { background: rgba(230,180,60,.16); color:#f0c060; }
+  .badge.miss { background: rgba(220,70,70,.18); color:#f08080; }
+  .conf { color: var(--sub); }
+  footer { text-align:center; color: var(--sub); font-size: 12px; padding: 24px 0 34px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>隧道病害智能识别 · 效果展示</h1>
+  <p>统一模型 YOLOv8n（裂缝 / 渗水 / 剥落 / 其他 四类归并）· 共 141 张隧道定检原图 · 置信度阈值 0.25</p>
+</header>
+<div class="banner">
+  <div class="stat"><div class="num">141</div><div class="lab">总图数</div></div>
+  <div class="stat"><div class="num" style="color:#6fdc8c">141</div><div class="lab">检出图数 (100.0%)</div></div>
+  <div class="stat"><div class="num">130</div><div class="lab">识别与标注一致 (92.2%)</div></div>
+  <div class="stat"><div class="num" style="color:#f08080">0</div><div class="lab">未检出</div></div>
+</div>
+<div class="chips"><span class="chip chip-裂缝">裂缝 <b>93</b></span><span class="chip chip-渗水">渗水 <b>17</b></span><span class="chip chip-剥落">剥落 <b>31</b></span><span class="chip chip-其他">其他 <b>0</b></span></div>
+
+    <section>
+      <h2>报告标注：裂缝 <span class="sec-count">90 张</span></h2>
+      <div class="grid">
+      <figure class="card">
+        <a href="识别结果/裂缝/052_裂缝_严家湾_YK35+053.8_环向裂缝_006.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/052_裂缝_严家湾_YK35+053.8_环向裂缝_006.jpg" alt="严家湾_YK35+053.8_环向裂缝_006.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="严家湾_YK35+053.8_环向裂缝_006.jpg">严家湾_YK35+053.8_环向裂缝_006.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.82</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/053_裂缝_严家湾_YK35+763.1_斜向裂缝_007.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/053_裂缝_严家湾_YK35+763.1_斜向裂缝_007.jpg" alt="严家湾_YK35+763.1_斜向裂缝_007.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="严家湾_YK35+763.1_斜向裂缝_007.jpg">严家湾_YK35+763.1_斜向裂缝_007.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.87</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/054_裂缝_严家湾_ZK35+592.7_环向裂缝_005.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/054_裂缝_严家湾_ZK35+592.7_环向裂缝_005.jpg" alt="严家湾_ZK35+592.7_环向裂缝_005.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="严家湾_ZK35+592.7_环向裂缝_005.jpg">严家湾_ZK35+592.7_环向裂缝_005.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.56</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/055_裂缝_严家湾_ZK35+822.5_斜向裂缝_004.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/055_裂缝_严家湾_ZK35+822.5_斜向裂缝_004.jpg" alt="严家湾_ZK35+822.5_斜向裂缝_004.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="严家湾_ZK35+822.5_斜向裂缝_004.jpg">严家湾_ZK35+822.5_斜向裂缝_004.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.86</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/056_裂缝_严家湾_ZK35+910.5_纵向裂缝_003.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/056_裂缝_严家湾_ZK35+910.5_纵向裂缝_003.jpg" alt="严家湾_ZK35+910.5_纵向裂缝_003.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="严家湾_ZK35+910.5_纵向裂缝_003.jpg">严家湾_ZK35+910.5_纵向裂缝_003.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.78</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/057_裂缝_严家湾_ZK36+030.5_斜向裂缝_002.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/057_裂缝_严家湾_ZK36+030.5_斜向裂缝_002.jpg" alt="严家湾_ZK36+030.5_斜向裂缝_002.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="严家湾_ZK36+030.5_斜向裂缝_002.jpg">严家湾_ZK36+030.5_斜向裂缝_002.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.84</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/058_裂缝_九龙池_YK37+833.6_斜向裂缝_009.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/058_裂缝_九龙池_YK37+833.6_斜向裂缝_009.jpg" alt="九龙池_YK37+833.6_斜向裂缝_009.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="九龙池_YK37+833.6_斜向裂缝_009.jpg">九龙池_YK37+833.6_斜向裂缝_009.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.91</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/059_裂缝_九龙池_YK37+961.8_环向裂缝_010.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/059_裂缝_九龙池_YK37+961.8_环向裂缝_010.jpg" alt="九龙池_YK37+961.8_环向裂缝_010.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="九龙池_YK37+961.8_环向裂缝_010.jpg">九龙池_YK37+961.8_环向裂缝_010.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.90</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/060_裂缝_九龙池_YK38+106.4_环向裂缝_011.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/060_裂缝_九龙池_YK38+106.4_环向裂缝_011.jpg" alt="九龙池_YK38+106.4_环向裂缝_011.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="九龙池_YK38+106.4_环向裂缝_011.jpg">九龙池_YK38+106.4_环向裂缝_011.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.77</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/061_裂缝_九龙池_YK38+138.8_环向裂缝_012.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/061_裂缝_九龙池_YK38+138.8_环向裂缝_012.jpg" alt="九龙池_YK38+138.8_环向裂缝_012.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="九龙池_YK38+138.8_环向裂缝_012.jpg">九龙池_YK38+138.8_环向裂缝_012.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.84</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/062_裂缝_九龙池_ZK41+435.7_环向裂缝_003.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/062_裂缝_九龙池_ZK41+435.7_环向裂缝_003.jpg" alt="九龙池_ZK41+435.7_环向裂缝_003.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="九龙池_ZK41+435.7_环向裂缝_003.jpg">九龙池_ZK41+435.7_环向裂缝_003.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.80</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/063_裂缝_九龙池_ZK41+784.7_环向裂缝_002.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/063_裂缝_九龙池_ZK41+784.7_环向裂缝_002.jpg" alt="九龙池_ZK41+784.7_环向裂缝_002.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="九龙池_ZK41+784.7_环向裂缝_002.jpg">九龙池_ZK41+784.7_环向裂缝_002.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.88</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/064_裂缝_九龙池_ZK41+929.6_环向裂缝_001.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/064_裂缝_九龙池_ZK41+929.6_环向裂缝_001.jpg" alt="九龙池_ZK41+929.6_环向裂缝_001.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="九龙池_ZK41+929.6_环向裂缝_001.jpg">九龙池_ZK41+929.6_环向裂缝_001.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.87</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/065_裂缝_南金_YK45+202.9_环向裂缝_007.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/065_裂缝_南金_YK45+202.9_环向裂缝_007.jpg" alt="南金_YK45+202.9_环向裂缝_007.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="南金_YK45+202.9_环向裂缝_007.jpg">南金_YK45+202.9_环向裂缝_007.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.89</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/066_裂缝_南金_YK45+258.5_环向裂缝_008.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/066_裂缝_南金_YK45+258.5_环向裂缝_008.jpg" alt="南金_YK45+258.5_环向裂缝_008.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="南金_YK45+258.5_环向裂缝_008.jpg">南金_YK45+258.5_环向裂缝_008.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.79</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/剥落/067_裂缝_南金_YK45+281.8_环向裂缝_009.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/剥落/067_裂缝_南金_YK45+281.8_环向裂缝_009.jpg" alt="南金_YK45+281.8_环向裂缝_009.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="南金_YK45+281.8_环向裂缝_009.jpg">南金_YK45+281.8_环向裂缝_009.jpg</div>
+          <div class="meta"><span class="badge warn">识别:剥落</span><span class="conf">置信度 0.59</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/068_裂缝_南金_YK45+316.9_斜向裂缝_010.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/068_裂缝_南金_YK45+316.9_斜向裂缝_010.jpg" alt="南金_YK45+316.9_斜向裂缝_010.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="南金_YK45+316.9_斜向裂缝_010.jpg">南金_YK45+316.9_斜向裂缝_010.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.89</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/069_裂缝_南金_ZK45+289.7_环向裂缝_005.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/069_裂缝_南金_ZK45+289.7_环向裂缝_005.jpg" alt="南金_ZK45+289.7_环向裂缝_005.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="南金_ZK45+289.7_环向裂缝_005.jpg">南金_ZK45+289.7_环向裂缝_005.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.79</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/070_裂缝_南金_ZK45+539.3_环向裂缝_004.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/070_裂缝_南金_ZK45+539.3_环向裂缝_004.jpg" alt="南金_ZK45+539.3_环向裂缝_004.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="南金_ZK45+539.3_环向裂缝_004.jpg">南金_ZK45+539.3_环向裂缝_004.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.72</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/剥落/071_裂缝_南金_ZK45+539.6_环向裂缝_003.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/剥落/071_裂缝_南金_ZK45+539.6_环向裂缝_003.jpg" alt="南金_ZK45+539.6_环向裂缝_003.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="南金_ZK45+539.6_环向裂缝_003.jpg">南金_ZK45+539.6_环向裂缝_003.jpg</div>
+          <div class="meta"><span class="badge warn">识别:剥落</span><span class="conf">置信度 0.84</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/072_裂缝_南金_ZK45+853.6_环向裂缝_002.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/072_裂缝_南金_ZK45+853.6_环向裂缝_002.jpg" alt="南金_ZK45+853.6_环向裂缝_002.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="南金_ZK45+853.6_环向裂缝_002.jpg">南金_ZK45+853.6_环向裂缝_002.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.80</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/073_裂缝_向家_YK55+486_斜向裂缝_004.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/073_裂缝_向家_YK55+486_斜向裂缝_004.jpg" alt="向家_YK55+486_斜向裂缝_004.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="向家_YK55+486_斜向裂缝_004.jpg">向家_YK55+486_斜向裂缝_004.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.37</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/074_裂缝_向家_YK55+629.1_环向裂缝_005.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/074_裂缝_向家_YK55+629.1_环向裂缝_005.jpg" alt="向家_YK55+629.1_环向裂缝_005.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="向家_YK55+629.1_环向裂缝_005.jpg">向家_YK55+629.1_环向裂缝_005.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.70</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/075_裂缝_向家_YK55+726.8_环向裂缝_006.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/075_裂缝_向家_YK55+726.8_环向裂缝_006.jpg" alt="向家_YK55+726.8_环向裂缝_006.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="向家_YK55+726.8_环向裂缝_006.jpg">向家_YK55+726.8_环向裂缝_006.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.77</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/076_裂缝_向家_ZK55+643.0_环向裂缝_003.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/076_裂缝_向家_ZK55+643.0_环向裂缝_003.jpg" alt="向家_ZK55+643.0_环向裂缝_003.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="向家_ZK55+643.0_环向裂缝_003.jpg">向家_ZK55+643.0_环向裂缝_003.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.63</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/077_裂缝_向家_ZK55+654.8_环向裂缝_002.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/077_裂缝_向家_ZK55+654.8_环向裂缝_002.jpg" alt="向家_ZK55+654.8_环向裂缝_002.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="向家_ZK55+654.8_环向裂缝_002.jpg">向家_ZK55+654.8_环向裂缝_002.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.55</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/078_裂缝_向家_ZK55+681.1_纵向裂缝_001.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/078_裂缝_向家_ZK55+681.1_纵向裂缝_001.jpg" alt="向家_ZK55+681.1_纵向裂缝_001.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="向家_ZK55+681.1_纵向裂缝_001.jpg">向家_ZK55+681.1_纵向裂缝_001.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.86</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/079_裂缝_土墙院_YK54+611_竖向裂缝_006.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/079_裂缝_土墙院_YK54+611_竖向裂缝_006.jpg" alt="土墙院_YK54+611_竖向裂缝_006.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="土墙院_YK54+611_竖向裂缝_006.jpg">土墙院_YK54+611_竖向裂缝_006.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.42</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/080_裂缝_土墙院_YK54+618.7_环向裂缝_007.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/080_裂缝_土墙院_YK54+618.7_环向裂缝_007.jpg" alt="土墙院_YK54+618.7_环向裂缝_007.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="土墙院_YK54+618.7_环向裂缝_007.jpg">土墙院_YK54+618.7_环向裂缝_007.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.84</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/081_裂缝_土墙院_YK54+630.7_环向裂缝_008.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/081_裂缝_土墙院_YK54+630.7_环向裂缝_008.jpg" alt="土墙院_YK54+630.7_环向裂缝_008.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="土墙院_YK54+630.7_环向裂缝_008.jpg">土墙院_YK54+630.7_环向裂缝_008.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.76</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/082_裂缝_土墙院_YK54+654.6_环向裂缝_009.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/082_裂缝_土墙院_YK54+654.6_环向裂缝_009.jpg" alt="土墙院_YK54+654.6_环向裂缝_009.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="土墙院_YK54+654.6_环向裂缝_009.jpg">土墙院_YK54+654.6_环向裂缝_009.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.84</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/083_裂缝_土墙院_ZK63+103.5_纵向裂缝_004.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/083_裂缝_土墙院_ZK63+103.5_纵向裂缝_004.jpg" alt="土墙院_ZK63+103.5_纵向裂缝_004.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="土墙院_ZK63+103.5_纵向裂缝_004.jpg">土墙院_ZK63+103.5_纵向裂缝_004.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.86</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/084_裂缝_土墙院_ZK63+468.8_环向裂缝_003.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/084_裂缝_土墙院_ZK63+468.8_环向裂缝_003.jpg" alt="土墙院_ZK63+468.8_环向裂缝_003.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="土墙院_ZK63+468.8_环向裂缝_003.jpg">土墙院_ZK63+468.8_环向裂缝_003.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.88</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/085_裂缝_土墙院_ZK63+661.1_纵向裂缝_001.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/085_裂缝_土墙院_ZK63+661.1_纵向裂缝_001.jpg" alt="土墙院_ZK63+661.1_纵向裂缝_001.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="土墙院_ZK63+661.1_纵向裂缝_001.jpg">土墙院_ZK63+661.1_纵向裂缝_001.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.75</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/086_裂缝_土墙院_ZK63+661.1_纵向裂缝_002.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/086_裂缝_土墙院_ZK63+661.1_纵向裂缝_002.jpg" alt="土墙院_ZK63+661.1_纵向裂缝_002.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="土墙院_ZK63+661.1_纵向裂缝_002.jpg">土墙院_ZK63+661.1_纵向裂缝_002.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.88</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/087_裂缝_枇杷湾_YK29+509.7_环向裂缝_002.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/087_裂缝_枇杷湾_YK29+509.7_环向裂缝_002.jpg" alt="枇杷湾_YK29+509.7_环向裂缝_002.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="枇杷湾_YK29+509.7_环向裂缝_002.jpg">枇杷湾_YK29+509.7_环向裂缝_002.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.40</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/088_裂缝_枇杷湾_YK29+521.7_纵向裂缝_003.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/088_裂缝_枇杷湾_YK29+521.7_纵向裂缝_003.jpg" alt="枇杷湾_YK29+521.7_纵向裂缝_003.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="枇杷湾_YK29+521.7_纵向裂缝_003.jpg">枇杷湾_YK29+521.7_纵向裂缝_003.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.89</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/089_裂缝_枇杷湾_ZK29+680_纵向裂缝_001.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/089_裂缝_枇杷湾_ZK29+680_纵向裂缝_001.jpg" alt="枇杷湾_ZK29+680_纵向裂缝_001.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="枇杷湾_ZK29+680_纵向裂缝_001.jpg">枇杷湾_ZK29+680_纵向裂缝_001.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.69</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/090_裂缝_椆树山_YK57+466.8_环向裂缝_002.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/090_裂缝_椆树山_YK57+466.8_环向裂缝_002.jpg" alt="椆树山_YK57+466.8_环向裂缝_002.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="椆树山_YK57+466.8_环向裂缝_002.jpg">椆树山_YK57+466.8_环向裂缝_002.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.76</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/091_裂缝_椆树山_YK58+167.6_纵向裂缝_003.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/091_裂缝_椆树山_YK58+167.6_纵向裂缝_003.jpg" alt="椆树山_YK58+167.6_纵向裂缝_003.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="椆树山_YK58+167.6_纵向裂缝_003.jpg">椆树山_YK58+167.6_纵向裂缝_003.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.86</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/092_裂缝_椆树山_YK59+148.3_纵向裂缝_004.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/092_裂缝_椆树山_YK59+148.3_纵向裂缝_004.jpg" alt="椆树山_YK59+148.3_纵向裂缝_004.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="椆树山_YK59+148.3_纵向裂缝_004.jpg">椆树山_YK59+148.3_纵向裂缝_004.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.82</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/093_裂缝_椆树山_YK59+360.0_环向裂缝_005.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/093_裂缝_椆树山_YK59+360.0_环向裂缝_005.jpg" alt="椆树山_YK59+360.0_环向裂缝_005.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="椆树山_YK59+360.0_环向裂缝_005.jpg">椆树山_YK59+360.0_环向裂缝_005.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.82</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/094_裂缝_永家山_YK27+891.6_纵向裂缝_004.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/094_裂缝_永家山_YK27+891.6_纵向裂缝_004.jpg" alt="永家山_YK27+891.6_纵向裂缝_004.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="永家山_YK27+891.6_纵向裂缝_004.jpg">永家山_YK27+891.6_纵向裂缝_004.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.89</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/095_裂缝_永家山_YK28+065.9_斜向裂缝_005.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/095_裂缝_永家山_YK28+065.9_斜向裂缝_005.jpg" alt="永家山_YK28+065.9_斜向裂缝_005.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="永家山_YK28+065.9_斜向裂缝_005.jpg">永家山_YK28+065.9_斜向裂缝_005.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.82</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/096_裂缝_永家山_YK28+396.0_环向裂缝_006.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/096_裂缝_永家山_YK28+396.0_环向裂缝_006.jpg" alt="永家山_YK28+396.0_环向裂缝_006.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="永家山_YK28+396.0_环向裂缝_006.jpg">永家山_YK28+396.0_环向裂缝_006.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.86</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/097_裂缝_永家山_YK28+812.1_斜向裂缝_007.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/097_裂缝_永家山_YK28+812.1_斜向裂缝_007.jpg" alt="永家山_YK28+812.1_斜向裂缝_007.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="永家山_YK28+812.1_斜向裂缝_007.jpg">永家山_YK28+812.1_斜向裂缝_007.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.83</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/098_裂缝_永家山_ZK28+088.4_纵向裂缝_001.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/098_裂缝_永家山_ZK28+088.4_纵向裂缝_001.jpg" alt="永家山_ZK28+088.4_纵向裂缝_001.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="永家山_ZK28+088.4_纵向裂缝_001.jpg">永家山_ZK28+088.4_纵向裂缝_001.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.82</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/渗水/099_裂缝_溪峒_YK017+226_竖向裂缝_003.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/渗水/099_裂缝_溪峒_YK017+226_竖向裂缝_003.jpg" alt="溪峒_YK017+226_竖向裂缝_003.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="溪峒_YK017+226_竖向裂缝_003.jpg">溪峒_YK017+226_竖向裂缝_003.jpg</div>
+          <div class="meta"><span class="badge warn">识别:渗水</span><span class="conf">置信度 0.86</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/100_裂缝_皮达坳_YK31+344.9_环向裂缝_005.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/100_裂缝_皮达坳_YK31+344.9_环向裂缝_005.jpg" alt="皮达坳_YK31+344.9_环向裂缝_005.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="皮达坳_YK31+344.9_环向裂缝_005.jpg">皮达坳_YK31+344.9_环向裂缝_005.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.88</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/101_裂缝_皮达坳_YK31+382.1_斜向裂缝_006.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/101_裂缝_皮达坳_YK31+382.1_斜向裂缝_006.jpg" alt="皮达坳_YK31+382.1_斜向裂缝_006.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="皮达坳_YK31+382.1_斜向裂缝_006.jpg">皮达坳_YK31+382.1_斜向裂缝_006.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.87</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/102_裂缝_皮达坳_ZK31+225.2_斜向裂缝_004.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/102_裂缝_皮达坳_ZK31+225.2_斜向裂缝_004.jpg" alt="皮达坳_ZK31+225.2_斜向裂缝_004.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="皮达坳_ZK31+225.2_斜向裂缝_004.jpg">皮达坳_ZK31+225.2_斜向裂缝_004.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.71</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/103_裂缝_皮达坳_ZK31+309.2_纵向裂缝_003.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/103_裂缝_皮达坳_ZK31+309.2_纵向裂缝_003.jpg" alt="皮达坳_ZK31+309.2_纵向裂缝_003.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="皮达坳_ZK31+309.2_纵向裂缝_003.jpg">皮达坳_ZK31+309.2_纵向裂缝_003.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.82</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/104_裂缝_皮达坳_ZK31+542.9_纵向裂缝_002.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/104_裂缝_皮达坳_ZK31+542.9_纵向裂缝_002.jpg" alt="皮达坳_ZK31+542.9_纵向裂缝_002.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="皮达坳_ZK31+542.9_纵向裂缝_002.jpg">皮达坳_ZK31+542.9_纵向裂缝_002.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.87</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/105_裂缝_皮达坳_ZK31+546.1_斜向裂缝_001.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/105_裂缝_皮达坳_ZK31+546.1_斜向裂缝_001.jpg" alt="皮达坳_ZK31+546.1_斜向裂缝_001.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="皮达坳_ZK31+546.1_斜向裂缝_001.jpg">皮达坳_ZK31+546.1_斜向裂缝_001.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.87</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/106_裂缝_碧玉岩_K15+767.7_纵向裂缝_003.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/106_裂缝_碧玉岩_K15+767.7_纵向裂缝_003.jpg" alt="碧玉岩_K15+767.7_纵向裂缝_003.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="碧玉岩_K15+767.7_纵向裂缝_003.jpg">碧玉岩_K15+767.7_纵向裂缝_003.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.89</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/107_裂缝_福寿山_YK63+553.6_纵向裂缝_004.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/107_裂缝_福寿山_YK63+553.6_纵向裂缝_004.jpg" alt="福寿山_YK63+553.6_纵向裂缝_004.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="福寿山_YK63+553.6_纵向裂缝_004.jpg">福寿山_YK63+553.6_纵向裂缝_004.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.82</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/108_裂缝_福寿山_ZK63+386.5_纵向裂缝_002.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/108_裂缝_福寿山_ZK63+386.5_纵向裂缝_002.jpg" alt="福寿山_ZK63+386.5_纵向裂缝_002.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="福寿山_ZK63+386.5_纵向裂缝_002.jpg">福寿山_ZK63+386.5_纵向裂缝_002.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.81</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/109_裂缝_竹山冲_YK30+026.7_斜向裂缝_007.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/109_裂缝_竹山冲_YK30+026.7_斜向裂缝_007.jpg" alt="竹山冲_YK30+026.7_斜向裂缝_007.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="竹山冲_YK30+026.7_斜向裂缝_007.jpg">竹山冲_YK30+026.7_斜向裂缝_007.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.90</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/110_裂缝_竹山冲_YK30+410.3_纵向裂缝_008.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/110_裂缝_竹山冲_YK30+410.3_纵向裂缝_008.jpg" alt="竹山冲_YK30+410.3_纵向裂缝_008.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="竹山冲_YK30+410.3_纵向裂缝_008.jpg">竹山冲_YK30+410.3_纵向裂缝_008.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.76</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/111_裂缝_竹山冲_ZK30+004.3_斜向裂缝_002.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/111_裂缝_竹山冲_ZK30+004.3_斜向裂缝_002.jpg" alt="竹山冲_ZK30+004.3_斜向裂缝_002.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="竹山冲_ZK30+004.3_斜向裂缝_002.jpg">竹山冲_ZK30+004.3_斜向裂缝_002.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.78</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/112_裂缝_老山界_ZK19+040_竖向裂缝_001.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/112_裂缝_老山界_ZK19+040_竖向裂缝_001.jpg" alt="老山界_ZK19+040_竖向裂缝_001.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="老山界_ZK19+040_竖向裂缝_001.jpg">老山界_ZK19+040_竖向裂缝_001.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.40</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/113_裂缝_老山界_ZK20+301.7_环向裂缝_002.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/113_裂缝_老山界_ZK20+301.7_环向裂缝_002.jpg" alt="老山界_ZK20+301.7_环向裂缝_002.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="老山界_ZK20+301.7_环向裂缝_002.jpg">老山界_ZK20+301.7_环向裂缝_002.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.90</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/114_裂缝_舒家山_YK47+041.9_环向裂缝_005.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/114_裂缝_舒家山_YK47+041.9_环向裂缝_005.jpg" alt="舒家山_YK47+041.9_环向裂缝_005.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="舒家山_YK47+041.9_环向裂缝_005.jpg">舒家山_YK47+041.9_环向裂缝_005.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.83</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/115_裂缝_舒家山_YK47+057.9_斜向裂缝_006.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/115_裂缝_舒家山_YK47+057.9_斜向裂缝_006.jpg" alt="舒家山_YK47+057.9_斜向裂缝_006.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="舒家山_YK47+057.9_斜向裂缝_006.jpg">舒家山_YK47+057.9_斜向裂缝_006.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.71</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/116_裂缝_舒家山_YK47+395.4_环向裂缝_007.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/116_裂缝_舒家山_YK47+395.4_环向裂缝_007.jpg" alt="舒家山_YK47+395.4_环向裂缝_007.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="舒家山_YK47+395.4_环向裂缝_007.jpg">舒家山_YK47+395.4_环向裂缝_007.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.85</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/117_裂缝_舒家山_YK47+432.3_斜向裂缝_008.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/117_裂缝_舒家山_YK47+432.3_斜向裂缝_008.jpg" alt="舒家山_YK47+432.3_斜向裂缝_008.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="舒家山_YK47+432.3_斜向裂缝_008.jpg">舒家山_YK47+432.3_斜向裂缝_008.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.85</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/118_裂缝_舒家山_ZK47+826.5_纵向裂缝_004.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/118_裂缝_舒家山_ZK47+826.5_纵向裂缝_004.jpg" alt="舒家山_ZK47+826.5_纵向裂缝_004.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="舒家山_ZK47+826.5_纵向裂缝_004.jpg">舒家山_ZK47+826.5_纵向裂缝_004.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.80</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/119_裂缝_舒家山_ZK48+416.6_纵向裂缝_003.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/119_裂缝_舒家山_ZK48+416.6_纵向裂缝_003.jpg" alt="舒家山_ZK48+416.6_纵向裂缝_003.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="舒家山_ZK48+416.6_纵向裂缝_003.jpg">舒家山_ZK48+416.6_纵向裂缝_003.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.79</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/120_裂缝_舒家山_ZK48+532.0_环向裂缝_002.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/120_裂缝_舒家山_ZK48+532.0_环向裂缝_002.jpg" alt="舒家山_ZK48+532.0_环向裂缝_002.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="舒家山_ZK48+532.0_环向裂缝_002.jpg">舒家山_ZK48+532.0_环向裂缝_002.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.83</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/121_裂缝_舒家山_ZK48+567.5_环向裂缝_001.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/121_裂缝_舒家山_ZK48+567.5_环向裂缝_001.jpg" alt="舒家山_ZK48+567.5_环向裂缝_001.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="舒家山_ZK48+567.5_环向裂缝_001.jpg">舒家山_ZK48+567.5_环向裂缝_001.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.86</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/122_裂缝_观音坡_YK61+978.5_环向裂缝_007.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/122_裂缝_观音坡_YK61+978.5_环向裂缝_007.jpg" alt="观音坡_YK61+978.5_环向裂缝_007.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="观音坡_YK61+978.5_环向裂缝_007.jpg">观音坡_YK61+978.5_环向裂缝_007.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.88</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/123_裂缝_观音坡_YK62+031.0_环向裂缝_008.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/123_裂缝_观音坡_YK62+031.0_环向裂缝_008.jpg" alt="观音坡_YK62+031.0_环向裂缝_008.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="观音坡_YK62+031.0_环向裂缝_008.jpg">观音坡_YK62+031.0_环向裂缝_008.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.79</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/124_裂缝_观音坡_YK62+125.6_环向裂缝_009.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/124_裂缝_观音坡_YK62+125.6_环向裂缝_009.jpg" alt="观音坡_YK62+125.6_环向裂缝_009.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="观音坡_YK62+125.6_环向裂缝_009.jpg">观音坡_YK62+125.6_环向裂缝_009.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.86</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/125_裂缝_观音坡_YK62+524.1_环向裂缝_010.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/125_裂缝_观音坡_YK62+524.1_环向裂缝_010.jpg" alt="观音坡_YK62+524.1_环向裂缝_010.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="观音坡_YK62+524.1_环向裂缝_010.jpg">观音坡_YK62+524.1_环向裂缝_010.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.87</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/126_裂缝_观音坡_ZK61+933.2_环向裂缝_004.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/126_裂缝_观音坡_ZK61+933.2_环向裂缝_004.jpg" alt="观音坡_ZK61+933.2_环向裂缝_004.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="观音坡_ZK61+933.2_环向裂缝_004.jpg">观音坡_ZK61+933.2_环向裂缝_004.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.86</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/127_裂缝_观音坡_ZK62+456.7_斜向裂缝_003.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/127_裂缝_观音坡_ZK62+456.7_斜向裂缝_003.jpg" alt="观音坡_ZK62+456.7_斜向裂缝_003.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="观音坡_ZK62+456.7_斜向裂缝_003.jpg">观音坡_ZK62+456.7_斜向裂缝_003.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.85</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/128_裂缝_观音坡_ZK62+482.2_纵向裂缝_002.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/128_裂缝_观音坡_ZK62+482.2_纵向裂缝_002.jpg" alt="观音坡_ZK62+482.2_纵向裂缝_002.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="观音坡_ZK62+482.2_纵向裂缝_002.jpg">观音坡_ZK62+482.2_纵向裂缝_002.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.87</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/129_裂缝_观音坡_ZK62+857.7_纵向裂缝_001.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/129_裂缝_观音坡_ZK62+857.7_纵向裂缝_001.jpg" alt="观音坡_ZK62+857.7_纵向裂缝_001.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="观音坡_ZK62+857.7_纵向裂缝_001.jpg">观音坡_ZK62+857.7_纵向裂缝_001.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.80</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/130_裂缝_赤水溪_YK52+733.5_斜向裂缝_006.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/130_裂缝_赤水溪_YK52+733.5_斜向裂缝_006.jpg" alt="赤水溪_YK52+733.5_斜向裂缝_006.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="赤水溪_YK52+733.5_斜向裂缝_006.jpg">赤水溪_YK52+733.5_斜向裂缝_006.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.84</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/131_裂缝_赤水溪_YK52+734.3_环向裂缝_007.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/131_裂缝_赤水溪_YK52+734.3_环向裂缝_007.jpg" alt="赤水溪_YK52+734.3_环向裂缝_007.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="赤水溪_YK52+734.3_环向裂缝_007.jpg">赤水溪_YK52+734.3_环向裂缝_007.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.60</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/132_裂缝_赤水溪_YK52+858.1_环向裂缝_008.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/132_裂缝_赤水溪_YK52+858.1_环向裂缝_008.jpg" alt="赤水溪_YK52+858.1_环向裂缝_008.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="赤水溪_YK52+858.1_环向裂缝_008.jpg">赤水溪_YK52+858.1_环向裂缝_008.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.80</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/133_裂缝_赤水溪_YK53+002.2_环向裂缝_009.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/133_裂缝_赤水溪_YK53+002.2_环向裂缝_009.jpg" alt="赤水溪_YK53+002.2_环向裂缝_009.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="赤水溪_YK53+002.2_环向裂缝_009.jpg">赤水溪_YK53+002.2_环向裂缝_009.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.78</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/134_裂缝_赤水溪_ZK53+228.2_环向裂缝_004.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/134_裂缝_赤水溪_ZK53+228.2_环向裂缝_004.jpg" alt="赤水溪_ZK53+228.2_环向裂缝_004.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="赤水溪_ZK53+228.2_环向裂缝_004.jpg">赤水溪_ZK53+228.2_环向裂缝_004.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.87</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/135_裂缝_赤水溪_ZK53+419.2_纵向裂缝_003.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/135_裂缝_赤水溪_ZK53+419.2_纵向裂缝_003.jpg" alt="赤水溪_ZK53+419.2_纵向裂缝_003.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="赤水溪_ZK53+419.2_纵向裂缝_003.jpg">赤水溪_ZK53+419.2_纵向裂缝_003.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.65</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/136_裂缝_赤水溪_ZK53+504.6_纵向裂缝_002.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/136_裂缝_赤水溪_ZK53+504.6_纵向裂缝_002.jpg" alt="赤水溪_ZK53+504.6_纵向裂缝_002.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="赤水溪_ZK53+504.6_纵向裂缝_002.jpg">赤水溪_ZK53+504.6_纵向裂缝_002.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.86</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/137_裂缝_赤水溪_ZK53+505.9_纵向裂缝_001.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/137_裂缝_赤水溪_ZK53+505.9_纵向裂缝_001.jpg" alt="赤水溪_ZK53+505.9_纵向裂缝_001.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="赤水溪_ZK53+505.9_纵向裂缝_001.jpg">赤水溪_ZK53+505.9_纵向裂缝_001.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.81</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/138_裂缝_金鸡_YK43+311.3_环向裂缝_005.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/138_裂缝_金鸡_YK43+311.3_环向裂缝_005.jpg" alt="金鸡_YK43+311.3_环向裂缝_005.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="金鸡_YK43+311.3_环向裂缝_005.jpg">金鸡_YK43+311.3_环向裂缝_005.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.84</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/139_裂缝_金鸡_YK43+371.5_纵向裂缝_006.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/139_裂缝_金鸡_YK43+371.5_纵向裂缝_006.jpg" alt="金鸡_YK43+371.5_纵向裂缝_006.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="金鸡_YK43+371.5_纵向裂缝_006.jpg">金鸡_YK43+371.5_纵向裂缝_006.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.83</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/140_裂缝_金鸡_ZK43+246.4_纵向裂缝_003.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/140_裂缝_金鸡_ZK43+246.4_纵向裂缝_003.jpg" alt="金鸡_ZK43+246.4_纵向裂缝_003.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="金鸡_ZK43+246.4_纵向裂缝_003.jpg">金鸡_ZK43+246.4_纵向裂缝_003.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.65</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/141_裂缝_金鸡_ZK43+330.7_斜向裂缝_002.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/141_裂缝_金鸡_ZK43+330.7_斜向裂缝_002.jpg" alt="金鸡_ZK43+330.7_斜向裂缝_002.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="金鸡_ZK43+330.7_斜向裂缝_002.jpg">金鸡_ZK43+330.7_斜向裂缝_002.jpg</div>
+          <div class="meta"><span class="badge ok">识别:裂缝 ✓</span><span class="conf">置信度 0.89</span></div>
+        </figcaption>
+      </figure>
+      </div>
+    </section>
+    <section>
+      <h2>报告标注：剥落 <span class="sec-count">32 张</span></h2>
+      <div class="grid">
+      <figure class="card">
+        <a href="识别结果/剥落/001_剥落_九龙池_YK37+737.5_防火涂层剥落_013.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/剥落/001_剥落_九龙池_YK37+737.5_防火涂层剥落_013.jpg" alt="九龙池_YK37+737.5_防火涂层剥落_013.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="九龙池_YK37+737.5_防火涂层剥落_013.jpg">九龙池_YK37+737.5_防火涂层剥落_013.jpg</div>
+          <div class="meta"><span class="badge ok">识别:剥落 ✓</span><span class="conf">置信度 0.80</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/剥落/002_剥落_九龙池_YK37+737.6_防火涂层剥落_014.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/剥落/002_剥落_九龙池_YK37+737.6_防火涂层剥落_014.jpg" alt="九龙池_YK37+737.6_防火涂层剥落_014.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="九龙池_YK37+737.6_防火涂层剥落_014.jpg">九龙池_YK37+737.6_防火涂层剥落_014.jpg</div>
+          <div class="meta"><span class="badge ok">识别:剥落 ✓</span><span class="conf">置信度 0.90</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/剥落/003_剥落_九龙池_YK38+717.8_防火涂层剥落_015.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/剥落/003_剥落_九龙池_YK38+717.8_防火涂层剥落_015.jpg" alt="九龙池_YK38+717.8_防火涂层剥落_015.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="九龙池_YK38+717.8_防火涂层剥落_015.jpg">九龙池_YK38+717.8_防火涂层剥落_015.jpg</div>
+          <div class="meta"><span class="badge ok">识别:剥落 ✓</span><span class="conf">置信度 0.96</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/剥落/004_剥落_九龙池_YK38+721.5_防火涂层剥落_016.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/剥落/004_剥落_九龙池_YK38+721.5_防火涂层剥落_016.jpg" alt="九龙池_YK38+721.5_防火涂层剥落_016.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="九龙池_YK38+721.5_防火涂层剥落_016.jpg">九龙池_YK38+721.5_防火涂层剥落_016.jpg</div>
+          <div class="meta"><span class="badge ok">识别:剥落 ✓</span><span class="conf">置信度 0.79</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/剥落/005_剥落_土墙院_ZK63+253.2_防火涂料剥落_005.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/剥落/005_剥落_土墙院_ZK63+253.2_防火涂料剥落_005.jpg" alt="土墙院_ZK63+253.2_防火涂料剥落_005.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="土墙院_ZK63+253.2_防火涂料剥落_005.jpg">土墙院_ZK63+253.2_防火涂料剥落_005.jpg</div>
+          <div class="meta"><span class="badge ok">识别:剥落 ✓</span><span class="conf">置信度 0.94</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/剥落/006_剥落_枇杷湾_YK29+474.2_防火涂料剥落_004.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/剥落/006_剥落_枇杷湾_YK29+474.2_防火涂料剥落_004.jpg" alt="枇杷湾_YK29+474.2_防火涂料剥落_004.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="枇杷湾_YK29+474.2_防火涂料剥落_004.jpg">枇杷湾_YK29+474.2_防火涂料剥落_004.jpg</div>
+          <div class="meta"><span class="badge ok">识别:剥落 ✓</span><span class="conf">置信度 0.97</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/剥落/007_剥落_枇杷湾_YK29+474.4_防火涂料剥落_005.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/剥落/007_剥落_枇杷湾_YK29+474.4_防火涂料剥落_005.jpg" alt="枇杷湾_YK29+474.4_防火涂料剥落_005.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="枇杷湾_YK29+474.4_防火涂料剥落_005.jpg">枇杷湾_YK29+474.4_防火涂料剥落_005.jpg</div>
+          <div class="meta"><span class="badge ok">识别:剥落 ✓</span><span class="conf">置信度 0.90</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/008_剥落_枇杷湾_YK29+477.2_防火涂料剥落_006.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/008_剥落_枇杷湾_YK29+477.2_防火涂料剥落_006.jpg" alt="枇杷湾_YK29+477.2_防火涂料剥落_006.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="枇杷湾_YK29+477.2_防火涂料剥落_006.jpg">枇杷湾_YK29+477.2_防火涂料剥落_006.jpg</div>
+          <div class="meta"><span class="badge warn">识别:裂缝</span><span class="conf">置信度 0.66</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/剥落/009_剥落_枇杷湾_YK29+725.8_防火涂料剥落_007.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/剥落/009_剥落_枇杷湾_YK29+725.8_防火涂料剥落_007.jpg" alt="枇杷湾_YK29+725.8_防火涂料剥落_007.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="枇杷湾_YK29+725.8_防火涂料剥落_007.jpg">枇杷湾_YK29+725.8_防火涂料剥落_007.jpg</div>
+          <div class="meta"><span class="badge ok">识别:剥落 ✓</span><span class="conf">置信度 0.92</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/剥落/010_剥落_椆树山_YK57+582.7_防火涂料剥落_006.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/剥落/010_剥落_椆树山_YK57+582.7_防火涂料剥落_006.jpg" alt="椆树山_YK57+582.7_防火涂料剥落_006.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="椆树山_YK57+582.7_防火涂料剥落_006.jpg">椆树山_YK57+582.7_防火涂料剥落_006.jpg</div>
+          <div class="meta"><span class="badge ok">识别:剥落 ✓</span><span class="conf">置信度 0.79</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/剥落/011_剥落_椆树山_YK60+431.9_防火涂料剥落_007.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/剥落/011_剥落_椆树山_YK60+431.9_防火涂料剥落_007.jpg" alt="椆树山_YK60+431.9_防火涂料剥落_007.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="椆树山_YK60+431.9_防火涂料剥落_007.jpg">椆树山_YK60+431.9_防火涂料剥落_007.jpg</div>
+          <div class="meta"><span class="badge ok">识别:剥落 ✓</span><span class="conf">置信度 0.75</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/剥落/012_剥落_椆树山_YK60+455.9_防火涂料剥落_008.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/剥落/012_剥落_椆树山_YK60+455.9_防火涂料剥落_008.jpg" alt="椆树山_YK60+455.9_防火涂料剥落_008.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="椆树山_YK60+455.9_防火涂料剥落_008.jpg">椆树山_YK60+455.9_防火涂料剥落_008.jpg</div>
+          <div class="meta"><span class="badge ok">识别:剥落 ✓</span><span class="conf">置信度 0.76</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/剥落/013_剥落_椆树山_YK60+455.9_防火涂料剥落_009.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/剥落/013_剥落_椆树山_YK60+455.9_防火涂料剥落_009.jpg" alt="椆树山_YK60+455.9_防火涂料剥落_009.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="椆树山_YK60+455.9_防火涂料剥落_009.jpg">椆树山_YK60+455.9_防火涂料剥落_009.jpg</div>
+          <div class="meta"><span class="badge ok">识别:剥落 ✓</span><span class="conf">置信度 0.80</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/剥落/014_剥落_永家山_YK28+727.5_防火涂料剥落_008.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/剥落/014_剥落_永家山_YK28+727.5_防火涂料剥落_008.jpg" alt="永家山_YK28+727.5_防火涂料剥落_008.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="永家山_YK28+727.5_防火涂料剥落_008.jpg">永家山_YK28+727.5_防火涂料剥落_008.jpg</div>
+          <div class="meta"><span class="badge ok">识别:剥落 ✓</span><span class="conf">置信度 0.93</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/剥落/015_剥落_永家山_YK29+199.9_防火涂料剥落_009.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/剥落/015_剥落_永家山_YK29+199.9_防火涂料剥落_009.jpg" alt="永家山_YK29+199.9_防火涂料剥落_009.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="永家山_YK29+199.9_防火涂料剥落_009.jpg">永家山_YK29+199.9_防火涂料剥落_009.jpg</div>
+          <div class="meta"><span class="badge ok">识别:剥落 ✓</span><span class="conf">置信度 0.89</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/剥落/016_剥落_永家山_ZK27+929.0_防火涂料剥落_003.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/剥落/016_剥落_永家山_ZK27+929.0_防火涂料剥落_003.jpg" alt="永家山_ZK27+929.0_防火涂料剥落_003.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="永家山_ZK27+929.0_防火涂料剥落_003.jpg">永家山_ZK27+929.0_防火涂料剥落_003.jpg</div>
+          <div class="meta"><span class="badge ok">识别:剥落 ✓</span><span class="conf">置信度 0.92</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/剥落/017_剥落_永家山_ZK28+791.4_防火涂料剥落_002.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/剥落/017_剥落_永家山_ZK28+791.4_防火涂料剥落_002.jpg" alt="永家山_ZK28+791.4_防火涂料剥落_002.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="永家山_ZK28+791.4_防火涂料剥落_002.jpg">永家山_ZK28+791.4_防火涂料剥落_002.jpg</div>
+          <div class="meta"><span class="badge ok">识别:剥落 ✓</span><span class="conf">置信度 0.87</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/018_剥落_皮达坳_YK31+609.6_防火涂料剥落_007.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/018_剥落_皮达坳_YK31+609.6_防火涂料剥落_007.jpg" alt="皮达坳_YK31+609.6_防火涂料剥落_007.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="皮达坳_YK31+609.6_防火涂料剥落_007.jpg">皮达坳_YK31+609.6_防火涂料剥落_007.jpg</div>
+          <div class="meta"><span class="badge warn">识别:裂缝</span><span class="conf">置信度 0.71</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/剥落/019_剥落_碧玉岩_ZK15+141.8_防火涂料剥落_001.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/剥落/019_剥落_碧玉岩_ZK15+141.8_防火涂料剥落_001.jpg" alt="碧玉岩_ZK15+141.8_防火涂料剥落_001.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="碧玉岩_ZK15+141.8_防火涂料剥落_001.jpg">碧玉岩_ZK15+141.8_防火涂料剥落_001.jpg</div>
+          <div class="meta"><span class="badge ok">识别:剥落 ✓</span><span class="conf">置信度 0.94</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/020_剥落_竹山冲_ZK30+084.7_防火涂料剥落_006.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/020_剥落_竹山冲_ZK30+084.7_防火涂料剥落_006.jpg" alt="竹山冲_ZK30+084.7_防火涂料剥落_006.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="竹山冲_ZK30+084.7_防火涂料剥落_006.jpg">竹山冲_ZK30+084.7_防火涂料剥落_006.jpg</div>
+          <div class="meta"><span class="badge warn">识别:裂缝</span><span class="conf">置信度 0.76</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/021_剥落_竹山冲_ZK30+180.8_防火涂料剥落_005.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/021_剥落_竹山冲_ZK30+180.8_防火涂料剥落_005.jpg" alt="竹山冲_ZK30+180.8_防火涂料剥落_005.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="竹山冲_ZK30+180.8_防火涂料剥落_005.jpg">竹山冲_ZK30+180.8_防火涂料剥落_005.jpg</div>
+          <div class="meta"><span class="badge warn">识别:裂缝</span><span class="conf">置信度 0.71</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/剥落/022_剥落_竹山冲_ZK30+268.3_防火涂料剥落_004.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/剥落/022_剥落_竹山冲_ZK30+268.3_防火涂料剥落_004.jpg" alt="竹山冲_ZK30+268.3_防火涂料剥落_004.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="竹山冲_ZK30+268.3_防火涂料剥落_004.jpg">竹山冲_ZK30+268.3_防火涂料剥落_004.jpg</div>
+          <div class="meta"><span class="badge ok">识别:剥落 ✓</span><span class="conf">置信度 0.74</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/023_剥落_竹山冲_ZK30+320.6_防火涂料剥落_003.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/023_剥落_竹山冲_ZK30+320.6_防火涂料剥落_003.jpg" alt="竹山冲_ZK30+320.6_防火涂料剥落_003.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="竹山冲_ZK30+320.6_防火涂料剥落_003.jpg">竹山冲_ZK30+320.6_防火涂料剥落_003.jpg</div>
+          <div class="meta"><span class="badge warn">识别:裂缝</span><span class="conf">置信度 0.75</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/剥落/024_剥落_舒家山_YK47+007.8_防火涂层剥落_010.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/剥落/024_剥落_舒家山_YK47+007.8_防火涂层剥落_010.jpg" alt="舒家山_YK47+007.8_防火涂层剥落_010.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="舒家山_YK47+007.8_防火涂层剥落_010.jpg">舒家山_YK47+007.8_防火涂层剥落_010.jpg</div>
+          <div class="meta"><span class="badge ok">识别:剥落 ✓</span><span class="conf">置信度 0.65</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/剥落/025_剥落_舒家山_YK47+007.9_防火涂层剥落_009.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/剥落/025_剥落_舒家山_YK47+007.9_防火涂层剥落_009.jpg" alt="舒家山_YK47+007.9_防火涂层剥落_009.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="舒家山_YK47+007.9_防火涂层剥落_009.jpg">舒家山_YK47+007.9_防火涂层剥落_009.jpg</div>
+          <div class="meta"><span class="badge ok">识别:剥落 ✓</span><span class="conf">置信度 0.80</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/剥落/026_剥落_舒家山_YK47+009.6_防火涂层剥落_011.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/剥落/026_剥落_舒家山_YK47+009.6_防火涂层剥落_011.jpg" alt="舒家山_YK47+009.6_防火涂层剥落_011.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="舒家山_YK47+009.6_防火涂层剥落_011.jpg">舒家山_YK47+009.6_防火涂层剥落_011.jpg</div>
+          <div class="meta"><span class="badge ok">识别:剥落 ✓</span><span class="conf">置信度 0.95</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/剥落/027_剥落_观音坡_ZK62+205.0_防火涂料剥落_006.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/剥落/027_剥落_观音坡_ZK62+205.0_防火涂料剥落_006.jpg" alt="观音坡_ZK62+205.0_防火涂料剥落_006.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="观音坡_ZK62+205.0_防火涂料剥落_006.jpg">观音坡_ZK62+205.0_防火涂料剥落_006.jpg</div>
+          <div class="meta"><span class="badge ok">识别:剥落 ✓</span><span class="conf">置信度 0.76</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/剥落/028_剥落_观音坡_ZK62+287.0_防火涂料剥落_005.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/剥落/028_剥落_观音坡_ZK62+287.0_防火涂料剥落_005.jpg" alt="观音坡_ZK62+287.0_防火涂料剥落_005.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="观音坡_ZK62+287.0_防火涂料剥落_005.jpg">观音坡_ZK62+287.0_防火涂料剥落_005.jpg</div>
+          <div class="meta"><span class="badge ok">识别:剥落 ✓</span><span class="conf">置信度 0.83</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/剥落/029_剥落_赤水溪_YK53+145.6_防火涂料剥落_010.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/剥落/029_剥落_赤水溪_YK53+145.6_防火涂料剥落_010.jpg" alt="赤水溪_YK53+145.6_防火涂料剥落_010.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="赤水溪_YK53+145.6_防火涂料剥落_010.jpg">赤水溪_YK53+145.6_防火涂料剥落_010.jpg</div>
+          <div class="meta"><span class="badge ok">识别:剥落 ✓</span><span class="conf">置信度 0.75</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/剥落/030_剥落_赤水溪_YK53+175.9_防火涂料剥落_011.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/剥落/030_剥落_赤水溪_YK53+175.9_防火涂料剥落_011.jpg" alt="赤水溪_YK53+175.9_防火涂料剥落_011.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="赤水溪_YK53+175.9_防火涂料剥落_011.jpg">赤水溪_YK53+175.9_防火涂料剥落_011.jpg</div>
+          <div class="meta"><span class="badge ok">识别:剥落 ✓</span><span class="conf">置信度 0.79</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/剥落/031_剥落_赤水溪_ZK53+207.4_防火涂料剥落_005.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/剥落/031_剥落_赤水溪_ZK53+207.4_防火涂料剥落_005.jpg" alt="赤水溪_ZK53+207.4_防火涂料剥落_005.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="赤水溪_ZK53+207.4_防火涂料剥落_005.jpg">赤水溪_ZK53+207.4_防火涂料剥落_005.jpg</div>
+          <div class="meta"><span class="badge ok">识别:剥落 ✓</span><span class="conf">置信度 0.93</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/剥落/032_剥落_金鸡_YK43+136.7_防火涂层剥落_007.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/剥落/032_剥落_金鸡_YK43+136.7_防火涂层剥落_007.jpg" alt="金鸡_YK43+136.7_防火涂层剥落_007.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="金鸡_YK43+136.7_防火涂层剥落_007.jpg">金鸡_YK43+136.7_防火涂层剥落_007.jpg</div>
+          <div class="meta"><span class="badge ok">识别:剥落 ✓</span><span class="conf">置信度 0.94</span></div>
+        </figcaption>
+      </figure>
+      </div>
+    </section>
+    <section>
+      <h2>报告标注：渗水 <span class="sec-count">19 张</span></h2>
+      <div class="grid">
+      <figure class="card">
+        <a href="识别结果/渗水/033_渗水_严家湾_ZK034+946_渗水（干渍）_001.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/渗水/033_渗水_严家湾_ZK034+946_渗水（干渍）_001.jpg" alt="严家湾_ZK034+946_渗水（干渍）_001.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="严家湾_ZK034+946_渗水（干渍）_001.jpg">严家湾_ZK034+946_渗水（干渍）_001.jpg</div>
+          <div class="meta"><span class="badge ok">识别:渗水 ✓</span><span class="conf">置信度 0.85</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/渗水/034_渗水_九龙池_YK042+048_渗水（干渍）_008.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/渗水/034_渗水_九龙池_YK042+048_渗水（干渍）_008.jpg" alt="九龙池_YK042+048_渗水（干渍）_008.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="九龙池_YK042+048_渗水（干渍）_008.jpg">九龙池_YK042+048_渗水（干渍）_008.jpg</div>
+          <div class="meta"><span class="badge ok">识别:渗水 ✓</span><span class="conf">置信度 0.85</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/渗水/035_渗水_九龙池_ZK38+334.9_渗水（干渍）_007.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/渗水/035_渗水_九龙池_ZK38+334.9_渗水（干渍）_007.jpg" alt="九龙池_ZK38+334.9_渗水（干渍）_007.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="九龙池_ZK38+334.9_渗水（干渍）_007.jpg">九龙池_ZK38+334.9_渗水（干渍）_007.jpg</div>
+          <div class="meta"><span class="badge ok">识别:渗水 ✓</span><span class="conf">置信度 0.96</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/渗水/036_渗水_九龙池_ZK38+784.3_渗水（湿渍）_006.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/渗水/036_渗水_九龙池_ZK38+784.3_渗水（湿渍）_006.jpg" alt="九龙池_ZK38+784.3_渗水（湿渍）_006.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="九龙池_ZK38+784.3_渗水（湿渍）_006.jpg">九龙池_ZK38+784.3_渗水（湿渍）_006.jpg</div>
+          <div class="meta"><span class="badge ok">识别:渗水 ✓</span><span class="conf">置信度 0.68</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/裂缝/037_渗水_九龙池_ZK38+843.8_渗水（干渍）_005.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/裂缝/037_渗水_九龙池_ZK38+843.8_渗水（干渍）_005.jpg" alt="九龙池_ZK38+843.8_渗水（干渍）_005.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="九龙池_ZK38+843.8_渗水（干渍）_005.jpg">九龙池_ZK38+843.8_渗水（干渍）_005.jpg</div>
+          <div class="meta"><span class="badge warn">识别:裂缝</span><span class="conf">置信度 0.46</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/渗水/038_渗水_九龙池_ZK38+848.8_渗水（干渍）_004.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/渗水/038_渗水_九龙池_ZK38+848.8_渗水（干渍）_004.jpg" alt="九龙池_ZK38+848.8_渗水（干渍）_004.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="九龙池_ZK38+848.8_渗水（干渍）_004.jpg">九龙池_ZK38+848.8_渗水（干渍）_004.jpg</div>
+          <div class="meta"><span class="badge ok">识别:渗水 ✓</span><span class="conf">置信度 0.93</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/渗水/039_渗水_南金_YK045+871_渗水（干渍）_006.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/渗水/039_渗水_南金_YK045+871_渗水（干渍）_006.jpg" alt="南金_YK045+871_渗水（干渍）_006.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="南金_YK045+871_渗水（干渍）_006.jpg">南金_YK045+871_渗水（干渍）_006.jpg</div>
+          <div class="meta"><span class="badge ok">识别:渗水 ✓</span><span class="conf">置信度 0.88</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/渗水/040_渗水_南金_ZK045+210_渗水（干渍）_001.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/渗水/040_渗水_南金_ZK045+210_渗水（干渍）_001.jpg" alt="南金_ZK045+210_渗水（干渍）_001.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="南金_ZK045+210_渗水（干渍）_001.jpg">南金_ZK045+210_渗水（干渍）_001.jpg</div>
+          <div class="meta"><span class="badge ok">识别:渗水 ✓</span><span class="conf">置信度 0.74</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/渗水/041_渗水_椆树山_YK060+930_渗水（干渍）_001.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/渗水/041_渗水_椆树山_YK060+930_渗水（干渍）_001.jpg" alt="椆树山_YK060+930_渗水（干渍）_001.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="椆树山_YK060+930_渗水（干渍）_001.jpg">椆树山_YK060+930_渗水（干渍）_001.jpg</div>
+          <div class="meta"><span class="badge ok">识别:渗水 ✓</span><span class="conf">置信度 0.71</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/渗水/042_渗水_溪峒_ZK017+238_渗水（干渍）_001.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/渗水/042_渗水_溪峒_ZK017+238_渗水（干渍）_001.jpg" alt="溪峒_ZK017+238_渗水（干渍）_001.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="溪峒_ZK017+238_渗水（干渍）_001.jpg">溪峒_ZK017+238_渗水（干渍）_001.jpg</div>
+          <div class="meta"><span class="badge ok">识别:渗水 ✓</span><span class="conf">置信度 0.96</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/渗水/043_渗水_溪峒_ZK017+238_渗水（干渍）_002.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/渗水/043_渗水_溪峒_ZK017+238_渗水（干渍）_002.jpg" alt="溪峒_ZK017+238_渗水（干渍）_002.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="溪峒_ZK017+238_渗水（干渍）_002.jpg">溪峒_ZK017+238_渗水（干渍）_002.jpg</div>
+          <div class="meta"><span class="badge ok">识别:渗水 ✓</span><span class="conf">置信度 0.96</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/渗水/044_渗水_碧玉岩_YK014+848.5_渗水（干渍）_002.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/渗水/044_渗水_碧玉岩_YK014+848.5_渗水（干渍）_002.jpg" alt="碧玉岩_YK014+848.5_渗水（干渍）_002.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="碧玉岩_YK014+848.5_渗水（干渍）_002.jpg">碧玉岩_YK014+848.5_渗水（干渍）_002.jpg</div>
+          <div class="meta"><span class="badge ok">识别:渗水 ✓</span><span class="conf">置信度 0.92</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/渗水/045_渗水_福寿山_YK063+682_渗水（干渍）_003.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/渗水/045_渗水_福寿山_YK063+682_渗水（干渍）_003.jpg" alt="福寿山_YK063+682_渗水（干渍）_003.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="福寿山_YK063+682_渗水（干渍）_003.jpg">福寿山_YK063+682_渗水（干渍）_003.jpg</div>
+          <div class="meta"><span class="badge ok">识别:渗水 ✓</span><span class="conf">置信度 0.32</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/渗水/046_渗水_福寿山_ZK063+671_渗水（干渍）_001.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/渗水/046_渗水_福寿山_ZK063+671_渗水（干渍）_001.jpg" alt="福寿山_ZK063+671_渗水（干渍）_001.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="福寿山_ZK063+671_渗水（干渍）_001.jpg">福寿山_ZK063+671_渗水（干渍）_001.jpg</div>
+          <div class="meta"><span class="badge ok">识别:渗水 ✓</span><span class="conf">置信度 0.93</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/渗水/047_渗水_竹山冲_ZK030+450_渗水（干渍）_001.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/渗水/047_渗水_竹山冲_ZK030+450_渗水（干渍）_001.jpg" alt="竹山冲_ZK030+450_渗水（干渍）_001.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="竹山冲_ZK030+450_渗水（干渍）_001.jpg">竹山冲_ZK030+450_渗水（干渍）_001.jpg</div>
+          <div class="meta"><span class="badge ok">识别:渗水 ✓</span><span class="conf">置信度 0.63</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/渗水/048_渗水_老山界_ZK19+915.6_干渍_004.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/渗水/048_渗水_老山界_ZK19+915.6_干渍_004.jpg" alt="老山界_ZK19+915.6_干渍_004.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="老山界_ZK19+915.6_干渍_004.jpg">老山界_ZK19+915.6_干渍_004.jpg</div>
+          <div class="meta"><span class="badge ok">识别:渗水 ✓</span><span class="conf">置信度 0.97</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/渗水/049_渗水_老山界_ZK19+939.1_干渍_003.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/渗水/049_渗水_老山界_ZK19+939.1_干渍_003.jpg" alt="老山界_ZK19+939.1_干渍_003.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="老山界_ZK19+939.1_干渍_003.jpg">老山界_ZK19+939.1_干渍_003.jpg</div>
+          <div class="meta"><span class="badge ok">识别:渗水 ✓</span><span class="conf">置信度 0.97</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/剥落/050_渗水_金鸡_YK043+083_渗水（干渍）_004.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/剥落/050_渗水_金鸡_YK043+083_渗水（干渍）_004.jpg" alt="金鸡_YK043+083_渗水（干渍）_004.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="金鸡_YK043+083_渗水（干渍）_004.jpg">金鸡_YK043+083_渗水（干渍）_004.jpg</div>
+          <div class="meta"><span class="badge warn">识别:剥落</span><span class="conf">置信度 0.29</span></div>
+        </figcaption>
+      </figure>
+      <figure class="card">
+        <a href="识别结果/剥落/051_渗水_金鸡_ZK043+083_渗水（干渍）_001.jpg" target="_blank">
+          <img loading="lazy" src="识别结果/剥落/051_渗水_金鸡_ZK043+083_渗水（干渍）_001.jpg" alt="金鸡_ZK043+083_渗水（干渍）_001.jpg">
+        </a>
+        <figcaption>
+          <div class="fname" title="金鸡_ZK043+083_渗水（干渍）_001.jpg">金鸡_ZK043+083_渗水（干渍）_001.jpg</div>
+          <div class="meta"><span class="badge warn">识别:剥落</span><span class="conf">置信度 0.26</span></div>
+        </figcaption>
+      </figure>
+      </div>
+    </section>
+<footer>生成于本机 · 图片均为检测框标注输出，点击缩略图查看大图</footer>
+</body>
+</html>

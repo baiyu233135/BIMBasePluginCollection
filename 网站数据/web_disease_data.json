@@ -1,0 +1,177 @@
+{
+  "meta": {
+    "exported_at": "2026-09-10 12:32:25",
+    "generator": "export_web_data.py",
+    "project_root": "C:/ProgramData/PKPM/BIMBase/Plugins/Pro/V1.6/pythonplugin",
+    "total": 4,
+    "bridge_count": 4,
+    "tunnel_count": 0,
+    "missing_position_count": 0,
+    "missing_photo_count": 4,
+    "unit": "mm",
+    "coordinate_system": "BIMBase 世界坐标，Y 轴向上，具体坐标系以模型为准",
+    "suggested_model": {
+      "project": "",
+      "bridge_model": "",
+      "tunnel_model": "",
+      "note": "留给用户填写，如 project: 常泰长江大桥"
+    },
+    "output_json": "C:/ProgramData/PKPM/BIMBase/Plugins/Pro/V1.6/pythonplugin/网站数据/web_disease_data.json",
+    "stats_preview": {
+      "by_disease": {
+        "异常区域": {
+          "total": 3,
+          "bridge": 3,
+          "tunnel": 0
+        },
+        "剥落": {
+          "total": 1,
+          "bridge": 1,
+          "tunnel": 0
+        }
+      },
+      "by_severity": {
+        "未填写": {
+          "total": 4,
+          "bridge": 4,
+          "tunnel": 0
+        }
+      },
+      "by_component": {
+        "T梁": {
+          "total": 3,
+          "bridge": 3,
+          "tunnel": 0
+        },
+        "引桥桥墩": {
+          "total": 1,
+          "bridge": 1,
+          "tunnel": 0
+        }
+      }
+    }
+  },
+  "diseases": [
+    {
+      "source": "bridge",
+      "id": "72d2bd04",
+      "tunnel_or_bridge_name": "",
+      "component": "T梁",
+      "disease": "异常区域",
+      "severity": "",
+      "position": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 260.0
+      },
+      "bbox": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "photo": "桥隧病害识别/datasets/bridge_disease/by_component/T梁/6_img_0004.png",
+      "photo_exists": false,
+      "created_at": "2026-07-23 19:14:08"
+    },
+    {
+      "source": "bridge",
+      "id": "ba8580c1",
+      "tunnel_or_bridge_name": "",
+      "component": "T梁",
+      "disease": "异常区域",
+      "severity": "",
+      "position": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 260.0
+      },
+      "bbox": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "photo": "桥隧病害识别/datasets/bridge_disease/by_component/T梁/6_img_0004.png",
+      "photo_exists": false,
+      "created_at": "2026-07-23 19:32:47"
+    },
+    {
+      "source": "bridge",
+      "id": "d9d2c1dd",
+      "tunnel_or_bridge_name": "",
+      "component": "T梁",
+      "disease": "异常区域",
+      "severity": "",
+      "position": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 260.0
+      },
+      "bbox": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "photo": "桥隧病害识别/datasets/bridge_disease/by_component/T梁/6_img_0003.png",
+      "photo_exists": false,
+      "created_at": "2026-07-23 19:41:17"
+    },
+    {
+      "source": "bridge",
+      "id": "b4b13438",
+      "tunnel_or_bridge_name": "",
+      "component": "引桥桥墩",
+      "disease": "剥落",
+      "severity": "",
+      "position": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 100.0
+      },
+      "bbox": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "photo": "桥隧病害识别/datasets/bridge_disease/by_component/墩柱/7_img_0853.png",
+      "photo_exists": false,
+      "created_at": "2026-08-06 14:34:48"
+    }
+  ],
+  "stats": {
+    "by_disease": {
+      "异常区域": {
+        "total": 3,
+        "bridge": 3,
+        "tunnel": 0
+      },
+      "剥落": {
+        "total": 1,
+        "bridge": 1,
+        "tunnel": 0
+      }
+    },
+    "by_severity": {
+      "未填写": {
+        "total": 4,
+        "bridge": 4,
+        "tunnel": 0
+      }
+    },
+    "by_component": {
+      "T梁": {
+        "total": 3,
+        "bridge": 3,
+        "tunnel": 0
+      },
+      "引桥桥墩": {
+        "total": 1,
+        "bridge": 1,
+        "tunnel": 0
+      }
+    }
+  }
+}

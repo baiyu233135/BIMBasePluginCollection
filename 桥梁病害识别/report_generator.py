@@ -264,6 +264,15 @@ class ReportGenerator:
         disease_types = Counter(r.disease_class for r in records)
         
         doc.add_paragraph(f"本次检测共发现 {total_diseases} 处病害，涉及 {len(component_types)} 种构件类型。")
+
+        # 尺寸标定方法说明（挑战杯命题要求：计算方法 + 误差来源）
+        doc.add_paragraph(
+            "尺寸标定方法：参照物框选标定——在照片上框选已知实际长度的参照物，"
+            "按框长边建立像素比例（mm/px），再换算各病害框的几何尺寸。"
+            "面积为检测框外接矩形估算值，真实病害面积通常偏小，"
+            "适用于近似矩形病害的尺寸对比。"
+            "误差来源：照片镜头畸变、参照物与病害不在同一景深（透视差异）。"
+        )
         doc.add_paragraph()
         
         # 病害类型分布
@@ -332,6 +341,19 @@ class ReportGenerator:
             ]
             if getattr(r, "ai_diagnosed", False):
                 info.append(("AI 智能诊断", getattr(r, "ai_diagnosis", "") or "已诊断"))
+
+            # 几何尺寸（参照物框选标定换算；无标定时仅给像素尺寸）
+            length_mm = getattr(r, "length_mm", None)
+            width_mm = getattr(r, "width_mm", None)
+            if length_mm is not None and width_mm is not None:
+                info.append((
+                    "几何尺寸",
+                    f"长 {length_mm:.1f} mm × 宽 {width_mm:.1f} mm（外接矩形估算）"
+                ))
+            elif r.bbox and len(r.bbox) == 4 and (r.bbox[2] - r.bbox[0]) > 0:
+                px_w = r.bbox[2] - r.bbox[0]
+                px_h = r.bbox[3] - r.bbox[1]
+                info.append(("几何尺寸", f"未标定，仅像素尺寸：{px_w}×{px_h} px"))
 
             # 每条记录附带对应的处理建议（按病害类型+严重程度）
             advice_map = DISEASE_TREATMENT_ADVICE.get(r.disease_class, {})

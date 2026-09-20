@@ -39,6 +39,8 @@ runs/
 # 密钥与运行时数据（不入库）
 桥梁病害识别/disease_config.json
 桥梁病害识别/disease_records.json
+隧道病害识别/tunnel_disease_config.json
+隧道病害识别/tunnel_disease_records.json
 component_registry.json
 AI_Modeling/component_registry.json
 速构智维/component_registry.json
@@ -54,3 +56,6 @@ OrcaSlicer/
 Thumbs.db
 .DS_Store
 cad组件缓存/
+
+# PPT 生成临时产物
+archive/misc/_ppt_tmp/

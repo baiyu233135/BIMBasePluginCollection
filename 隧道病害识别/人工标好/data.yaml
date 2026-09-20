@@ -1,0 +1,9 @@
+path: C:/ProgramData/PKPM/BIMBase/Plugins/Pro/V1.6/pythonplugin/隧道病害识别/人工标好
+train: images
+val: images
+nc: 4
+names:
+  - 裂缝
+  - 渗水
+  - 剥落
+  - 其他
