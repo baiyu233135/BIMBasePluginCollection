@@ -16,7 +16,7 @@ BIMBase 面板「速构智维」→「桥梁病害识别」
 ## 关键技术栈
 
 - **UI**：PyQt5（Qt platform plugin 路径多路探测，兼容 BIMBase 自带 QTBoot）
-- **病害检测**：ultralytics YOLOv8n（CPU 推理，`models/disease_yolov8n.pt` 专用权重 + `yolov8n.pt` 通用兜底）+ OpenCV 多策略异常检测（免模型，当前默认路径）
+- **病害检测**：ultralytics YOLOv8n（CPU 推理，`models/disease_yolov8n.pt` 专用权重——**v2 训练成果已接入**，7 类含「已修复」+ `yolov8n.pt` 通用兜底）+ OpenCV 多策略异常检测（免模型，当前对话框默认路径）
 - **AI 诊断**：阿里云 DashScope Qwen-VL（`qwen-vl-max`，OpenAI 兼容端点，原图+带框图双图输入，严格 JSON 输出）
 - **BIM 集成**：pyp3d（Component/Attr/Cube/Combine/create_material/UnifiedFunction），`bimbase_sync.py` 由 速构智维 提供、动态路径导入
 - **报告**：python-docx（Word 诊断报告）
@@ -29,7 +29,7 @@ BIMBase 面板「速构智维」→「桥梁病害识别」
 
 `disease_detector.py::DiseaseDetector` 按加载到的权重自动路由：
 
-- **专用模型存在**（`disease_yolov8n.pt`）→ YOLO 推理（conf≥0.25，CPU），输出 6 类病害（裂缝、剥落、露筋、蜂窝麻面、渗水、锈蚀）；
+- **专用模型存在**（`disease_yolov8n.pt`，现为 v2 训练权重）→ YOLO 推理（conf≥0.25，CPU），输出 7 类病害（裂缝、剥落、露筋、蜂窝麻面、渗水、锈蚀、已修复）；
 - **只有通用权重** → 不跑 YOLO（通用权重检不出病害），转 `cv_crack_detector.py` 传统裂缝检测；
 - **ultralytics 缺失** → 尝试 pip 自动安装 CPU 版 torch。
 
@@ -80,6 +80,13 @@ BIMBase 面板「速构智维」→「桥梁病害识别」
 - **构件类型按识别时缓存**（2026-09）：记录在创建时缓存当时的构件类型下拉框值，记录表新增「构件类型」列直接可见；「获取当前选中组件」自动切换类型时会弹提示（后续记录归新类型，已有记录不变）；多构件记录可叠加到同一份报告导出；
 - `report_generator.py`：python-docx 生成 Word 报告——封面 → 项目概况（病害分布统计）→ 统计表（构件×病害）→ 病害详图（每条记录 + 单框标注图）→ 处理建议汇总（按病害类型×严重程度的内置建议字典，置信度 0.7/0.5 分档）。
 
+### 6. 尺寸量化标定与数字孪生网页导出
+
+- **尺寸标定（参照物框选）**：`dimension_utils.py::calc_scale/box_dimensions`——在照片上框选一个已知实际长度的参照物，换算像素→毫米比例后，该照片所有病害框自动回填 `length_mm/width_mm/area_mm2`（记录表「尺寸(mm)」列），诊断与报告均可携带实测尺寸；
+- **🌐 导出网页数据按钮**：把当前病害记录组装为「常泰长江大桥数字孪生.html」可直接导入的 JSON（桩号解析与 `数字孪生/template.html` 的 `parseStakeM` 保持一致，含实测毫米尺寸文字）；
+- **数字孪生/**：`template.html` + 本地 three.js（`lib/three.min.js`+`OrbitControls.js`），`build.py` 打包成单文件 `常泰长江大桥数字孪生.html`（离线可用，双击打开），导入上面导出的 JSON 即在 3D 桥模上按桩号定位展示病害；`_export_verify/` 存验证截图与示例导出数据；
+- **export_web_data.py**：独立 CLI（纯标准库），把桥梁/隧道病害记录整理成数字孪生网站数据包，默认输出到根目录 `网站数据/`（JSON + 人类可读 summary）。
+
 ## 使用说明
 
 1. BIMBase 面板「速构智维」→「桥梁病害识别」，弹出主对话框。
@@ -90,6 +97,8 @@ BIMBase 面板「速构智维」→「桥梁病害识别」
 6. **🔍 获取当前选中组件**：先在 BIMBase 选中真实构件（引桥桥墩/柱式桥墩等），系统识别类型并填充「投影面」下拉框；基准坐标读不到时可手动填 `x,y,z`。
 7. **🎯 病害投影**：选中记录等比映射到所选面，以彩色点云放入 BIMBase 场景。
 8. **📄 生成诊断报告**：选择保存路径，输出 Word 报告。
+9. **尺寸标定**（可选）：在照片上框选参照物并输入实际长度，全部病害框自动换算毫米尺寸。
+10. **🌐 导出网页数据**：导出数字孪生用 JSON；双击打开 `数字孪生/常泰长江大桥数字孪生.html` 导入该文件即可 3D 可视化。
 
 更详细的字段说明与注意事项见 `桥梁病害识别_使用说明.md`。
 
@@ -134,14 +143,18 @@ BIMBase 面板「速构智维」→「桥梁病害识别」
 ├── component_classifier.py      # EfficientNet-B0 构件分类（预留，权重未训练）
 ├── report_generator.py          # Word 报告生成
 ├── image_box_widget.py          # 照片病害框交互控件
+├── dimension_utils.py           # 尺寸标定（参照物→毫米换算）
+├── export_web_data.py           # 网站数据导出 CLI（输出 网站数据/）
 ├── disease_config.json          # AI 诊断配置（⚠️ 含 API Key，注意脱敏）
 ├── disease_records.json         # 病害标记历史记录
-├── models/                      # disease_yolov8n.pt（专用）+ yolov8n.pt（通用兜底）+ 第一轮备份
+├── models/                      # disease_yolov8n.pt（正式权重=v2 成果，7 类）+ yolov8n.pt（通用兜底）+ v1/轮次备份 + disease_yolov8n_v2/（v2 训练产物：weights、曲线图、results.csv）
 ├── datasets/                    # 巡检提取集 / YOLO 6类集 / 人工标注集 / 合并集（nc=7）
 ├── training/                    # 训练流水线：提图/下载/伪标签/标注GUI/合并/训练/进度
 │   ├── 人工标注指南.md           # CVAT/LabelImg 标注指南
 │   └── local_annotator_README.md # 本地标注工具用法
 ├── runs/                        # YOLO 验证输出（PR 曲线、混淆矩阵）
+├── 数字孪生/                     # template.html + three.js 本地库 + build.py 打包 + 常泰长江大桥数字孪生.html（单文件离线版）+ _export_verify/
+├── 数字孪生.zip                  # 数字孪生平台打包分发版
 ├── 桥梁病害识别_使用说明.md      # 面向用户的详细使用说明
 ├── Picture/                     # 图标
 └── docs/                        # 功能说明 / 测试文档 / 报错处理记录
@@ -149,10 +162,10 @@ BIMBase 面板「速构智维」→「桥梁病害识别」
 
 ## 现状说明（诚实记录）
 
-- 当前 UI 只暴露 **CV 异常识别** 路径；YOLO 六分类能力在代码层保留（`disease_detector.py`），对话框暂无「开始检测」按钮。
+- 当前 UI 检测入口只暴露 **CV 异常识别** 路径；YOLO 七分类能力在代码层保留（`disease_detector.py`），对话框暂无「开始检测」按钮。**v2 训练权重已部署为正式模型**（`models/disease_yolov8n.pt` 即 v2 best 权重，7 类含「已修复」；v1 备份为 `models/disease_yolov8n_v1_backup.pt`），经 `DiseaseDetector` 调用即生效。
 - `component_classifier.py`（EfficientNet-B0 19 类）实现完整，但权重未训练、界面未接入，属预留能力。
 - `_on_face_project` / `_on_texture_project` / `_on_pointcloud_project` 三个测试方法未连接按钮，为隐藏调试入口。
-- 最近一轮训练：合并集（nc=7 含「已修复」）、50 epochs、CPU，mAP50 约 0.34（`training/runs/models/disease_yolov8n/results.csv`），模型精度仍有较大提升空间——这也是后续工作方向。
+- 最近一轮训练（v2）：合并集（nc=7 含「已修复」）、141 epochs、CPU，mAP50 约 0.33（`models/disease_yolov8n_v2/results.csv`），模型精度仍有较大提升空间——这也是后续工作方向。
 - 原「投影测试××」4 个简化组件已从 `组件测试/` 删除，投影测试请改用真实构件。
 
 ## 文档

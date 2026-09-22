@@ -1,0 +1,187 @@
+{
+  "app": "桥梁病害识别",
+  "version": 1,
+  "exported_at": "2026-09-22 16:18:01",
+  "bridge_name": "常泰长江大桥",
+  "records": [
+    {
+      "id": "t01",
+      "disease": "裂缝",
+      "severity": "中等",
+      "component": "箱梁",
+      "component_no": "箱梁-1",
+      "position": "上层桥面 K11+200 行车道",
+      "size": "实测 长1800mm × 宽500mm，面积约0.90m²；约 1.5m×0.8m",
+      "note": "纵向裂缝，雨后扩展",
+      "ai_diagnosis": "箱梁裂缝，建议按中等等级处置。",
+      "time": "2024-09-01 10:24",
+      "bbox": [
+        200.0,
+        150.0,
+        450.0,
+        350.0
+      ],
+      "photo_name": "常泰_K11+200_箱梁裂缝.jpg",
+      "stake_m": -1020.0,
+      "photo_w": 800,
+      "photo_h": 600
+    },
+    {
+      "id": "t02",
+      "disease": "剥落",
+      "severity": "严重",
+      "component": "主塔",
+      "component_no": "主塔-1",
+      "position": "左塔柱外侧 高程 120m",
+      "size": "实测 长900mm × 宽700mm，面积约0.63m²；约 1.5m×0.8m",
+      "note": "混凝土保护层剥落",
+      "ai_diagnosis": "主塔剥落，建议按严重等级处置。",
+      "time": "2024-09-01 10:24",
+      "bbox": [
+        250.0,
+        150.0,
+        420.0,
+        300.0
+      ],
+      "photo_name": "常泰_K11+632_主塔剥落.jpg",
+      "stake_m": -588.0,
+      "photo_w": 800,
+      "photo_h": 600,
+      "height_m": 120.0
+    },
+    {
+      "id": "t03",
+      "disease": "渗水",
+      "severity": "轻微",
+      "component": "柱式桥墩",
+      "component_no": "柱式桥墩-1",
+      "position": "辅助墩 K11+142 迎水面",
+      "size": "约 1.5m×0.8m",
+      "note": "",
+      "ai_diagnosis": "柱式桥墩渗水，建议按轻微等级处置。",
+      "time": "2024-09-01 10:24",
+      "bbox": [
+        200.0,
+        180.0,
+        380.0,
+        340.0
+      ],
+      "photo_name": "常泰_K11+142_桥墩渗水.jpg",
+      "stake_m": -1078.0,
+      "photo_w": 800,
+      "photo_h": 600,
+      "height_m": 20.0
+    },
+    {
+      "id": "t04",
+      "disease": "锈蚀",
+      "severity": "中等",
+      "component": "斜拉索",
+      "component_no": "斜拉索-1",
+      "position": "右塔南侧拉索中段",
+      "size": "约 1.5m×0.8m",
+      "note": "PE 护套破损",
+      "ai_diagnosis": "斜拉索锈蚀，建议按中等等级处置。",
+      "time": "2024-09-01 10:24",
+      "bbox": [
+        280.0,
+        100.0,
+        400.0,
+        260.0
+      ],
+      "photo_name": "常泰_K12+840_斜拉索锈蚀.jpg",
+      "stake_m": 620.0,
+      "photo_w": 800,
+      "photo_h": 600
+    },
+    {
+      "id": "t05",
+      "disease": "蜂窝麻面",
+      "severity": "轻微",
+      "component": "桩基承台",
+      "component_no": "桩基承台-1",
+      "position": "右塔承台顶面北侧",
+      "size": "约 1.5m×0.8m",
+      "note": "",
+      "ai_diagnosis": "桩基承台蜂窝麻面，建议按轻微等级处置。",
+      "time": "2024-09-01 10:24",
+      "bbox": [
+        150.0,
+        300.0,
+        350.0,
+        440.0
+      ],
+      "photo_name": "常泰_K12+808_承台蜂窝麻面.jpg",
+      "stake_m": 588.0,
+      "photo_w": 800,
+      "photo_h": 600,
+      "height_m": 4.0
+    },
+    {
+      "id": "t06",
+      "disease": "露筋",
+      "severity": "中等",
+      "component": "防撞护栏",
+      "component_no": "防撞护栏-1",
+      "position": "上层桥面 K12+520 右侧护栏",
+      "size": "约 1.5m×0.8m",
+      "note": "",
+      "ai_diagnosis": "防撞护栏露筋，建议按中等等级处置。",
+      "time": "2024-09-01 10:24",
+      "bbox": [
+        220.0,
+        240.0,
+        460.0,
+        380.0
+      ],
+      "photo_name": "常泰_K12+520_护栏露筋.jpg",
+      "stake_m": 300.0,
+      "photo_w": 800,
+      "photo_h": 600
+    },
+    {
+      "id": "t07",
+      "disease": "其他",
+      "severity": "轻微",
+      "component": "薄壁墩",
+      "component_no": "薄壁墩-1",
+      "position": "右边墩 K13+440 墩身",
+      "size": "约 1.5m×0.8m",
+      "note": "",
+      "ai_diagnosis": "薄壁墩其他，建议按轻微等级处置。",
+      "time": "2024-09-01 10:24",
+      "bbox": [
+        200.0,
+        200.0,
+        360.0,
+        360.0
+      ],
+      "photo_name": "常泰_K13+440_边墩污损.jpg",
+      "stake_m": 1220.0,
+      "photo_w": 800,
+      "photo_h": 600,
+      "height_m": 25.0
+    },
+    {
+      "id": "t08",
+      "disease": "裂缝",
+      "severity": "轻微",
+      "component": "T梁",
+      "component_no": "T梁-1",
+      "position": "引桥 T 梁底板",
+      "size": "实测 长800mm × 宽300mm，面积约0.24m²；约 1.5m×0.8m",
+      "note": "",
+      "ai_diagnosis": "T梁裂缝，建议按轻微等级处置。",
+      "time": "2024-09-01 10:24",
+      "bbox": [
+        200.0,
+        150.0,
+        450.0,
+        350.0
+      ],
+      "photo_name": "常泰_引桥T梁裂缝_无桩号.jpg",
+      "photo_w": 800,
+      "photo_h": 600
+    }
+  ]
+}

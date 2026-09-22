@@ -123,8 +123,12 @@ def test_bbox_mapping():
           f"u={s.local_u}, v={s.local_v}")
 
     # 未知病害类型 → 绿色兜底
-    s = photo_bbox_to_shadow(face, (0, 0, 100, 100), 1000, 2000, '已修复')
+    s = photo_bbox_to_shadow(face, (0, 0, 100, 100), 1000, 2000, '不存在的病害类型')
     check("未知类型绿色兜底", s.color_rgb == (0, 200, 0), str(s.color_rgb))
+
+    # v2 模型新增"已修复"类别 → 绿色 #66bb6a
+    s = photo_bbox_to_shadow(face, (0, 0, 100, 100), 1000, 2000, '已修复')
+    check("已修复为绿色", s.color_rgb == DISEASE_COLOR_MAP['已修复'], str(s.color_rgb))
 
 
 def test_shadow_to_world():

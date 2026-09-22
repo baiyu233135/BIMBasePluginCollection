@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 <BIMPyPlugin>
     <BfaLibName/>
     <PluginVersion>1.0.1</PluginVersion>
@@ -40,6 +40,6 @@
         </Panel>
     </Category>
     <Name>组件测试</Name>
-    <PluginModule>C:\ProgramData\PKPM\BIMBase\Plugins\Pro\V1.6\pythonplugin\组件测试\</PluginModule>
+    <PluginModule>C:\ProgramData\PKPM\BIMBase\Plugins\Pro\V1.6\pythonplugin\组件测试</PluginModule>
     <PluginSDKVersion>1.6.2</PluginSDKVersion>
 </BIMPyPlugin>

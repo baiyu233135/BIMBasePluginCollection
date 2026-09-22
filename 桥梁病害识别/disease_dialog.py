@@ -9,7 +9,9 @@
 4. 生成Word诊断报告
 """
 
+import json
 import os
+import re
 import sys
 import uuid
 from datetime import datetime
@@ -53,10 +55,90 @@ COMPONENT_CLASSES = [
 ]
 
 # 病害类型（含自动识别兜底标签）
-DISEASE_CLASSES = ["异常区域", "裂缝", "剥落", "露筋", "蜂窝麻面", "渗水", "锈蚀"]
+DISEASE_CLASSES = ["异常区域", "裂缝", "剥落", "露筋", "蜂窝麻面", "渗水", "锈蚀", "已修复"]
 
 # 严重程度
 SEVERITY_LEVELS = ["轻微", "中等", "严重", "极严重"]
+
+# 桩号解析：与「数字孪生/template.html」的 parseStakeM 保持一致
+# （照片名 K12+345 → 12*1000+345-12220 = 里程 X 米；跨中 K12+220 ↔ X=0）
+_STAKE_RE = re.compile(r"[A-Za-z]?K(\d+)\s*\+\s*(\d+(?:\.\d+)?)", re.IGNORECASE)
+
+
+def parse_stake_m(photo_name):
+    """从照片文件名解析 K12+345 形式桩号为里程米数，解析失败返回 None。"""
+    m = _STAKE_RE.search(photo_name or "")
+    if not m:
+        return None
+    return int(m.group(1)) * 1000 + float(m.group(2)) - 12220
+
+
+def build_web_export_data(records, bridge_name):
+    """把对话框病害记录组装为「常泰长江大桥数字孪生.html」可消费的 JSON 数据。
+
+    返回 (data, stake_ok)：data 为顶层 dict；stake_ok 为桩号解析成功的条数。
+    字段与数字孪生端 applyData()/buildPatches() 的消费字段一一对应。
+    """
+    recs = []
+    stake_ok = 0
+    for r in records:
+        # 尺寸文字：有标定量化结果（length_mm/width_mm/area_mm2）时带上实测毫米尺寸
+        size = r.get("size", "") or ""
+        lm, wm, am = r.get("length_mm"), r.get("width_mm"), r.get("area_mm2")
+        if lm is not None and wm is not None:
+            dim = f"实测 长{lm:.0f}mm × 宽{wm:.0f}mm"
+            if am is not None:
+                dim += f"，面积约{am / 1e6:.2f}m²"
+            size = f"{dim}；{size}" if size else dim
+
+        item = {
+            "id": r.get("id", ""),
+            "disease": r.get("disease", "其他"),
+            "severity": r.get("severity", ""),
+            "component": r.get("component", ""),       # 供 routeFace 路由贴片面
+            "component_no": r.get("component_no", ""),
+            "position": r.get("position", ""),
+            "size": size,
+            "note": r.get("note", ""),
+            "ai_diagnosis": r.get("ai_diagnosis", ""),
+            "time": r.get("time", ""),
+        }
+        bbox = r.get("bbox")
+        if bbox and len(bbox) == 4:
+            item["bbox"] = [float(bbox[0]), float(bbox[1]),
+                            float(bbox[2]), float(bbox[3])]
+        photo = r.get("photo", "")
+        if photo:
+            # 照片文件名（含桩号），网页据此沿桥定位病害
+            item["photo_name"] = os.path.basename(photo)
+            stake = parse_stake_m(item["photo_name"])
+            if stake is not None:
+                item["stake_m"] = round(stake, 3)
+                stake_ok += 1
+            if os.path.exists(photo):
+                try:
+                    from PIL import Image
+                    with Image.open(photo) as im:
+                        item["photo_w"], item["photo_h"] = im.size
+                except Exception:
+                    pass
+        # 有 3D 标记高程（BIMBase 世界坐标 mm）则换算为米，供塔/墩贴片定高
+        try:
+            mz = float(r.get("marker_z"))
+        except (TypeError, ValueError):
+            mz = None
+        if mz:
+            item["height_m"] = round(mz / 1000.0, 3)
+        recs.append(item)
+
+    data = {
+        "app": "桥梁病害识别",
+        "version": 1,
+        "exported_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "bridge_name": bridge_name or "常泰长江大桥",
+        "records": recs,
+    }
+    return data, stake_ok
 
 
 class DiseaseDialog(QDialog):
@@ -246,7 +328,7 @@ class DiseaseDialog(QDialog):
         layout.addWidget(group_disease)
 
         # === 操作按钮 ===
-        group_action = QGroupBox("4. 生成报告")
+        group_action = QGroupBox("4. 报告与导出")
         va = QVBoxLayout(group_action)
 
         self.btn_report = QPushButton("📄 生成诊断报告")
@@ -257,6 +339,19 @@ class DiseaseDialog(QDialog):
         self.btn_report.clicked.connect(self._on_generate_report)
         self.btn_report.setEnabled(False)
         va.addWidget(self.btn_report)
+
+        self.btn_export_web = QPushButton("🌐 导出网页数据")
+        self.btn_export_web.setMinimumHeight(36)
+        self.btn_export_web.setStyleSheet(
+            "QPushButton{background:#1565C0;color:white;font-size:13px;font-weight:bold;}"
+        )
+        self.btn_export_web.setToolTip(
+            "导出为「常泰长江大桥数字孪生.html」可导入的 JSON：\n"
+            "病害按照片文件名中的桩号（如 K12+345）沿桥定位，\n"
+            "按构件类型路由到塔 / 墩 / 承台 / 索 / 桥面贴片。"
+        )
+        self.btn_export_web.clicked.connect(self._on_export_web_data)
+        va.addWidget(self.btn_export_web)
 
         self.btn_clear = QPushButton("🗑 清空记录")
         self.btn_clear.clicked.connect(self._on_clear_records)
@@ -1109,6 +1204,35 @@ class DiseaseDialog(QDialog):
         self._redraw_marked_image()
         if not self.records:
             self.btn_report.setEnabled(False)
+
+    def _on_export_web_data(self):
+        """导出网页可视化数据 JSON，供「常泰长江大桥数字孪生.html」导入。"""
+        if not self.records:
+            QMessageBox.warning(
+                self, "提示",
+                "当前没有病害记录，无法导出。\n\n请先导入照片并添加病害记录。")
+            return
+        self._update_record_dimensions()
+        path, _ = QFileDialog.getSaveFileName(
+            self, "导出网页数据", "数字孪生用数据.json", "JSON (*.json)")
+        if not path:
+            return
+        bridge_name = self.edit_bridge_name.text().strip() or "常泰长江大桥"
+        data, stake_ok = build_web_export_data(self.records, bridge_name)
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+        except Exception as e:
+            QMessageBox.critical(self, "导出失败", f"写入文件失败：\n{e}")
+            return
+        n = len(data["records"])
+        msg = (f"已导出 {n} 条记录到：\n{path}\n\n"
+               f"桩号解析成功 {stake_ok}/{n} 条")
+        if stake_ok < n:
+            msg += ("\n\n未解析到桩号的记录在网页端将沿桥均匀排布；\n"
+                    "建议照片按「桥名_K12+345_说明.jpg」命名以精确定位。")
+        msg += "\n\n用「常泰长江大桥数字孪生.html」导入此文件即可 3D 可视化。"
+        QMessageBox.information(self, "导出成功", msg)
 
     def _on_generate_report(self):
         if not self.records:

@@ -59,3 +59,11 @@ cad组件缓存/
 
 # PPT 生成临时产物
 archive/misc/_ppt_tmp/
+
+# 大文件本地保留（超 GitHub 100MB 限制，不入库，已从 git 历史清除）
+*.p3d
+docs/挑战杯项目官方文件及参考/ppt制作与参考/美化后-pybim图片版(1)(1).pptx
+docs/挑战杯项目官方文件及参考/ppt制作与参考/ciaftlink(2).pptx
+
+# Office 临时锁文件
+~$*
